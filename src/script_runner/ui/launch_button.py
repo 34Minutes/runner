@@ -1,0 +1,40 @@
+"""A single clickable launcher button inside the dropdown."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton
+
+from ..config import Launcher
+
+
+class LaunchButton(QPushButton):
+    """Styled button representing one launcher entry."""
+
+    def __init__(self, launcher: Launcher, parent=None):
+        super().__init__(launcher.name, parent)
+        self.launcher = launcher
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(28)
+        self.setStyleSheet(
+            """
+            QPushButton {
+                background-color: rgba(55, 55, 60, 200);
+                color: #eee;
+                border: 1px solid rgba(90, 90, 95, 180);
+                border-radius: 5px;
+                padding: 4px 10px;
+                text-align: left;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 110, 170, 210);
+                border: 1px solid rgba(100, 140, 200, 220);
+            }
+            QPushButton:pressed {
+                background-color: rgba(50, 85, 140, 230);
+            }
+            """
+        )
+        # Future: add icon on left
+        self.setToolTip(f"Launch: {launcher.command} {launcher.args}".strip())
