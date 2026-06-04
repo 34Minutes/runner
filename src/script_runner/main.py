@@ -27,6 +27,8 @@ from .launcher import launch
 from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
+from .ui.manager_dialog import ManagerDialog
+from .utils.windows import ensure_topmost
 
 
 def seed_test_data_if_needed(cfg: ConfigManager) -> None:
@@ -38,24 +40,22 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
         Launcher.new(
             name="Calculator",
             command="calc",
-            args="",
             enabled=True,
         ),
         Launcher.new(
             name="Calendar",
-            command="https://calendar.google.com",
-            args="",
+            command="ms-calendar:",   # Windows Calendar app via protocol (falls back to browser on other OS)
             enabled=True,
         ),
         Launcher.new(
             name="Web Browser",
             command="https://www.google.com",
-            args="",
             enabled=True,
         ),
-        # A couple of extra practical ones
+        # Practical Windows-friendly examples
         Launcher.new(name="Notepad", command="notepad", enabled=True),
         Launcher.new(name="File Explorer", command="explorer", args=".", enabled=True),
+        Launcher.new(name="Command Prompt", command="cmd", enabled=True),
     ]
 
     for s in seeds:
@@ -77,6 +77,9 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     act_add = QAction("Add new launcher...", menu)
     act_add.triggered.connect(trigger.request_add.emit)
 
+    act_manage = QAction("Manage launchers...", menu)
+    act_manage.triggered.connect(trigger.request_manage.emit)
+
     act_reload = QAction("Reload config", menu)
     def do_reload():
         cfg.reload()
@@ -89,6 +92,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     act_exit.triggered.connect(app.quit)
 
     menu.addAction(act_add)
+    menu.addAction(act_manage)
     menu.addAction(act_reload)
     menu.addSeparator()
     menu.addAction(act_exit)
@@ -153,6 +157,9 @@ def main() -> int:
 
     def do_hide():
         dropdown.start_hide_animation()
+        # When the list goes away, re-assert that the trigger is topmost.
+        # Use a short delay so the animation has time to finish.
+        QTimer.singleShot(120, lambda: ensure_topmost(trigger))
 
     hide_timer.timeout.connect(do_hide)
 
@@ -192,6 +199,11 @@ def main() -> int:
                 "Launch failed",
                 f"Could not launch '{launcher.name}':\n{exc}",
             )
+        finally:
+            # After launching something (which often brings another app to the front),
+            # make sure our small trigger stays on top.
+            dropdown.force_hide()
+            ensure_topmost(trigger)
 
     dropdown.launch_requested.connect(on_launch)
 
@@ -207,7 +219,14 @@ def main() -> int:
                     cfg_mgr.add_launcher(new_or_updated)
                 dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
 
+    def show_manager_dialog():
+        dlg = ManagerDialog(cfg_mgr, trigger)
+        if dlg.exec():
+            # Manager saves its own changes; just refresh the dropdown list
+            dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+
     trigger.request_add.connect(lambda: show_add_dialog())
+    trigger.request_manage.connect(lambda: show_manager_dialog())
 
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):
@@ -224,6 +243,7 @@ def main() -> int:
     # Show the trigger (it starts at saved or default position)
     trigger.show()
     trigger.raise_()
+    ensure_topmost(trigger)
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.

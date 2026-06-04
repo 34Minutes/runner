@@ -110,7 +110,23 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
         return _launch_as_admin_windows(argv, cwd)
 
     # Normal launch
-    return subprocess.Popen(argv, **popen_kwargs)
+    if sys.platform == "win32":
+        # Use shell=True on Windows so bare commands ("calc", "notepad", "explorer")
+        # and commands with args ("explorer .") resolve the same way the Run dialog
+        # and Start menu do (via App Paths / shell associations).
+        cmdline = subprocess.list2cmdline(argv)
+        popen_kwargs = {
+            "shell": True,
+            "cwd": cwd,
+            "env": os.environ.copy(),
+        }
+        if launcher.show_console:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        else:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        return subprocess.Popen(cmdline, **popen_kwargs)
+    else:
+        return subprocess.Popen(argv, **popen_kwargs)
 
 
 def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> subprocess.Popen | None:

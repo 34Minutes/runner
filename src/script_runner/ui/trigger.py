@@ -23,6 +23,7 @@ class TriggerWidget(QWidget):
     hover_leave = Signal()
     position_changed = Signal(int, int)  # x, y
     request_add = Signal()
+    request_manage = Signal()
     request_exit = Signal()
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
@@ -57,12 +58,16 @@ class TriggerWidget(QWidget):
         self._action_add = QAction("Add new launcher...", self)
         self._action_add.triggered.connect(self.request_add.emit)
 
+        self._action_manage = QAction("Manage launchers...", self)
+        self._action_manage.triggered.connect(self.request_manage.emit)
+
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
 
     def contextMenuEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         menu = QMenu(self)
         menu.addAction(self._action_add)
+        menu.addAction(self._action_manage)
         menu.addSeparator()
         menu.addAction(self._action_exit)
         menu.exec(QCursor.pos())
