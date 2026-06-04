@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QMenu,
     QMessageBox,
+    QInputDialog,
 )
 
 try:
@@ -40,34 +41,44 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
     if cfg.config.launchers:
         return
 
-    seeds: list[Launcher] = [
-        Launcher.new(
-            name="Calculator",
-            command="calc",
-            enabled=True,
-        ),
-        Launcher.new(
-            name="Calendar",
-            command="ms-calendar:",   # Windows Calendar app via protocol (falls back to browser on other OS)
-            enabled=True,
-        ),
-        Launcher.new(
-            name="Web Browser",
-            command="https://www.google.com",
-            enabled=True,
-        ),
-        # Practical Windows-friendly examples
-        Launcher.new(name="Notepad", command="notepad", enabled=True),
-        Launcher.new(name="File Explorer", command="explorer", args=".", enabled=True),
-        Launcher.new(name="Command Prompt", command="cmd", enabled=True),
-    ]
+    if sys.platform == "darwin":
+        seeds: list[Launcher] = [
+            Launcher.new(name="Calculator", command="Calculator", enabled=True),  # macOS Calculator.app name
+            Launcher.new(name="Calendar", command="Calendar", enabled=True),
+            Launcher.new(name="Web Browser", command="https://www.google.com", enabled=True),
+            Launcher.new(name="TextEdit", command="TextEdit", enabled=True),
+            Launcher.new(name="Finder", command="Finder", args="~", enabled=True),
+            Launcher.new(name="Terminal", command="Terminal", enabled=True),
+        ]
+    else:
+        seeds: list[Launcher] = [
+            Launcher.new(
+                name="Calculator",
+                command="calc",
+                enabled=True,
+            ),
+            Launcher.new(
+                name="Calendar",
+                command="ms-calendar:",   # Windows Calendar app via protocol (falls back to browser on other OS)
+                enabled=True,
+            ),
+            Launcher.new(
+                name="Web Browser",
+                command="https://www.google.com",
+                enabled=True,
+            ),
+            # Practical Windows-friendly examples
+            Launcher.new(name="Notepad", command="notepad", enabled=True),
+            Launcher.new(name="File Explorer", command="explorer", args=".", enabled=True),
+            Launcher.new(name="Command Prompt", command="cmd", enabled=True),
+        ]
 
     for s in seeds:
         cfg.add_launcher(s)
 
 
 def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPanel,
-                cfg: ConfigManager) -> QSystemTrayIcon:
+                cfg: ConfigManager, set_hotkey_callback=None) -> QSystemTrayIcon:
     """Create and return a system tray icon with useful menu."""
     tray = QSystemTrayIcon()
     icon = QIcon.fromTheme("applications-system")
@@ -84,6 +95,10 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     act_manage = QAction("Manage launchers...", menu)
     act_manage.triggered.connect(trigger.request_manage.emit)
 
+    act_set_hotkey = QAction("Set hotkey...", menu)
+    if set_hotkey_callback:
+        act_set_hotkey.triggered.connect(set_hotkey_callback)
+
     act_reload = QAction("Reload config", menu)
     def do_reload():
         cfg.reload()
@@ -97,6 +112,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
 
     menu.addAction(act_add)
     menu.addAction(act_manage)
+    menu.addAction(act_set_hotkey)
     menu.addAction(act_reload)
     menu.addSeparator()
     menu.addAction(act_exit)
@@ -135,6 +151,9 @@ def main() -> int:
             QTimer.singleShot(test_quit_ms, app.quit)
 
     cfg_mgr = ConfigManager()
+    # Auto-correct default hotkey for platform on first run / if still old default
+    if sys.platform == "darwin" and cfg_mgr.config.settings.hotkey == "<ctrl>+<alt>+l":
+        cfg_mgr.update_settings(hotkey="<cmd>+<alt>+l")
     seed_test_data_if_needed(cfg_mgr)
 
     # Create core widgets
@@ -227,25 +246,57 @@ def main() -> int:
     trigger.request_add.connect(lambda: show_add_dialog())
     trigger.request_manage.connect(lambda: show_manager_dialog())
 
-    # Global hotkey to force-show the launcher dropdown.
-    # (No always-on-top anymore, so user needs a way to bring up the list.)
-    if keyboard is not None:
+    # Global hotkey support (configurable)
+    def _setup_hotkey(hotkey_str: str):
+        if keyboard is None:
+            return None
         def _force_show_dropdown():
             dropdown.position_below(trigger)
             dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
             dropdown.start_show_animation()
-
         try:
-            hotkey = '<ctrl>+<alt>+l'  # easy to remember for "launcher"
-            hotkey_listener = keyboard.GlobalHotKeys({hotkey: _force_show_dropdown})
-            hotkey_listener.start()
-            # Keep alive
-            app._hotkey_listener = hotkey_listener
-            print(f"Hotkey registered: {hotkey} to show launcher list")
+            listener = keyboard.GlobalHotKeys({hotkey_str: _force_show_dropdown})
+            listener.start()
+            print(f"Hotkey registered: {hotkey_str} to show launcher list")
+            if sys.platform == "darwin":
+                print("  On macOS you may need to grant Accessibility permissions to Terminal/Python")
+                print("  in System Settings > Privacy & Security > Accessibility")
+            return listener
         except Exception as exc:
-            print(f"Warning: failed to register hotkey {hotkey}: {exc}")
-    else:
-        print("pynput not available; hotkey support disabled (install pynput)")
+            print(f"Warning: failed to register hotkey {hotkey_str}: {exc}")
+            return None
+
+    current_hotkey = cfg_mgr.config.settings.hotkey
+    app._hotkey_listener = _setup_hotkey(current_hotkey)
+
+    def change_hotkey():
+        if keyboard is None:
+            QMessageBox.information(trigger, "Hotkey", "pynput is not installed; hotkeys are disabled.\nInstall with: pip install pynput")
+            return
+        text, ok = QInputDialog.getText(
+            trigger,
+            "Set Hotkey",
+            "Enter hotkey in pynput format.\n"
+            "Examples:\n"
+            "  Windows/Linux: <ctrl>+<alt>+k\n"
+            "  macOS:         <cmd>+<alt>+k\n\n"
+            "Common modifiers: <ctrl>, <alt>, <shift>, <cmd> (mac)\n"
+            "See pynput documentation for full syntax.",
+            text=cfg_mgr.config.settings.hotkey
+        )
+        if ok and text:
+            new_hotkey = text.strip()
+            if new_hotkey:
+                cfg_mgr.update_settings(hotkey=new_hotkey)
+                # stop previous listener
+                if hasattr(app, '_hotkey_listener') and app._hotkey_listener:
+                    try:
+                        app._hotkey_listener.stop()
+                    except Exception:
+                        pass
+                app._hotkey_listener = _setup_hotkey(new_hotkey)
+
+    trigger.request_set_hotkey.connect(change_hotkey)
 
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):
@@ -257,7 +308,7 @@ def main() -> int:
     trigger.request_exit.connect(app.quit)
 
     # System tray
-    tray = create_tray(app, trigger, dropdown, cfg_mgr)
+    tray = create_tray(app, trigger, dropdown, cfg_mgr, set_hotkey_callback=change_hotkey)
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()

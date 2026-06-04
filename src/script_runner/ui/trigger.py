@@ -1,10 +1,11 @@
-"""The small always-visible trigger widget showing the downward arrow.
+"""The small trigger widget showing the downward arrow.
 
-- Frameless, always on top (Tool window)
+- Frameless Tool window (not always-on-top anymore)
 - Draggable by the user
-- Right-click context menu (Add..., Exit, etc.)
+- Right-click context menu (Add..., Manage..., Exit)
 - Emits hover enter/leave for the dropdown controller
 - Respects size from settings
+- Global hotkey support (registered in main.py) to force-show the list
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class TriggerWidget(QWidget):
     position_changed = Signal(int, int)  # x, y
     request_add = Signal()
     request_manage = Signal()
+    request_set_hotkey = Signal()
     request_exit = Signal()
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
@@ -49,6 +51,8 @@ class TriggerWidget(QWidget):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
+        self._in_context_menu = False
+
         # Context menu actions
         self._create_actions()
 
@@ -56,7 +60,9 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for Add / Manage / Exit")
+        self.setToolTip("Script Runner — hover the arrow to open launcher list\n"
+                        "Right-click for Add / Manage / Exit / Set hotkey\n"
+                        "Global hotkey (configurable) shows the list")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)
@@ -64,6 +70,9 @@ class TriggerWidget(QWidget):
 
         self._action_manage = QAction("Manage launchers...", self)
         self._action_manage.triggered.connect(self.request_manage.emit)
+
+        self._action_set_hotkey = QAction("Set hotkey...", self)
+        self._action_set_hotkey.triggered.connect(self.request_set_hotkey.emit)
 
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
@@ -76,9 +85,22 @@ class TriggerWidget(QWidget):
         menu = QMenu(self)
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
+        menu.addAction(self._action_set_hotkey)
         menu.addSeparator()
         menu.addAction(self._action_exit)
-        menu.exec(self.mapToGlobal(pos))
+
+        # Suppress hover enter/leave while the menu is open. This prevents
+        # the dropdown from hiding/showing and interfering with menu selection,
+        # which was causing menus to immediately close on macOS.
+        self._in_context_menu = True
+        menu.aboutToHide.connect(lambda: setattr(self, '_in_context_menu', False))
+
+        # Use a zero-delay timer + popup(). This is a well-known workaround on
+        # macOS for frameless/Tool windows where the context menu would otherwise
+        # close immediately as soon as the user moves the mouse or releases the
+        # right-click button.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: menu.popup(self.mapToGlobal(pos)))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
@@ -111,10 +133,14 @@ class TriggerWidget(QWidget):
             super().mouseReleaseEvent(event)
 
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        if getattr(self, '_in_context_menu', False):
+            return
         self.hover_enter.emit()
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        if getattr(self, '_in_context_menu', False):
+            return
         self.hover_leave.emit()
         super().leaveEvent(event)
 

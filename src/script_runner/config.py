@@ -47,7 +47,7 @@ class Settings:
     animation_duration_ms: int = 180
     position_x: int = 100
     position_y: int = 60
-    # Future: theme, hotkey, etc.
+    hotkey: str = "<ctrl>+<alt>+l"  # pynput format; on mac use <cmd>+<alt>+l etc.
 
 
 @dataclass
