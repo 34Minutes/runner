@@ -41,7 +41,9 @@ class AddEditDialog(QDialog):
 
         self._name_edit = QLineEdit()
         self._command_edit = QLineEdit()
+        self._command_edit.setPlaceholderText('e.g. brave  or  C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe')
         self._args_edit = QLineEdit()
+        self._args_edit.setPlaceholderText('e.g. https://x.com  or  --new-window')
         self._enabled_cb = QCheckBox("Include in dropdown list")
         self._enabled_cb.setChecked(True)
 

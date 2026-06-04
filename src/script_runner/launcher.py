@@ -89,15 +89,9 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
         else:
             argv = [sys.executable, command] + args_list
     else:
-        # Direct command or already includes python
-        if " " in command and not command.startswith('"') and not Path(command.split()[0]).exists():
-            # If it has spaces and isn't a quoted path that exists, treat as command + implicit args?
-            # Better: let the user put the whole thing in "command" or use the args field.
-            # For simplicity we split the command only if it looks like a single exe with spaces.
-            parts = shlex.split(command)
-            argv = parts + args_list
-        else:
-            argv = [command] + args_list
+        # Command is the program/executable (can contain spaces, e.g. "C:\Program Files\Brave...\brave.exe"
+        # from the Browse button). Additional arguments come from the Parameters field.
+        argv = [command] + args_list
 
     # Creation flags for console visibility (Windows)
     creationflags = 0
@@ -119,9 +113,9 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
     if launcher.run_as_admin and sys.platform == "win32":
         return _launch_as_admin_windows(argv, cwd)
 
-    # Normal launch on Windows: use ShellExecute (via the same mechanism as the Run dialog)
-    # so that bare names like "calc", "notepad", "explorer", "cmd", "ms-calendar:" etc.
-    # (and wrapped python via 'py') are resolved reliably using App Paths / shell associations / registered protocols.
+    # Normal launch on Windows: use shell=True so that bare commands like "calc", "brave", "explorer"
+    # and commands with args (including URLs for browsers) resolve the same way as the Run dialog
+    # via App Paths / shell associations.
     if sys.platform == "win32":
         is_python_wrapped = bool(argv) and argv[0].lower() in ("py", "python", "pythonw")
         if launcher.show_console and is_python_wrapped:
@@ -132,19 +126,25 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
                 env=os.environ.copy()
             )
-        effective_cmd = argv[0]
-        effective_params = " ".join(argv[1:]) if len(argv) > 1 else None
-        show = 1  # SW_SHOWNORMAL
-        _shell_execute(effective_cmd, effective_params, cwd, show)
-        return None
+        cmdline = subprocess.list2cmdline(argv)
+        popen_kwargs = {
+            "shell": True,
+            "cwd": cwd,
+            "env": os.environ.copy(),
+        }
+        if launcher.show_console:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        else:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        return subprocess.Popen(cmdline, **popen_kwargs)
     else:
         return subprocess.Popen(argv, **popen_kwargs)
 
 
 def _shell_execute(command: str, params: str | None = None, cwd: str | None = None, show: int = 1) -> None:
-    """Launch using ShellExecuteW. This is the most reliable way on Windows to
-    run bare commands like "calc", "notepad", "explorer .", "cmd", or protocols
-    like "ms-calendar:". It uses the same mechanism as the Run dialog / Start menu.
+    """Launch using ShellExecuteW. Used for "Run as administrator" and as fallback.
+    For normal launches we use subprocess + shell=True to reliably support
+    user-specified executables (with spaces) + arguments (e.g. browser + URL).
     """
     import ctypes
 
