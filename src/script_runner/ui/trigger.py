@@ -1,11 +1,10 @@
 """The small trigger widget showing the downward arrow.
 
-- Frameless Tool window (not always-on-top anymore)
+- Frameless Tool window
 - Draggable by the user
 - Right-click context menu (Add..., Manage..., Exit)
 - Emits hover enter/leave for the dropdown controller
 - Respects size from settings
-- Global hotkey support (registered in main.py) to force-show the list
 """
 
 from __future__ import annotations
@@ -23,9 +22,9 @@ class TriggerWidget(QWidget):
     hover_enter = Signal()
     hover_leave = Signal()
     position_changed = Signal(int, int)  # x, y
+    size_changed = Signal(int, int)  # w, h
     request_add = Signal()
     request_manage = Signal()
-    request_set_hotkey = Signal()
     request_exit = Signal()
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
@@ -40,7 +39,11 @@ class TriggerWidget(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
-        self.setFixedSize(
+        self._resize_margin = 8
+        self._resizing = False
+        self._resize_edge = None
+        self.setMinimumSize(20, 20)
+        self.resize(
             config.settings.trigger_width,
             config.settings.trigger_height,
         )
@@ -56,13 +59,13 @@ class TriggerWidget(QWidget):
         # Context menu actions
         self._create_actions()
 
+        self._in_context_menu = False
+
         # Move to saved position (clamped later by caller if needed)
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Script Runner — hover the arrow to open launcher list\n"
-                        "Right-click for Add / Manage / Exit / Set hotkey\n"
-                        "Global hotkey (configurable) shows the list")
+        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for Add / Manage / Exit")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)
@@ -70,9 +73,6 @@ class TriggerWidget(QWidget):
 
         self._action_manage = QAction("Manage launchers...", self)
         self._action_manage.triggered.connect(self.request_manage.emit)
-
-        self._action_set_hotkey = QAction("Set hotkey...", self)
-        self._action_set_hotkey.triggered.connect(self.request_set_hotkey.emit)
 
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
@@ -85,7 +85,6 @@ class TriggerWidget(QWidget):
         menu = QMenu(self)
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
-        menu.addAction(self._action_set_hotkey)
         menu.addSeparator()
         menu.addAction(self._action_exit)
 
@@ -104,14 +103,24 @@ class TriggerWidget(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = True
-            self._drag_offset = event.globalPosition().toPoint() - self.pos()
-            event.accept()
+            edge = self._get_resize_edge(event.pos())
+            if edge:
+                self._resizing = True
+                self._resize_edge = edge
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                event.accept()
+            else:
+                self._dragging = True
+                self._drag_offset = event.globalPosition().toPoint() - self.pos()
+                event.accept()
         else:
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
-        if self._dragging and event.buttons() & Qt.MouseButton.LeftButton:
+        if self._resizing:
+            self._perform_resize(event)
+            event.accept()
+        elif self._dragging and event.buttons() & Qt.MouseButton.LeftButton:
             new_pos = event.globalPosition().toPoint() - self._drag_offset
             # Optional: keep on screen (simple version, full multi-monitor later)
             screen = QApplication.primaryScreen()
@@ -123,14 +132,79 @@ class TriggerWidget(QWidget):
             self.position_changed.emit(new_pos.x(), new_pos.y())
             event.accept()
         else:
+            self._update_resize_cursor(event.pos())
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = False
-            event.accept()
+            if self._resizing:
+                self._resizing = False
+                self._resize_edge = None
+                self.size_changed.emit(self.width(), self.height())
+                self.setCursor(Qt.ArrowCursor)
+                event.accept()
+            elif self._dragging:
+                self._dragging = False
+                event.accept()
+            else:
+                super().mouseReleaseEvent(event)
         else:
             super().mouseReleaseEvent(event)
+
+    def _get_resize_edge(self, pos: QPoint):
+        rect = self.rect()
+        m = self._resize_margin
+        left = pos.x() < m
+        right = pos.x() > rect.width() - m
+        top = pos.y() < m
+        bottom = pos.y() > rect.height() - m
+        if top and left: return "topleft"
+        if top and right: return "topright"
+        if bottom and left: return "bottomleft"
+        if bottom and right: return "bottomright"
+        if left: return "left"
+        if right: return "right"
+        if top: return "top"
+        if bottom: return "bottom"
+        return None
+
+    def _update_resize_cursor(self, pos: QPoint):
+        edge = self._get_resize_edge(pos)
+        if edge in ("topleft", "bottomright"):
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif edge in ("topright", "bottomleft"):
+            self.setCursor(Qt.SizeBDiagCursor)
+        elif edge in ("left", "right"):
+            self.setCursor(Qt.SizeHorCursor)
+        elif edge in ("top", "bottom"):
+            self.setCursor(Qt.SizeVerCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
+    def _perform_resize(self, event: QMouseEvent):
+        global_pos = event.globalPosition().toPoint()
+        rect = self.geometry()
+        edge = self._resize_edge
+        if "left" in edge:
+            rect.setLeft(global_pos.x())
+        if "right" in edge:
+            rect.setRight(global_pos.x())
+        if "top" in edge:
+            rect.setTop(global_pos.y())
+        if "bottom" in edge:
+            rect.setBottom(global_pos.y())
+        # enforce min size
+        if rect.width() < self.minimumWidth():
+            if "left" in edge:
+                rect.setLeft(rect.right() - self.minimumWidth())
+            else:
+                rect.setRight(rect.left() + self.minimumWidth())
+        if rect.height() < self.minimumHeight():
+            if "top" in edge:
+                rect.setTop(rect.bottom() - self.minimumHeight())
+            else:
+                rect.setBottom(rect.top() + self.minimumHeight())
+        self.setGeometry(rect)
 
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
         if getattr(self, '_in_context_menu', False):
@@ -171,7 +245,7 @@ class TriggerWidget(QWidget):
         painter.drawPolygon(poly)
 
     def update_size_from_settings(self) -> None:
-        self.setFixedSize(
+        self.resize(
             self._config.settings.trigger_width,
             self._config.settings.trigger_height,
         )

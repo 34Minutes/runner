@@ -95,6 +95,10 @@ class DropdownPanel(QWidget):
     def set_width(self, width: int) -> None:
         self.setFixedWidth(width)
 
+    def update_height_for_content(self) -> None:
+        """Recompute and apply the correct height for the current buttons (public)."""
+        self._update_height_for_content()
+
     def rebuild_buttons(self, launchers: list[Launcher]) -> None:
         """Replace all buttons with current enabled launchers."""
         # Clear
@@ -119,18 +123,62 @@ class DropdownPanel(QWidget):
         self._update_height_for_content()
 
     def _update_height_for_content(self) -> None:
-        # Compute natural height based on children (cap at ~420)
+        """Compute the height required so that each button row gets its full height
+        (minHeight or sizeHint) + the declared _button_layout spacing (2px) + chrome.
+
+        We sum explicitly from the child widgets because once the _button_container
+        has been set as the widget of the QScrollArea (during __init__, before
+        rebuild adds children), the container's layout.minimumSize() and sizeHint()
+        can report artificially low values (e.g. 68 instead of 88 for 3x28+spacings).
+        Using those would cause us to set too-small fixed height on frame/scroll,
+        making the inner VBox allocate too little vertical space → children get
+        placed with ~20px steps; their minHeight=28 then causes overlaps/squish
+        (gaps of -8 instead of +2).
+        """
         self._button_container.adjustSize()
-        natural_h = self._button_container.sizeHint().height() + 12
+
+        # Explicit sum: robust even when hosted layout reports wrong aggregates.
+        inner_h = 0
+        sp = self._button_layout.spacing()
+        for i, w in enumerate(self._buttons):
+            if i > 0:
+                inner_h += sp
+            if hasattr(w, 'sizeHint'):
+                try:
+                    sh_h = w.sizeHint().height()
+                except Exception:
+                    sh_h = 0
+                mh = getattr(w, 'minimumHeight', lambda: 0)()
+                inner_h += max(sh_h, mh, 20)
+            else:
+                inner_h += 20
+
+        m = self._layout.contentsMargins()
+        frame_chrome = m.top() + m.bottom()
+        # The button_layout (inside container inside scroll) observes an ~8px top inset
+        # (first button y≈8). To give the VBoxLayout a rect tall enough for mins + its
+        # own spacing(2), we need extra on top of the pure inner_h.
+        viewport_chrome = 22  # extra allowance so the inner button_layout rect is large enough for all minHeights + the full declared spacing(2) between each (previously we were 1px short per gap)
+        target_h = inner_h + frame_chrome + viewport_chrome
         max_h = 420
-        target_h = min(natural_h, max_h)
+        target_h = min(target_h, max_h)
         self._frame.setFixedHeight(target_h)
         self.setFixedHeight(target_h)
 
+        # Give the inner content a minimumHeight so that when the QScrollArea (resizable)
+        # is constrained by the frame's fixed height (or during/after anims), the
+        # button_layout still receives enough vertical space to place children with
+        # their full minHeight *and* the declared spacing(2).
+        self._button_container.setMinimumHeight(inner_h)
+        self._scroll.setMinimumHeight(inner_h)
+
+        # Force layout to adopt the size so child layouts (button spacing) get the correct allocation now
+        self._frame.updateGeometry()
+        self.updateGeometry()
+
     def _on_button_clicked(self, launcher: Launcher) -> None:
         self.launch_requested.emit(launcher)
-        # Hide after a short delay so click feedback is visible
-        QTimer.singleShot(80, self.start_hide_animation)
+        # Note: hide decision (respecting pinned state) is now handled in main.py's on_launch
 
     def position_below(self, trigger: QWidget) -> None:
         """Position this panel directly below the trigger widget."""
@@ -146,15 +194,38 @@ class DropdownPanel(QWidget):
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:  # type: ignore[override]
-        self._schedule_hide()
+        if not self._config.settings.pinned_open:
+            self._schedule_hide()
         self.hover_leave.emit()
         super().leaveEvent(event)
 
     def _schedule_hide(self) -> None:
+        if self._config.settings.pinned_open:
+            return
         self._hide_timer.start()
 
     def _cancel_hide(self) -> None:
         self._hide_timer.stop()
+
+    def cancel_hide(self) -> None:
+        """Cancel any pending hide timer. Called from main when mouse moves from dd list back to trigger."""
+        self._cancel_hide()
+
+    def ensure_visible_and_sized(self) -> None:
+        """Ensure the dropdown is visible at the correct full content height.
+        Safe to call when pinned_open: prevents unwanted collapses after moves,
+        resizes of trigger, or click interactions.
+        """
+        self._cancel_hide()
+        self._update_height_for_content()
+        if not self.isVisible():
+            self.show()
+            self.setWindowOpacity(1.0)
+            # Clear anim constraints so our fixed target from _update rules
+            self._frame.setMinimumHeight(0)
+            self._frame.setMaximumHeight(16777215)
+            self._frame.updateGeometry()
+            self.updateGeometry()
 
     def _do_hide(self) -> None:
         self.start_hide_animation()
@@ -165,6 +236,15 @@ class DropdownPanel(QWidget):
         self.show()
         self.raise_()
         self.setFocus(Qt.FocusReason.OtherFocusReason)  # allow Esc key
+
+        # Ensure we have an accurate target height (buttons + proper spacings) before
+        # capturing end_h for the grow animation. Prevents growing to a squished/too-small value.
+        self._update_height_for_content()
+
+        # Relax the mins we put on the hosted scroll/content so the frame can start the
+        # animation from a small height (8) without the child's minSize fighting the layout.
+        self._button_container.setMinimumHeight(0)
+        self._scroll.setMinimumHeight(0)
 
         start_h = 8
         end_h = self._frame.height()
@@ -193,6 +273,9 @@ class DropdownPanel(QWidget):
             self._frame.setMaximumHeight(16777215)
             self._frame.setFixedHeight(end_h)
             self.setWindowOpacity(1.0)
+            # Restore proper mins for the content now that we are at full open height.
+            # This re-enables the "don't squish my spacings" protection.
+            self._update_height_for_content()
 
         height_anim.finished.connect(on_finished)
 
@@ -201,8 +284,15 @@ class DropdownPanel(QWidget):
         height_anim.start()
 
     def start_hide_animation(self) -> None:
+        if self._config.settings.pinned_open:
+            return
         if not self.isVisible():
             return
+
+        # Relax content mins so the shrink animation on the frame can go all the way down
+        # (otherwise child's minSize may prevent the layout from making the frame as small as 6).
+        self._button_container.setMinimumHeight(0)
+        self._scroll.setMinimumHeight(0)
 
         current_h = self._frame.height()
         start_op = self.windowOpacity()
@@ -240,7 +330,8 @@ class DropdownPanel(QWidget):
 
     def keyPressEvent(self, event):  # type: ignore[override]
         if event.key() == Qt.Key.Key_Escape:
-            self.force_hide()
+            if not self._config.settings.pinned_open:
+                self.force_hide()
             event.accept()
         else:
             super().keyPressEvent(event)

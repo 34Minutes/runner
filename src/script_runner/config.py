@@ -47,7 +47,7 @@ class Settings:
     animation_duration_ms: int = 180
     position_x: int = 100
     position_y: int = 60
-    hotkey: str = "<ctrl>+<alt>+l"  # pynput format; on mac use <cmd>+<alt>+l etc.
+    pinned_open: bool = False
 
 
 @dataclass

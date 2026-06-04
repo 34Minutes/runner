@@ -20,14 +20,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QMenu,
     QMessageBox,
-    QInputDialog,
-    QMainWindow,
 )
-
-try:
-    from pynput import keyboard
-except ImportError:
-    keyboard = None
 
 from .config import ConfigManager, Launcher, AppConfig
 from .launcher import launch
@@ -79,7 +72,7 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
 
 
 def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPanel,
-                cfg: ConfigManager, set_hotkey_callback=None) -> QSystemTrayIcon:
+                cfg: ConfigManager) -> QSystemTrayIcon:
     """Create and return a system tray icon with useful menu."""
     tray = QSystemTrayIcon()
     icon = QIcon.fromTheme("applications-system")
@@ -96,15 +89,14 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     act_manage = QAction("Manage launchers...", menu)
     act_manage.triggered.connect(trigger.request_manage.emit)
 
-    act_set_hotkey = QAction("Set hotkey...", menu)
-    if set_hotkey_callback:
-        act_set_hotkey.triggered.connect(set_hotkey_callback)
-
     act_reload = QAction("Reload config", menu)
     def do_reload():
         cfg.reload()
         dropdown.rebuild_buttons(cfg.get_enabled_launchers())
         trigger.update_size_from_settings()
+        if cfg.config.settings.pinned_open:
+            dropdown.position_below(trigger)
+            dropdown.ensure_visible_and_sized()
         # reposition if needed
     act_reload.triggered.connect(do_reload)
 
@@ -113,7 +105,6 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
 
     menu.addAction(act_add)
     menu.addAction(act_manage)
-    menu.addAction(act_set_hotkey)
     menu.addAction(act_reload)
     menu.addSeparator()
     menu.addAction(act_exit)
@@ -128,7 +119,10 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
             # Force show the dropdown near trigger
             dropdown.position_below(trigger)
             dropdown.rebuild_buttons(cfg.get_enabled_launchers())
-            dropdown.start_show_animation()
+            if cfg.config.settings.pinned_open:
+                dropdown.ensure_visible_and_sized()
+            else:
+                dropdown.start_show_animation()
 
     tray.activated.connect(on_tray_activated)
 
@@ -137,21 +131,22 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
 
 def main() -> int:
     app = QApplication(sys.argv)
+
+    # Set activation policy as early as possible on macOS.
+    # Use integer 1 (Accessory) to avoid enum lookup issues on older system PySide6.
+    if sys.platform == "darwin":
+        try:
+            app.setActivationPolicy(1)  # 1 == ActivationPolicyAccessory
+        except Exception:
+            pass
+
     app.setApplicationName("Script Runner")
     app.setQuitOnLastWindowClosed(False)  # tray + floating widget
 
-    if sys.platform == "darwin":
-        # Make the app an "accessory" app on macOS: no dock icon, no app switcher entry.
-        # Our floating trigger and tray will still be visible.
-        app.setActivationPolicy(Qt.ApplicationAttribute.AA_ActivationPolicyAccessory)
-
-    # On macOS (and to be safe cross-platform), keep a hidden QMainWindow alive.
-    # This prevents the app from auto-quitting when using only frameless/Tool windows
-    # and temporary dialogs (a common macOS + Qt gotcha).
-    _hidden_main = QMainWindow()
-    _hidden_main.setWindowTitle("Script Runner")
-    _hidden_main.hide()
-    app._hidden_main_window = _hidden_main  # keep reference
+    # NOTE: We intentionally do NOT create a hidden QMainWindow here.
+    # On macOS, a hidden main window + frameless Tool window + dialogs + activation policy
+    # can easily trigger AppKit assertions (EXC_BREAKPOINT / SIGTRAP).
+    # The setQuitOnLastWindowClosed(False) + early activation policy is usually sufficient.
 
     # Support for automated testing: script-runner --test-quit-after 1500
     test_quit_ms = 0
@@ -165,9 +160,6 @@ def main() -> int:
             QTimer.singleShot(test_quit_ms, app.quit)
 
     cfg_mgr = ConfigManager()
-    # Auto-correct default hotkey for platform on first run / if still old default
-    if sys.platform == "darwin" and cfg_mgr.config.settings.hotkey == "<ctrl>+<alt>+l":
-        cfg_mgr.update_settings(hotkey="<cmd>+<alt>+l")
     seed_test_data_if_needed(cfg_mgr)
 
     # Create core widgets
@@ -191,27 +183,31 @@ def main() -> int:
 
     def cancel_hide():
         hide_timer.stop()
+        dropdown.cancel_hide()  # also cancel dropdown's internal timer to keep list open when mouse is over trigger
 
     def do_hide():
-        dropdown.start_hide_animation()
+        if not cfg_mgr.config.settings.pinned_open:
+            dropdown.start_hide_animation()
 
     hide_timer.timeout.connect(do_hide)
 
     def on_trigger_enter():
-        cancel_hide()
+        cancel_hide()  # cancels both main timer and dropdown's internal timer
         dropdown.position_below(trigger)
         dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
         if not dropdown.isVisible():
             dropdown.start_show_animation()
 
     def on_trigger_leave():
-        schedule_hide()
+        if not cfg_mgr.config.settings.pinned_open:
+            schedule_hide()
 
     def on_dropdown_enter():
         cancel_hide()
 
     def on_dropdown_leave():
-        schedule_hide()
+        if not cfg_mgr.config.settings.pinned_open:
+            schedule_hide()
 
     trigger.hover_enter.connect(on_trigger_enter)
     trigger.hover_leave.connect(on_trigger_leave)
@@ -234,7 +230,12 @@ def main() -> int:
                 f"Could not launch '{launcher.name}':\n{exc}",
             )
         finally:
-            dropdown.force_hide()
+            if not cfg_mgr.config.settings.pinned_open:
+                # short delay for click visual feedback, then hide (unless pinned)
+                QTimer.singleShot(80, dropdown.start_hide_animation)
+            else:
+                # ensure it stays fully expanded/sized even after click (in case events caused partial state)
+                QTimer.singleShot(50, dropdown.ensure_visible_and_sized)
 
     dropdown.launch_requested.connect(on_launch)
 
@@ -250,82 +251,60 @@ def main() -> int:
                     cfg_mgr.add_launcher(new_or_updated)
                 dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
 
+    def apply_pinned_state():
+        pinned = cfg_mgr.config.settings.pinned_open
+        if pinned:
+            dropdown.position_below(trigger)
+            dropdown.cancel_hide()
+            dropdown.update_height_for_content()
+            if not dropdown.isVisible():
+                dropdown.start_show_animation()
+            else:
+                # already visible (e.g. re-apply after manager toggle), just make sure height is full
+                dropdown.update_height_for_content()
+        else:
+            dropdown.force_hide()
+
     def show_manager_dialog():
-        dropdown.force_hide()
-        dlg = ManagerDialog(cfg_mgr, trigger)
-        if dlg.exec():
-            # Manager saves its own changes; just refresh the dropdown list
-            dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+        def on_pinned_changed(checked):
+            apply_pinned_state()
+        dlg = ManagerDialog(cfg_mgr, trigger, pinned_changed_callback=on_pinned_changed)
+        dlg.exec()
+        # always rebuild after manager (launchers may have changed) and apply pin state
+        dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+        apply_pinned_state()
 
     trigger.request_add.connect(lambda: show_add_dialog())
     trigger.request_manage.connect(lambda: show_manager_dialog())
 
-    # Global hotkey support (configurable)
-    def _setup_hotkey(hotkey_str: str):
-        if keyboard is None:
-            return None
-        def _force_show_dropdown():
-            dropdown.position_below(trigger)
-            dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
-            dropdown.start_show_animation()
-        try:
-            listener = keyboard.GlobalHotKeys({hotkey_str: _force_show_dropdown})
-            listener.start()
-            print(f"Hotkey registered: {hotkey_str} to show launcher list")
-            if sys.platform == "darwin":
-                print("  On macOS you may need to grant Accessibility permissions to Terminal/Python")
-                print("  in System Settings > Privacy & Security > Accessibility")
-            return listener
-        except Exception as exc:
-            print(f"Warning: failed to register hotkey {hotkey_str}: {exc}")
-            return None
-
-    current_hotkey = cfg_mgr.config.settings.hotkey
-    app._hotkey_listener = _setup_hotkey(current_hotkey)
-
-    def change_hotkey():
-        if keyboard is None:
-            QMessageBox.information(trigger, "Hotkey", "pynput is not installed; hotkeys are disabled.\nInstall with: pip install pynput")
-            return
-        text, ok = QInputDialog.getText(
-            None,  # use None as parent to avoid issues with the frameless Tool trigger window on macOS
-            "Set Hotkey",
-            "Enter hotkey in pynput format.\n"
-            "Examples:\n"
-            "  Windows/Linux: <ctrl>+<alt>+k\n"
-            "  macOS:         <cmd>+<alt>+k\n\n"
-            "Common modifiers: <ctrl>, <alt>, <shift>, <cmd> (mac)\n"
-            "See pynput documentation for full syntax.",
-            text=cfg_mgr.config.settings.hotkey
-        )
-        if ok and text:
-            new_hotkey = text.strip()
-            if new_hotkey:
-                cfg_mgr.update_settings(hotkey=new_hotkey)
-                # stop previous listener
-                if hasattr(app, '_hotkey_listener') and app._hotkey_listener:
-                    try:
-                        app._hotkey_listener.stop()
-                    except Exception:
-                        pass
-                app._hotkey_listener = _setup_hotkey(new_hotkey)
-
-    trigger.request_set_hotkey.connect(change_hotkey)
-
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):
         cfg_mgr.update_settings(position_x=x, position_y=y)
+        if cfg_mgr.config.settings.pinned_open:
+            dropdown.position_below(trigger)
+            dropdown.ensure_visible_and_sized()
 
     trigger.position_changed.connect(save_position)
+
+    def save_size(w: int, h: int):
+        cfg_mgr.update_settings(trigger_width=w, trigger_height=h)
+        if cfg_mgr.config.settings.pinned_open:
+            dropdown.position_below(trigger)
+            dropdown.ensure_visible_and_sized()
+
+    trigger.size_changed.connect(save_size)
 
     # Exit request from trigger context menu
     trigger.request_exit.connect(app.quit)
 
     # System tray
-    tray = create_tray(app, trigger, dropdown, cfg_mgr, set_hotkey_callback=change_hotkey)
+    tray = create_tray(app, trigger, dropdown, cfg_mgr)
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()
+
+    # Apply initial pinned state (if enabled, dropdown will be forced open)
+    apply_pinned_state()
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.

@@ -41,7 +41,12 @@ class AddEditDialog(QDialog):
 
         self._name_edit = QLineEdit()
         self._command_edit = QLineEdit()
-        self._command_edit.setPlaceholderText('e.g. brave  or  C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe')
+        if sys.platform == "darwin":
+            self._command_edit.setPlaceholderText('e.g. /Applications/Brave Browser.app  or  Brave Browser')
+        elif sys.platform == "win32":
+            self._command_edit.setPlaceholderText('e.g. brave  or  C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe')
+        else:
+            self._command_edit.setPlaceholderText('e.g. brave  or  /usr/bin/brave')
         self._args_edit = QLineEdit()
         self._args_edit.setPlaceholderText('e.g. https://x.com  or  --new-window')
         self._enabled_cb = QCheckBox("Include in dropdown list")
@@ -60,6 +65,9 @@ class AddEditDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setText("Save")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 

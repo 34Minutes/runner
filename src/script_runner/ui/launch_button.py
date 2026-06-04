@@ -38,3 +38,14 @@ class LaunchButton(QPushButton):
         )
         # Future: add icon on left
         self.setToolTip(f"Launch: {launcher.command} {launcher.args}".strip())
+
+    def sizeHint(self):
+        sh = super().sizeHint()
+        # Ensure sizeHint reflects our intended row height (minHeight) so that
+        # container layouts and sizeHint/minimumSize queries in DropdownPanel
+        # compute a tall enough natural height. Without this the VBox can
+        # under-allocate and squash the 2px spacing.
+        min_h = self.minimumHeight()
+        if sh.height() < min_h:
+            return sh.expandedTo(type(sh)(sh.width(), min_h))
+        return sh

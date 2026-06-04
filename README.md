@@ -75,11 +75,11 @@ You can edit the JSON manually or use the in-app dialogs.
 ## Development Notes
 - UI built with PySide6 (Qt).
 - Hover/animation logic is the most delicate part — test thoroughly.
-- Windows-only behaviors (run as admin, file icons, startup shortcut, hotkeys) live in `src/script_runner/utils/windows.py` and are guarded by platform checks.
+- Windows-only behaviors (run as admin, file icons, startup shortcut) live in `src/script_runner/utils/windows.py` and are guarded by platform checks.
 - To test Windows launch behavior, run on Windows or use a VM.
 
 ## Roadmap / Ideas
-Many enhancements documented in the language rec doc (global hotkey, search in list, icons, categories, manage dialog, drag-to-add, etc.).
+Many enhancements documented in the language rec doc (search in list, icons, categories, manage dialog, drag-to-add, etc.).
 
 ## License
 MIT (or whatever you choose at release).
