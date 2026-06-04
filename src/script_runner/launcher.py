@@ -109,24 +109,43 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
     if launcher.run_as_admin and sys.platform == "win32":
         return _launch_as_admin_windows(argv, cwd)
 
-    # Normal launch
+    # Normal launch on Windows: use ShellExecute (via the same mechanism as the Run dialog)
+    # so that bare names like "calc", "notepad", "explorer", "cmd", "ms-calendar:" etc.
+    # (and wrapped python via 'py') are resolved reliably using App Paths / shell associations / registered protocols.
     if sys.platform == "win32":
-        # Use shell=True on Windows so bare commands ("calc", "notepad", "explorer")
-        # and commands with args ("explorer .") resolve the same way the Run dialog
-        # and Start menu do (via App Paths / shell associations).
-        cmdline = subprocess.list2cmdline(argv)
-        popen_kwargs = {
-            "shell": True,
-            "cwd": cwd,
-            "env": os.environ.copy(),
-        }
-        if launcher.show_console:
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-        else:
-            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        return subprocess.Popen(cmdline, **popen_kwargs)
+        is_python_wrapped = bool(argv) and argv[0].lower() in ("py", "python", "pythonw")
+        if launcher.show_console and is_python_wrapped:
+            # For python scripts with show_console, use Popen + CREATE_NEW_CONSOLE so output console appears
+            cmdline = subprocess.list2cmdline(argv)
+            return subprocess.Popen(
+                cmdline, shell=True, cwd=cwd,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                env=os.environ.copy()
+            )
+        effective_cmd = argv[0]
+        effective_params = " ".join(argv[1:]) if len(argv) > 1 else None
+        show = 1  # SW_SHOWNORMAL
+        _shell_execute(effective_cmd, effective_params, cwd, show)
+        return None
     else:
         return subprocess.Popen(argv, **popen_kwargs)
+
+
+def _shell_execute(command: str, params: str | None = None, cwd: str | None = None, show: int = 1) -> None:
+    """Launch using ShellExecuteW. This is the most reliable way on Windows to
+    run bare commands like "calc", "notepad", "explorer .", "cmd", or protocols
+    like "ms-calendar:". It uses the same mechanism as the Run dialog / Start menu.
+    """
+    import ctypes
+
+    ctypes.windll.shell32.ShellExecuteW(
+        None,           # hwnd
+        "open",         # verb
+        command,
+        params,
+        cwd,
+        show,           # nShowCmd: 1=SW_SHOWNORMAL, 3=SW_MAXIMIZE, etc.
+    )
 
 
 def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> subprocess.Popen | None:

@@ -245,11 +245,27 @@ def main() -> int:
     trigger.raise_()
     ensure_topmost(trigger)
 
+    # Aggressively keep the trigger on top even when other applications are activated
+    # or after launching processes. The periodic timer + focus listener helps recover
+    # the topmost state (common gotcha with frameless + Tool + StaysOnTopHint on Windows).
+    def _keep_topmost():
+        if trigger.isVisible():
+            ensure_topmost(trigger)
+
+    topmost_timer = QTimer()
+    topmost_timer.timeout.connect(_keep_topmost)
+    topmost_timer.start(2000)  # re-enforce every 2s
+    # Keep timer alive (attach to trigger)
+    trigger._topmost_timer = topmost_timer
+
+    app.focusChanged.connect(lambda _old, _new: _keep_topmost())
+
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.
 
     # Optional: bring to front briefly on start
     QTimer.singleShot(250, lambda: trigger.raise_())
+    QTimer.singleShot(900, _keep_topmost)
 
     # Run
     return app.exec()

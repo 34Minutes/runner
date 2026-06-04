@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget
 
 
@@ -21,8 +22,18 @@ def ensure_topmost(widget: Optional[QWidget]) -> None:
     if widget is None:
         return
 
-    # Always try Qt level
+    # Always try Qt level first
     widget.raise_()
+
+    # Re-apply the StaysOnTopHint flag (sometimes gets lost after focus changes or child processes)
+    try:
+        flags = widget.windowFlags()
+        if not (flags & Qt.WindowStaysOnTopHint):
+            widget.setWindowFlags(flags | Qt.WindowStaysOnTopHint)
+            widget.show()  # re-show to apply new flags
+    except Exception:
+        pass
+
     # Note: we avoid activateWindow() here because the trigger has
     # WindowDoesNotAcceptFocus; the native TOPMOST call is what really matters.
 
