@@ -70,15 +70,25 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
             opener = "open" if sys.platform == "darwin" else "xdg-open"
             return subprocess.Popen([opener, command], cwd=cwd)
 
-    # macOS .app bundles (selected via the file dialog)
-    if sys.platform == "darwin" and command.lower().endswith(".app"):
-        # Use the "open" command to launch the bundle properly.
-        # Supports arguments via --args
-        open_args = ["open", "-a", command]
-        if args_list:
-            open_args.append("--args")
-            open_args.extend(args_list)
-        return subprocess.Popen(open_args, cwd=cwd)
+    # macOS: support launching apps by .app bundle path or by name (e.g. "Brave Browser")
+    # This is the standard/reliable way to open macOS GUI apps with arguments.
+    if sys.platform == "darwin":
+        cmd_lower = command.lower()
+        is_app = (
+            cmd_lower.endswith(".app") or
+            " " in command or  # typical for app display names like "Brave Browser"
+            ("/" not in command and not Path(command).exists())
+        )
+        if is_app:
+            # Standard macOS way to open an app (by name or .app path) with arguments/URLs.
+            # For plain URLs: open -a "Brave Browser" https://x.com
+            # For command-line flags: open -a "Brave Browser" --args --incognito https://x.com
+            open_args = ["open", "-a", command]
+            if args_list:
+                if any(a.startswith("--") for a in args_list):
+                    open_args.append("--args")
+                open_args.extend(args_list)
+            return subprocess.Popen(open_args, cwd=cwd)
 
     # Build the argv
     if _is_python_script(command) and not command.lower().startswith(("python", "py ")):
