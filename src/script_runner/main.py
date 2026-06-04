@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QInputDialog,
+    QMainWindow,
 )
 
 try:
@@ -138,6 +139,19 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Script Runner")
     app.setQuitOnLastWindowClosed(False)  # tray + floating widget
+
+    if sys.platform == "darwin":
+        # Make the app an "accessory" app on macOS: no dock icon, no app switcher entry.
+        # Our floating trigger and tray will still be visible.
+        app.setActivationPolicy(Qt.ApplicationAttribute.AA_ActivationPolicyAccessory)
+
+    # On macOS (and to be safe cross-platform), keep a hidden QMainWindow alive.
+    # This prevents the app from auto-quitting when using only frameless/Tool windows
+    # and temporary dialogs (a common macOS + Qt gotcha).
+    _hidden_main = QMainWindow()
+    _hidden_main.setWindowTitle("Script Runner")
+    _hidden_main.hide()
+    app._hidden_main_window = _hidden_main  # keep reference
 
     # Support for automated testing: script-runner --test-quit-after 1500
     test_quit_ms = 0
@@ -274,7 +288,7 @@ def main() -> int:
             QMessageBox.information(trigger, "Hotkey", "pynput is not installed; hotkeys are disabled.\nInstall with: pip install pynput")
             return
         text, ok = QInputDialog.getText(
-            trigger,
+            None,  # use None as parent to avoid issues with the frameless Tool trigger window on macOS
             "Set Hotkey",
             "Enter hotkey in pynput format.\n"
             "Examples:\n"
