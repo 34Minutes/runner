@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QWidget as QW,
     QFrame,
     QLabel,
-    QPushButton,
 )
 
 from ..config import AppConfig, Launcher
@@ -26,7 +25,6 @@ class DropdownPanel(QWidget):
     """The expanding list of launch buttons. Animated show/hide."""
 
     launch_requested = Signal(Launcher)  # emitted when a button is clicked
-    manage_requested = Signal()  # open the full manager dialog
     hover_enter = Signal()
     hover_leave = Signal()
 
@@ -41,7 +39,6 @@ class DropdownPanel(QWidget):
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
             # Note: we intentionally allow focus for keyboard (Esc, arrows)
         )
@@ -104,19 +101,6 @@ class DropdownPanel(QWidget):
         for b in self._buttons:
             b.deleteLater()
         self._buttons.clear()
-
-        # "Manage" at the top - better mouse flow as suggested
-        manage_btn = QPushButton("Manage launchers...")
-        manage_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #7aa2f7; border: none; padding: 4px; font-size: 11px; font-weight: bold; }"
-            "QPushButton:hover { text-decoration: underline; }"
-        )
-        manage_btn.clicked.connect(self.manage_requested.emit)
-        self._button_layout.addWidget(manage_btn)
-        self._buttons.append(manage_btn)
-
-        if launchers:
-            self._button_layout.addSpacing(4)
 
         for launcher in launchers:
             btn = LaunchButton(launcher, self._button_container)

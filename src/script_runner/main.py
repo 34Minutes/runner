@@ -22,13 +22,17 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+try:
+    from pynput import keyboard
+except ImportError:
+    keyboard = None
+
 from .config import ConfigManager, Launcher, AppConfig
 from .launcher import launch
 from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
 from .ui.manager_dialog import ManagerDialog
-from .utils.windows import ensure_topmost
 
 
 def seed_test_data_if_needed(cfg: ConfigManager) -> None:
@@ -157,11 +161,6 @@ def main() -> int:
 
     def do_hide():
         dropdown.start_hide_animation()
-        # When the list goes away, re-assert topmost on the trigger
-        # (only after our own UI action, not constantly). On macOS we
-        # avoid this to prevent focus/input issues; hover will bring it forward.
-        if sys.platform == "win32":
-            QTimer.singleShot(150, lambda: ensure_topmost(trigger))
 
     hide_timer.timeout.connect(do_hide)
 
@@ -202,14 +201,9 @@ def main() -> int:
                 f"Could not launch '{launcher.name}':\n{exc}",
             )
         finally:
-            # After launching something (which often brings another app to the front),
-            # make sure our small trigger stays on top.
             dropdown.force_hide()
-            if sys.platform == "win32":
-                ensure_topmost(trigger)
 
     dropdown.launch_requested.connect(on_launch)
-    dropdown.manage_requested.connect(lambda: show_manager_dialog())
 
     # Add dialog wiring
     def show_add_dialog(existing: Launcher | None = None):
@@ -233,6 +227,26 @@ def main() -> int:
     trigger.request_add.connect(lambda: show_add_dialog())
     trigger.request_manage.connect(lambda: show_manager_dialog())
 
+    # Global hotkey to force-show the launcher dropdown.
+    # (No always-on-top anymore, so user needs a way to bring up the list.)
+    if keyboard is not None:
+        def _force_show_dropdown():
+            dropdown.position_below(trigger)
+            dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+            dropdown.start_show_animation()
+
+        try:
+            hotkey = '<ctrl>+<alt>+l'  # easy to remember for "launcher"
+            hotkey_listener = keyboard.GlobalHotKeys({hotkey: _force_show_dropdown})
+            hotkey_listener.start()
+            # Keep alive
+            app._hotkey_listener = hotkey_listener
+            print(f"Hotkey registered: {hotkey} to show launcher list")
+        except Exception as exc:
+            print(f"Warning: failed to register hotkey {hotkey}: {exc}")
+    else:
+        print("pynput not available; hotkey support disabled (install pynput)")
+
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):
         cfg_mgr.update_settings(position_x=x, position_y=y)
@@ -247,13 +261,9 @@ def main() -> int:
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()
-    ensure_topmost(trigger)
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.
-
-    # Optional: bring to front briefly on start (non-aggressive)
-    QTimer.singleShot(300, lambda: ensure_topmost(trigger))
 
     # Run
     return app.exec()

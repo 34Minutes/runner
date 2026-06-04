@@ -14,7 +14,6 @@ from PySide6.QtGui import QAction, QMouseEvent, QPaintEvent, QPainter, QPen, QCo
 from PySide6.QtWidgets import QWidget, QMenu, QApplication
 
 from ..config import AppConfig, Launcher
-from ..utils.windows import ensure_topmost
 
 
 class TriggerWidget(QWidget):
@@ -35,9 +34,7 @@ class TriggerWidget(QWidget):
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
-            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
@@ -54,8 +51,6 @@ class TriggerWidget(QWidget):
 
         # Context menu actions
         self._create_actions()
-
-        self._suppress_hover = False
 
         # Move to saved position (clamped later by caller if needed)
         self.move(config.settings.position_x, config.settings.position_y)
@@ -78,17 +73,12 @@ class TriggerWidget(QWidget):
         Using customContextMenuPolicy + this slot is more reliable on macOS
         (and with frameless/Tool windows) than overriding contextMenuEvent.
         """
-        self.ensure_on_top()
-        self._suppress_hover = True
         menu = QMenu(self)
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
         menu.addSeparator()
         menu.addAction(self._action_exit)
-        try:
-            menu.exec(self.mapToGlobal(pos))
-        finally:
-            self._suppress_hover = False
+        menu.exec(self.mapToGlobal(pos))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
@@ -121,17 +111,10 @@ class TriggerWidget(QWidget):
             super().mouseReleaseEvent(event)
 
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
-        if getattr(self, '_suppress_hover', False):
-            super().enterEvent(event)
-            return
-        self.ensure_on_top()
         self.hover_enter.emit()
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:  # type: ignore[override]
-        if getattr(self, '_suppress_hover', False):
-            super().leaveEvent(event)
-            return
         self.hover_leave.emit()
         super().leaveEvent(event)
 
@@ -166,6 +149,3 @@ class TriggerWidget(QWidget):
             self._config.settings.trigger_width,
             self._config.settings.trigger_height,
         )
-
-    def ensure_on_top(self) -> None:
-        ensure_topmost(self)
