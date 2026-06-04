@@ -158,8 +158,10 @@ def main() -> int:
     def do_hide():
         dropdown.start_hide_animation()
         # When the list goes away, re-assert topmost on the trigger
-        # (only after our own UI action, not constantly).
-        QTimer.singleShot(150, lambda: ensure_topmost(trigger))
+        # (only after our own UI action, not constantly). On macOS we
+        # avoid this to prevent focus/input issues; hover will bring it forward.
+        if sys.platform == "win32":
+            QTimer.singleShot(150, lambda: ensure_topmost(trigger))
 
     hide_timer.timeout.connect(do_hide)
 
@@ -203,7 +205,8 @@ def main() -> int:
             # After launching something (which often brings another app to the front),
             # make sure our small trigger stays on top.
             dropdown.force_hide()
-            ensure_topmost(trigger)
+            if sys.platform == "win32":
+                ensure_topmost(trigger)
 
     dropdown.launch_requested.connect(on_launch)
     dropdown.manage_requested.connect(lambda: show_manager_dialog())
@@ -244,7 +247,6 @@ def main() -> int:
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()
-    trigger.raise_()
     ensure_topmost(trigger)
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
