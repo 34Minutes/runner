@@ -23,8 +23,8 @@ def ensure_topmost(widget: Optional[QWidget]) -> None:
 
     # Always try Qt level
     widget.raise_()
-    # activateWindow can help bring it forward in some cases
-    widget.activateWindow()
+    # Note: we avoid activateWindow() here because the trigger has
+    # WindowDoesNotAcceptFocus; the native TOPMOST call is what really matters.
 
     if sys.platform != "win32":
         return
