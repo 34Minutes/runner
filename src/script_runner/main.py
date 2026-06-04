@@ -124,7 +124,6 @@ def main() -> int:
         except Exception:
             test_quit_ms = 1500
         if test_quit_ms > 0:
-            from PySide6.QtCore import QTimer
             QTimer.singleShot(test_quit_ms, app.quit)
 
     cfg_mgr = ConfigManager()
