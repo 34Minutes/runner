@@ -66,8 +66,11 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
                 cfg: ConfigManager) -> QSystemTrayIcon:
     """Create and return a system tray icon with useful menu."""
     tray = QSystemTrayIcon()
-    # Use a simple built-in icon or provide one later
-    tray.setIcon(QIcon.fromTheme("applications-system") or QIcon())
+    icon = QIcon.fromTheme("applications-system")
+    if icon.isNull():
+        # Fallback: use the trigger widget as a pixmap source (the arrow looks decent)
+        icon = QIcon(trigger.grab())
+    tray.setIcon(icon)
 
     menu = QMenu()
 
