@@ -157,9 +157,9 @@ def main() -> int:
 
     def do_hide():
         dropdown.start_hide_animation()
-        # When the list goes away, re-assert that the trigger is topmost.
-        # Use a short delay so the animation has time to finish.
-        QTimer.singleShot(120, lambda: ensure_topmost(trigger))
+        # When the list goes away, re-assert topmost on the trigger
+        # (only after our own UI action, not constantly).
+        QTimer.singleShot(150, lambda: ensure_topmost(trigger))
 
     hide_timer.timeout.connect(do_hide)
 
@@ -247,27 +247,11 @@ def main() -> int:
     trigger.raise_()
     ensure_topmost(trigger)
 
-    # Aggressively keep the trigger on top even when other applications are activated
-    # or after launching processes. The periodic timer + focus listener helps recover
-    # the topmost state (common gotcha with frameless + Tool + StaysOnTopHint on Windows).
-    def _keep_topmost():
-        if trigger.isVisible():
-            ensure_topmost(trigger)
-
-    topmost_timer = QTimer()
-    topmost_timer.timeout.connect(_keep_topmost)
-    topmost_timer.start(2000)  # re-enforce every 2s
-    # Keep timer alive (attach to trigger)
-    trigger._topmost_timer = topmost_timer
-
-    app.focusChanged.connect(lambda _old, _new: _keep_topmost())
-
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.
 
-    # Optional: bring to front briefly on start
-    QTimer.singleShot(250, lambda: trigger.raise_())
-    QTimer.singleShot(900, _keep_topmost)
+    # Optional: bring to front briefly on start (non-aggressive)
+    QTimer.singleShot(300, lambda: ensure_topmost(trigger))
 
     # Run
     return app.exec()
