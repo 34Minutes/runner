@@ -26,9 +26,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
+# PyInstaller build artifacts
 *.manifest
-*.spec
+# Keep our hand-written .spec in the repo for reproducible Windows builds
+# *.spec   <--- commented so our script-runner.spec is tracked
 
 # Installer logs
 pip-log.txt
