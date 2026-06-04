@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QPointF
-from PySide6.QtGui import QCursor, QAction, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
+from PySide6.QtGui import QAction, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtWidgets import QWidget, QMenu, QApplication
 
 from ..config import AppConfig, Launcher
@@ -45,6 +45,12 @@ class TriggerWidget(QWidget):
             config.settings.trigger_height,
         )
 
+        # Use custom context menu policy. Overriding contextMenuEvent can cause
+        # the menu to immediately close on some platforms (especially macOS)
+        # with frameless/Tool windows.
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
         # Context menu actions
         self._create_actions()
 
@@ -64,13 +70,17 @@ class TriggerWidget(QWidget):
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
 
-    def contextMenuEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+    def _show_context_menu(self, pos: QPoint) -> None:
+        """Show the context menu at the given local position.
+        Using customContextMenuPolicy + this slot is more reliable on macOS
+        (and with frameless/Tool windows) than overriding contextMenuEvent.
+        """
         menu = QMenu(self)
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
         menu.addSeparator()
         menu.addAction(self._action_exit)
-        menu.exec(QCursor.pos())
+        menu.exec(self.mapToGlobal(pos))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:

@@ -9,6 +9,8 @@ Fields per spec:
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -77,8 +79,15 @@ class AddEditDialog(QDialog):
         self._name_edit.setFocus()
 
     def _on_browse(self) -> None:
-        # Common filters for executables, scripts, etc.
-        filt = "Executables and Scripts (*.exe *.bat *.cmd *.ps1 *.py *.lnk);;All Files (*.*)"
+        # Cross-platform filters. On macOS we need to allow .app bundles
+        # (which are directories but appear selectable in file dialogs).
+        if sys.platform == "darwin":
+            filt = "Applications (*.app);;All Files (*.*)"
+        elif sys.platform == "win32":
+            filt = "Executables and Scripts (*.exe *.bat *.cmd *.ps1 *.py *.lnk);;All Files (*.*)"
+        else:
+            filt = "Executables and Scripts (*.app *.py *.sh *.bin);;All Files (*.*)"
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Select program or script", "", filt
         )

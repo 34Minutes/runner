@@ -70,6 +70,16 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
             opener = "open" if sys.platform == "darwin" else "xdg-open"
             return subprocess.Popen([opener, command], cwd=cwd)
 
+    # macOS .app bundles (selected via the file dialog)
+    if sys.platform == "darwin" and command.lower().endswith(".app"):
+        # Use the "open" command to launch the bundle properly.
+        # Supports arguments via --args
+        open_args = ["open", "-a", command]
+        if args_list:
+            open_args.append("--args")
+            open_args.extend(args_list)
+        return subprocess.Popen(open_args, cwd=cwd)
+
     # Build the argv
     if _is_python_script(command) and not command.lower().startswith(("python", "py ")):
         # Try to use the Windows Python launcher if available, else fall back to sys.executable
