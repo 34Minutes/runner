@@ -52,7 +52,7 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Script Runner — hover to open launcher list\nRight-click for menu")
+        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for Add / Manage / Exit")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)

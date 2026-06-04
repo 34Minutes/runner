@@ -43,15 +43,6 @@ class ManagerDialog(QDialog):
         self._btn_down = QPushButton("Move Down")
         self._btn_add = QPushButton("Add New...")
 
-        btn_layout = QVBoxLayout()
-        btn_layout.addWidget(self._btn_edit)
-        btn_layout.addWidget(self._btn_delete)
-        btn_layout.addSpacing(12)
-        btn_layout.addWidget(self._btn_up)
-        btn_layout.addWidget(self._btn_down)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self._btn_add)
-
         self._connect_signals()
         self._refresh_list()
         self._rebuild_layout()
