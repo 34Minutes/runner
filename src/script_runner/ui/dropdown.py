@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget as QW,
     QFrame,
     QLabel,
+    QPushButton,
 )
 
 from ..config import AppConfig, Launcher
@@ -25,6 +26,7 @@ class DropdownPanel(QWidget):
     """The expanding list of launch buttons. Animated show/hide."""
 
     launch_requested = Signal(Launcher)  # emitted when a button is clicked
+    manage_requested = Signal()  # open the full manager dialog
     hover_enter = Signal()
     hover_leave = Signal()
 
@@ -108,6 +110,18 @@ class DropdownPanel(QWidget):
             btn.clicked.connect(lambda checked=False, l=launcher: self._on_button_clicked(l))
             self._button_layout.addWidget(btn)
             self._buttons.append(btn)
+
+        # Always add a "Manage..." entry at the bottom for discoverability
+        if launchers:
+            self._button_layout.addSpacing(6)
+        manage_btn = QPushButton("Manage launchers...")
+        manage_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #7aa2f7; border: none; padding: 4px; font-size: 11px; }"
+            "QPushButton:hover { text-decoration: underline; }"
+        )
+        manage_btn.clicked.connect(self.manage_requested.emit)
+        self._button_layout.addWidget(manage_btn)
+        self._buttons.append(manage_btn)
 
         # Add a small hint at bottom if empty
         if not launchers:

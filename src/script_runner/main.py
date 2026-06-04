@@ -206,6 +206,7 @@ def main() -> int:
             ensure_topmost(trigger)
 
     dropdown.launch_requested.connect(on_launch)
+    dropdown.manage_requested.connect(lambda: show_manager_dialog())
 
     # Add dialog wiring
     def show_add_dialog(existing: Launcher | None = None):
@@ -220,6 +221,7 @@ def main() -> int:
                 dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
 
     def show_manager_dialog():
+        dropdown.force_hide()
         dlg = ManagerDialog(cfg_mgr, trigger)
         if dlg.exec():
             # Manager saves its own changes; just refresh the dropdown list
