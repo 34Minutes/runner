@@ -389,27 +389,18 @@ class DropdownPanel(QWidget):
         self.show()
         self.raise_()
         if self._anchor_trigger is not None:
-            # Re-apply the computed position *after* show(). On macOS with Frameless+Tool windows,
-            # move() before the native window is created by show() can be ignored or reset; doing it
-            # right after ensures the dropdown ends up at the correct y relative to the trigger.
             self.position_adjacent(self._anchor_trigger)
-            self.raise_()  # re-raise list after possible re-position
-        self.setFocus(Qt.FocusReason.OtherFocusReason)  # allow Esc key
+            self.raise_()
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
-        # Ensure we have an accurate target height (buttons + proper spacings) before
-        # capturing end_h for the grow animation. Prevents growing to a squished/too-small value.
         self._update_height_for_content()
 
-        # Relax the mins we put on the hosted scroll/content so the frame can start the
-        # animation from a small height (8) without the child's minSize fighting the layout.
         self._button_container.setMinimumHeight(0)
         self._scroll.setMinimumHeight(0)
 
         start_h = 8
         end_h = self._frame.height()
 
-        # Decide starting geometry based on grow direction so the panel "grows away"
-        # from the screen edge while staying attached to the arrow.
         grow_from_top = getattr(self, "_grow_from_top", True)
         fixed_edge = getattr(self, "_fixed_edge_y", self.y())
 
@@ -434,8 +425,6 @@ class DropdownPanel(QWidget):
             pos_anim.setEndValue(QPoint(self.x(), final_y))
             pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        # We animate the height of the frame + opacity of whole widget
-        # (and optionally the pos for above case)
         self._frame.setMaximumHeight(end_h)
 
         anim = QPropertyAnimation(self, b"windowOpacity", self)
@@ -473,8 +462,6 @@ class DropdownPanel(QWidget):
         if not self.isVisible():
             return
 
-        # Relax content mins so the shrink animation on the frame can go all the way down
-        # (otherwise child's minSize may prevent the layout from making the frame as small as 6).
         self._button_container.setMinimumHeight(0)
         self._scroll.setMinimumHeight(0)
 
@@ -493,8 +480,6 @@ class DropdownPanel(QWidget):
         height_anim.setEndValue(6)
         height_anim.setEasingCurve(QEasingCurve.Type.InCubic)
 
-        # For "above" mode we also animate the position so the bottom edge stays fixed
-        # to the arrow while the panel shrinks upward.
         pos_anim = None
         grow_from_top = getattr(self, "_grow_from_top", True)
         if not grow_from_top:
@@ -529,7 +514,6 @@ class DropdownPanel(QWidget):
         self._search_edit.clear()
         self.hide()
         self.setWindowOpacity(1.0)
-        # Reset to default "below" behavior for next time.
         self._grow_from_top = True
         self._fixed_edge_y = 0
         self._grow_direction = "below"

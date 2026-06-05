@@ -201,9 +201,6 @@ def main() -> int:
         dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
         if not dropdown.isVisible():
             dropdown.start_show_animation()
-        # Keep the arrow handle above the dropdown list in the window stack.
-        # The dropdown does raise_() when it shows; we re-raise the trigger so
-        # its bottom (the pill/arrow) is not covered by the list's top border/frame.
         trigger.raise_()
         dropdown.stackUnder(trigger)
 
@@ -271,11 +268,9 @@ def main() -> int:
             if not dropdown.isVisible():
                 dropdown.start_show_animation()
             else:
-                # already visible (e.g. re-apply after manager toggle), just make sure height is full
                 dropdown.update_height_for_content()
-            # Keep the arrow handle above the dropdown list (see on_trigger_enter for rationale).
             trigger.raise_()
-            dropdown.stackUnder(trigger)  # explicit: force list window below the arrow handle
+            dropdown.stackUnder(trigger)
         else:
             dropdown.force_hide()
 
@@ -337,14 +332,9 @@ def main() -> int:
     trigger.show()
     trigger.raise_()
 
-    # Defer the initial apply_pinned_state (and thus any position_adjacent + show/anim of dropdown)
-    # until after the event loop has processed the trigger.show(). This ensures that
-    # trigger.width()/height() and mapToGlobal() reflect any persisted custom trigger size
-    # (from previous resizes) rather than a default size that may be reported immediately
-    # after construction/show on some platforms / with frameless widgets.
-    # Prevents the dropdown from being placed too high, causing the arrow to appear
-    # visually "under" the dropdown list on startup (especially with pinned_open=True
-    # after the trigger was previously resized larger/smaller than the default).
+    # Defer initial positioning until after the event loop processes show().
+    # Ensures trigger geometry (from persisted size) is realized before dropdown
+    # calculates its position relative to it (important for custom sizes + pinned mode).
     QTimer.singleShot(0, apply_pinned_state)
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.

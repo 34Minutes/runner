@@ -275,10 +275,8 @@ class TriggerWidget(QWidget):
 
     def showEvent(self, event: QEvent) -> None:  # type: ignore[override]
         super().showEvent(event)
-        # Re-apply the (possibly persisted custom) size from settings once the
-        # top-level window is realized. This ensures .width()/.height() and
-        # mapToGlobal return the correct values for initial dropdown positioning
-        # (avoids the arrow appearing under the list on startup after resizes).
+        # Re-apply persisted size from settings once the native window is realized.
+        # Ensures correct geometry for dropdown positioning relative to the trigger.
         self.resize(
             self._config.settings.trigger_width,
             self._config.settings.trigger_height,
