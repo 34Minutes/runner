@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (planning) Per-launcher icons (auto + custom).
 
 ### Changed
+- Development version bumped to 1.0.0a3 post ALPHA_1.0.1 tag.
 
 ### Fixed
 
