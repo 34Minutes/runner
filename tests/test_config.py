@@ -86,3 +86,65 @@ def test_reorder():
     mgr.reorder_launchers([c.id, a.id, b.id])
     names = [l.name for l in mgr.config.launchers]
     assert names == ["C", "A", "B"]
+
+
+# --- show_filter_box + pinned_open + defaults / migration (post BETA toggle feature) ---
+
+def test_settings_defaults_include_filter_box_and_pinned():
+    s = Settings()
+    assert s.show_filter_box is True  # default so existing users see the box
+    assert s.pinned_open is False
+
+
+def test_appconfig_show_filter_box_roundtrip():
+    cfg = AppConfig()
+    cfg.settings.show_filter_box = False
+    cfg.settings.pinned_open = True
+    d = cfg.to_dict()
+    assert d["settings"]["show_filter_box"] is False
+    assert d["settings"]["pinned_open"] is True
+
+    cfg2 = AppConfig.from_dict(d)
+    assert cfg2.settings.show_filter_box is False
+    assert cfg2.settings.pinned_open is True
+
+
+def test_old_config_without_show_filter_box_defaults_true():
+    """Old persisted configs (pre filter toggle) should default the new field to True."""
+    old = {
+        "version": 1,
+        "launchers": [],
+        "settings": {
+            "dropdown_width": 280,
+            "trigger_width": 36,
+            "trigger_height": 36,
+            "animation_duration_ms": 120,
+            "pinned_open": False,
+            "position_x": 100,
+            "position_y": 100,
+            # deliberately no "show_filter_box"
+        },
+    }
+    cfg = AppConfig.from_dict(old)
+    assert cfg.settings.show_filter_box is True  # graceful default
+
+
+def test_configmanager_update_settings_for_filter_and_pin(tmp_path, monkeypatch):
+    test_dir = tmp_path / "ScriptRunnerTestFilter"
+    monkeypatch.setattr(
+        "script_runner.config.platformdirs.user_config_dir",
+        lambda *a, **k: str(test_dir)
+    )
+    mgr = ConfigManager()
+    c = mgr.config
+    c.launchers.clear()
+    mgr.save(c)
+
+    mgr.update_settings(show_filter_box=False, pinned_open=True)
+    assert mgr.config.settings.show_filter_box is False
+    assert mgr.config.settings.pinned_open is True
+
+    # persist + reload
+    mgr2 = ConfigManager()
+    assert mgr2.config.settings.show_filter_box is False
+    assert mgr2.config.settings.pinned_open is True
