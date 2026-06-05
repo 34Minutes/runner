@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QLineEdit,
+    QApplication,
 )
 
 from ..config import AppConfig, Launcher
@@ -38,6 +39,9 @@ class DropdownPanel(QWidget):
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._do_hide)
         self._anchor_trigger: QWidget | None = None  # for re-positioning after show() on some platforms
+        self._grow_from_top: bool = True
+        self._fixed_edge_y: int = 0
+        self._grow_direction: str = "below"
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -104,8 +108,24 @@ class DropdownPanel(QWidget):
 
         self._hide_timer.setInterval(140)  # small grace period
 
+        # Respect initial show_filter_box setting
+        self.refresh_filter_visibility()
+
     def set_width(self, width: int) -> None:
         self.setFixedWidth(width)
+
+    def refresh_filter_visibility(self) -> None:
+        """Sync whether the filter search box is shown based on current settings.
+        Safe to call after the setting is toggled in Manage. Will resize if the
+        dropdown is currently visible.
+        """
+        show = getattr(self._config.settings, "show_filter_box", True)
+        if show:
+            self._search_edit.show()
+        else:
+            self._search_edit.hide()
+        if self.isVisible():
+            self._update_height_for_content()
 
     def update_height_for_content(self) -> None:
         """Recompute and apply the correct height for the current buttons (public)."""
@@ -163,8 +183,17 @@ class DropdownPanel(QWidget):
         placed with ~20px steps; their minHeight=28 then causes overlaps/squish
         (gaps of -8 instead of +2).
         """
+        # Ensure search visibility matches the latest setting (e.g. toggled from Manage while list open)
+        show = getattr(self._config.settings, "show_filter_box", True)
+        if show != self._search_edit.isVisible():
+            if show:
+                self._search_edit.show()
+            else:
+                self._search_edit.hide()
+
         self._button_container.adjustSize()
-        self._search_edit.adjustSize()
+        if self._search_edit.isVisible():
+            self._search_edit.adjustSize()
 
         # Explicit sum: robust even when hosted layout reports wrong aggregates.
         inner_h = 0
@@ -188,8 +217,12 @@ class DropdownPanel(QWidget):
 
         m = self._layout.contentsMargins()
         frame_chrome = m.top() + m.bottom()
-        layout_sp = self._layout.spacing()  # between search and scroll
-        search_h = self._search_edit.height() or self._search_edit.sizeHint().height() or 22
+        layout_sp = 0
+        search_h = 0
+        if self._search_edit.isVisible():
+            self._search_edit.adjustSize()
+            search_h = self._search_edit.height() or self._search_edit.sizeHint().height() or 22
+            layout_sp = self._layout.spacing()  # between search and scroll
         # The button_layout (inside container inside scroll) observes an ~8px top inset
         # (first button y≈8). To give the VBoxLayout a rect tall enough for mins + its
         # own spacing(2), we need extra on top of the pure inner_h.
@@ -215,21 +248,93 @@ class DropdownPanel(QWidget):
         self.launch_requested.emit(launcher)
         # Note: hide decision (respecting pinned state) is now handled in main.py's on_launch
 
-    def position_below(self, trigger: QWidget) -> None:
-        """Position this panel directly below the trigger widget."""
-        self._anchor_trigger = trigger  # remember for re-apply after show()
-        trig_h = trigger.height()
-        trig_w = trigger.width()
-        pos = trigger.mapToGlobal(QPoint(0, trig_h))
-        # Slight horizontal centering or left-align
-        x = pos.x() + (trig_w - self.width()) // 2
-        # Slight vertical overlap (negative y) so the trigger's bottom rounded pill
-        # and arrow tuck over the top border of the dropdown. When we call
-        # trigger.raise_() after showing the list (in main.py), the arrow draws
-        # on top, avoiding the "arrow behind list" look.
+    def position_adjacent(self, trigger: QWidget) -> None:
+        """Position the dropdown relative to the trigger.
+
+        Default: below the arrow, horizontally centered on it.
+
+        If not enough room below (near bottom of screen), flip to above.
+
+        Horizontally shift left/right as needed so the dropdown stays fully on-screen.
+
+        Sets internal flags (_grow_from_top, _fixed_edge_y, _grow_direction) so that
+        the show/hide animations grow/shrink *away* from the screen edge (attached to the arrow).
+        """
+        self._anchor_trigger = trigger
+
+        # Make sure we know our final content size for fitting calculations.
+        self._update_height_for_content()
+
+        target_w = self.width()
+        target_h = self._frame.height() or 120
+
+        # Trigger in global coordinates.
+        trig_pos = trigger.mapToGlobal(QPoint(0, 0))
+        trig_rect = QRect(trig_pos, trigger.size())
+
+        # Available screen area (excludes taskbar/dock etc.).
+        screen = QApplication.screenAt(trig_pos) or QApplication.primaryScreen()
+        avail = screen.availableGeometry()
+
         overlap = 3
-        target_y = pos.y() - overlap
-        self.move(x, target_y)
+
+        # --- Preferred below + centered ---
+        below_y = trig_rect.bottom() - overlap
+        center_x = trig_rect.left() + (trig_rect.width() - target_w) // 2
+        below_rect = QRect(center_x, below_y, target_w, target_h)
+
+        # Horizontal clamp for below case (prefer left-align if dropdown wider than screen)
+        if below_rect.right() > avail.right():
+            below_rect.moveRight(avail.right())
+        if below_rect.left() < avail.left():
+            below_rect.moveLeft(avail.left())
+
+        space_below = avail.bottom() - trig_rect.bottom()
+        fits_below = below_rect.bottom() <= avail.bottom()
+
+        # --- Alternative above ---
+        above_y = trig_rect.top() + overlap - target_h
+        above_rect = QRect(center_x, above_y, target_w, target_h)
+
+        # Horizontal clamp for above case (prefer left-align if dropdown wider than screen)
+        if above_rect.right() > avail.right():
+            above_rect.moveRight(avail.right())
+        if above_rect.left() < avail.left():
+            above_rect.moveLeft(avail.left())
+
+        space_above = trig_rect.top() - avail.top()
+        fits_above = above_rect.top() >= avail.top()
+
+        # Choose direction. Prefer below. Fall back to the side with more space.
+        if fits_below or (not fits_above and space_below >= space_above):
+            direction = "below"
+            final_rect = below_rect
+        else:
+            direction = "above"
+            final_rect = above_rect
+
+        # Final vertical clamp (extreme cases: huge list or tiny screen)
+        if final_rect.top() < avail.top():
+            final_rect.moveTop(avail.top())
+        if final_rect.bottom() > avail.bottom():
+            final_rect.moveBottom(avail.bottom())
+
+        # Apply position
+        self.move(final_rect.topLeft())
+
+        # Compute edge from (possibly clamped) rect so the growth origin matches
+        # the actual placed position. This is used by the show/hide animations.
+        if direction == "below":
+            fixed_edge_y = final_rect.top()
+            grow_from_top = True
+        else:
+            fixed_edge_y = final_rect.bottom()
+            grow_from_top = False
+
+        # Store for animations so they expand/contract away from the edge.
+        self._grow_direction = direction
+        self._fixed_edge_y = fixed_edge_y
+        self._grow_from_top = grow_from_top
 
     # --- Hover handling (combined area: trigger + this panel) ---
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
@@ -266,7 +371,7 @@ class DropdownPanel(QWidget):
             self.show()
             self.raise_()  # bring list forward (caller will raise trigger after to keep arrow on top)
             if self._anchor_trigger is not None:
-                self.position_below(self._anchor_trigger)
+                self.position_adjacent(self._anchor_trigger)
                 self.raise_()
             self.setWindowOpacity(1.0)
             # Clear anim constraints so our fixed target from _update rules
@@ -287,7 +392,7 @@ class DropdownPanel(QWidget):
             # Re-apply the computed position *after* show(). On macOS with Frameless+Tool windows,
             # move() before the native window is created by show() can be ignored or reset; doing it
             # right after ensures the dropdown ends up at the correct y relative to the trigger.
-            self.position_below(self._anchor_trigger)
+            self.position_adjacent(self._anchor_trigger)
             self.raise_()  # re-raise list after possible re-position
         self.setFocus(Qt.FocusReason.OtherFocusReason)  # allow Esc key
 
@@ -303,9 +408,35 @@ class DropdownPanel(QWidget):
         start_h = 8
         end_h = self._frame.height()
 
+        # Decide starting geometry based on grow direction so the panel "grows away"
+        # from the screen edge while staying attached to the arrow.
+        grow_from_top = getattr(self, "_grow_from_top", True)
+        fixed_edge = getattr(self, "_fixed_edge_y", self.y())
+
+        if grow_from_top:
+            # Below: top edge fixed at the attachment point. Grow downward.
+            self.move(self.x(), fixed_edge)
+            self._frame.setFixedHeight(start_h)
+            self.setWindowOpacity(0.0)
+            pos_anim = None
+        else:
+            # Above: bottom edge fixed at the attachment point. Grow upward.
+            # Start small with its bottom at the fixed edge.
+            init_y = fixed_edge - start_h
+            self.move(self.x(), init_y)
+            self._frame.setFixedHeight(start_h)
+            self.setWindowOpacity(0.0)
+            # We also need to animate the y position upward as height grows.
+            final_y = fixed_edge - end_h
+            pos_anim = QPropertyAnimation(self, b"pos", self)
+            pos_anim.setDuration(self._config.settings.animation_duration_ms)
+            pos_anim.setStartValue(QPoint(self.x(), init_y))
+            pos_anim.setEndValue(QPoint(self.x(), final_y))
+            pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
         # We animate the height of the frame + opacity of whole widget
-        self._frame.setFixedHeight(start_h)
-        self.setWindowOpacity(0.0)
+        # (and optionally the pos for above case)
+        self._frame.setMaximumHeight(end_h)
 
         anim = QPropertyAnimation(self, b"windowOpacity", self)
         anim.setDuration(self._config.settings.animation_duration_ms)
@@ -318,9 +449,6 @@ class DropdownPanel(QWidget):
         height_anim.setStartValue(start_h)
         height_anim.setEndValue(end_h)
         height_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        # Also set maximum so it doesn't grow during anim
-        self._frame.setMaximumHeight(end_h)
 
         def on_finished():
             self._frame.setMinimumHeight(0)
@@ -336,6 +464,8 @@ class DropdownPanel(QWidget):
         self._animation = anim  # keep ref
         anim.start()
         height_anim.start()
+        if pos_anim is not None:
+            pos_anim.start()
 
     def start_hide_animation(self) -> None:
         if self._config.settings.pinned_open:
@@ -363,6 +493,20 @@ class DropdownPanel(QWidget):
         height_anim.setEndValue(6)
         height_anim.setEasingCurve(QEasingCurve.Type.InCubic)
 
+        # For "above" mode we also animate the position so the bottom edge stays fixed
+        # to the arrow while the panel shrinks upward.
+        pos_anim = None
+        grow_from_top = getattr(self, "_grow_from_top", True)
+        if not grow_from_top:
+            fixed_bottom = getattr(self, "_fixed_edge_y", self.y() + current_h)
+            curr_y = self.y()
+            end_y = fixed_bottom - 6
+            pos_anim = QPropertyAnimation(self, b"pos", self)
+            pos_anim.setDuration(int(self._config.settings.animation_duration_ms * 0.7))
+            pos_anim.setStartValue(QPoint(self.x(), curr_y))
+            pos_anim.setEndValue(QPoint(self.x(), end_y))
+            pos_anim.setEasingCurve(QEasingCurve.Type.InCubic)
+
         def on_finished():
             self._search_edit.clear()
             self.hide()
@@ -376,6 +520,8 @@ class DropdownPanel(QWidget):
         self._animation = anim
         anim.start()
         height_anim.start()
+        if pos_anim is not None:
+            pos_anim.start()
 
     def force_hide(self) -> None:
         """Immediate hide (used on launch or escape)."""
@@ -383,6 +529,10 @@ class DropdownPanel(QWidget):
         self._search_edit.clear()
         self.hide()
         self.setWindowOpacity(1.0)
+        # Reset to default "below" behavior for next time.
+        self._grow_from_top = True
+        self._fixed_edge_y = 0
+        self._grow_direction = "below"
 
     def keyPressEvent(self, event):  # type: ignore[override]
         if event.key() == Qt.Key.Key_Escape:

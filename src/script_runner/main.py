@@ -95,7 +95,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
         dropdown.rebuild_buttons(cfg.get_enabled_launchers())
         trigger.update_size_from_settings()
         if cfg.config.settings.pinned_open:
-            dropdown.position_below(trigger)
+            dropdown.position_adjacent(trigger)
             dropdown.ensure_visible_and_sized()
         # reposition if needed
     act_reload.triggered.connect(do_reload)
@@ -117,7 +117,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     def on_tray_activated(reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             # Force show the dropdown near trigger
-            dropdown.position_below(trigger)
+            dropdown.position_adjacent(trigger)
             dropdown.rebuild_buttons(cfg.get_enabled_launchers())
             if cfg.config.settings.pinned_open:
                 dropdown.ensure_visible_and_sized()
@@ -171,6 +171,7 @@ def main() -> int:
 
     # Initial button population
     dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+    dropdown.refresh_filter_visibility()
 
     # Hover coordination
     # We need to keep the dropdown visible while mouse is in *either* trigger or dropdown.
@@ -196,7 +197,7 @@ def main() -> int:
 
     def on_trigger_enter():
         cancel_hide()  # cancels both main timer and dropdown's internal timer
-        dropdown.position_below(trigger)
+        dropdown.position_adjacent(trigger)
         dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
         if not dropdown.isVisible():
             dropdown.start_show_animation()
@@ -264,7 +265,7 @@ def main() -> int:
     def apply_pinned_state():
         pinned = cfg_mgr.config.settings.pinned_open
         if pinned:
-            dropdown.position_below(trigger)
+            dropdown.position_adjacent(trigger)
             dropdown.cancel_hide()
             dropdown.update_height_for_content()
             if not dropdown.isVisible():
@@ -279,9 +280,7 @@ def main() -> int:
             dropdown.force_hide()
 
     def show_manager_dialog():
-        def on_pinned_changed(checked):
-            apply_pinned_state()
-        dlg = ManagerDialog(cfg_mgr, trigger, pinned_changed_callback=on_pinned_changed)
+        dlg = ManagerDialog(cfg_mgr, trigger)
         dlg.exec()
         # always rebuild after manager (launchers may have changed) and apply pin state
         dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
@@ -290,11 +289,28 @@ def main() -> int:
     trigger.request_add.connect(lambda: show_add_dialog())
     trigger.request_manage.connect(lambda: show_manager_dialog())
 
+    # Connect the quick toggles from the arrow's right-click menu
+    def on_pin_toggled(checked):
+        cfg_mgr.update_settings(pinned_open=checked)
+        apply_pinned_state()
+
+    trigger.pin_toggled.connect(on_pin_toggled)
+
+    def on_filter_toggled(checked):
+        cfg_mgr.update_settings(show_filter_box=checked)
+        dropdown.refresh_filter_visibility()
+        if dropdown.isVisible():
+            dropdown.update_height_for_content()
+            if cfg_mgr.config.settings.pinned_open:
+                dropdown.position_adjacent(trigger)
+
+    trigger.filter_toggled.connect(on_filter_toggled)
+
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):
         cfg_mgr.update_settings(position_x=x, position_y=y)
         if cfg_mgr.config.settings.pinned_open:
-            dropdown.position_below(trigger)
+            dropdown.position_adjacent(trigger)
             dropdown.ensure_visible_and_sized()
             trigger.raise_()
             dropdown.stackUnder(trigger)
@@ -304,7 +320,7 @@ def main() -> int:
     def save_size(w: int, h: int):
         cfg_mgr.update_settings(trigger_width=w, trigger_height=h)
         if cfg_mgr.config.settings.pinned_open:
-            dropdown.position_below(trigger)
+            dropdown.position_adjacent(trigger)
             dropdown.ensure_visible_and_sized()
             trigger.raise_()
             dropdown.stackUnder(trigger)
@@ -321,7 +337,7 @@ def main() -> int:
     trigger.show()
     trigger.raise_()
 
-    # Defer the initial apply_pinned_state (and thus any position_below + show/anim of dropdown)
+    # Defer the initial apply_pinned_state (and thus any position_adjacent + show/anim of dropdown)
     # until after the event loop has processed the trigger.show(). This ensures that
     # trigger.width()/height() and mapToGlobal() reflect any persisted custom trigger size
     # (from previous resizes) rather than a default size that may be reported immediately

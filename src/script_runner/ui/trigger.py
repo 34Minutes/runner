@@ -9,11 +9,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QPointF
+from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QPointF, QTimer, QObject
 from PySide6.QtGui import QAction, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
-from PySide6.QtWidgets import QWidget, QMenu, QApplication
+from PySide6.QtWidgets import QWidget, QMenu, QApplication, QWidgetAction
 
 from ..config import AppConfig, Launcher
+from .toggle_switch import ToggleSwitch
 
 
 class TriggerWidget(QWidget):
@@ -26,6 +27,8 @@ class TriggerWidget(QWidget):
     request_add = Signal()
     request_manage = Signal()
     request_exit = Signal()
+    pin_toggled = Signal(bool)
+    filter_toggled = Signal(bool)
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -65,7 +68,7 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for Add / Manage / Exit")
+        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter — menu auto-closes on mouse leave), Add, Manage, Exit")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)
@@ -86,7 +89,60 @@ class TriggerWidget(QWidget):
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
         menu.addSeparator()
+
+        # Add the two toggles as actual sliding ToggleSwitch widgets inside the menu
+        # using QWidgetAction so the user sees the slide toggles directly in the right-click menu.
+        global_pos = self.mapToGlobal(pos)
+
+        pin_switch = ToggleSwitch("Pin dropdown open (fully expanded)")
+        pin_switch.setChecked(self._config.settings.pinned_open)
+        pin_switch.setPalette(menu.palette())  # inherit menu text color etc.
+        pin_action = QWidgetAction(menu)
+        pin_action.setDefaultWidget(pin_switch)
+        pin_switch.toggled.connect(lambda checked: self.pin_toggled.emit(checked))
+        menu.addAction(pin_action)
+
+        filter_switch = ToggleSwitch("Show filter box in dropdown")
+        filter_switch.setChecked(getattr(self._config.settings, "show_filter_box", True))
+        filter_switch.setPalette(menu.palette())
+        filter_action = QWidgetAction(menu)
+        filter_action.setDefaultWidget(filter_switch)
+        filter_switch.toggled.connect(lambda checked: self.filter_toggled.emit(checked))
+        menu.addAction(filter_action)
+
+        menu.addSeparator()
         menu.addAction(self._action_exit)
+
+        # Auto-hide the entire menu when the mouse moves away from it (no click required to dismiss).
+        # This makes the right-click menu feel lighter for the floating arrow widget.
+        # A short grace period timer prevents accidental close while moving between items.
+        hide_timer = QTimer(menu)
+        hide_timer.setSingleShot(True)
+        hide_timer.setInterval(250)
+        hide_timer.timeout.connect(menu.close)
+
+        class MenuMouseFilter(QObject):
+            def __init__(self, menu, timer):
+                super().__init__(menu)
+                self.menu = menu
+                self.timer = timer
+
+            def eventFilter(self, obj, event):
+                if obj == self.menu:
+                    if event.type() == QEvent.Leave:
+                        self.timer.start()
+                    elif event.type() == QEvent.Enter:
+                        self.timer.stop()
+                return False
+
+        mouse_filter = MenuMouseFilter(menu, hide_timer)
+        menu.installEventFilter(mouse_filter)
+        # Keep strong refs on the menu so the filter/timer aren't GC'd prematurely
+        menu._mouse_filter = mouse_filter
+        menu._hide_timer = hide_timer
+
+        # Clean up timer if menu hides for any other reason (e.g. item selection)
+        menu.aboutToHide.connect(hide_timer.stop)
 
         # Suppress hover enter/leave while the menu is open. This prevents
         # the dropdown from hiding/showing and interfering with menu selection,
@@ -98,8 +154,7 @@ class TriggerWidget(QWidget):
         # macOS for frameless/Tool windows where the context menu would otherwise
         # close immediately as soon as the user moves the mouse or releases the
         # right-click button.
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, lambda: menu.popup(self.mapToGlobal(pos)))
+        QTimer.singleShot(0, lambda: menu.popup(global_pos))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:

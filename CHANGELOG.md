@@ -12,9 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (planning) Per-launcher icons (auto + custom).
 
 ### Changed
-- Development version bumped to 1.0.0a3 post ALPHA_1.0.1 tag.
 
 ### Fixed
+
+## [BETA_1.0.0] - 2026-06-05
+
+First beta release of Script Runner.
+
+### Added
+- Toggle switches (animated sliding on/off style) replace all QCheckBox controls for settings.
+- "Pin dropdown open" and "Show filter box in dropdown" are now available directly as sliding toggle switches inside the arrow's right-click context menu (via QWidgetAction) for quick access. (The Manage dialog now focuses purely on launcher list management; the toggles remain available there too for discoverability.)
+- Right-click context menu on the arrow now auto-closes when the mouse moves away from it (250ms grace period to allow moving between items), for a lighter floating-widget UX. Includes the embedded toggle switches.
+
+### Changed
+- Smart dropdown placement relative to the trigger arrow: defaults to expanding below (with horizontal centering), but automatically flips to expand above (with upward grow animation from the arrow) when near the bottom of the screen, and/or shifts left/right to keep the full dropdown visible when near screen edges (including bottom-right corner cases etc.). The list is now guaranteed to stay on-screen no matter where the (draggable/resizable) arrow is placed.
+- Version bump to 1.0.0b1 for the beta.
+
+### Fixed
+- Various menu and toggle integration polish from alpha (text color, sizing of switches in menu, positioning robustness).
 
 ## [ALPHA_1.0.1] - 2026-06-05
 
@@ -39,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 First public alpha release.
 
 ### Added
-- Pinned "always expanded" dropdown mode (toggle "Pin dropdown open (fully expanded)" in Manage dialog). The list stays visible after launches and mouse leaves.
+- Pinned "always expanded" dropdown mode (initially toggled in Manage dialog; later moved to arrow right-click menu as direct sliding toggle). The list stays visible after launches and mouse leaves.
 - Resizable trigger widget: drag any edge or corner of the small arrow widget; size persisted in settings.
 - Robust dropdown layout and hover/pinned interactions:
   - List stays fully expanded (with proper button spacing) when pinned, even after clicking launchers or moving/resizing the trigger.
@@ -47,7 +62,7 @@ First public alpha release.
   - Post-launch behavior respects pinned state.
 - Fix button spacing in the dropdown list (was squished/zero or negative gaps due to QScrollArea + dynamic rebuild + height calc; now uses explicit child min+spacing sum + viewport chrome buffer).
 - System tray icon + menu (Add, Manage, Reload config, Exit); left-click tray also toggles list.
-- Full "Manage launchers..." dialog with edit/delete/reorder (up/down), add new, and the pinned toggle.
+- Full "Manage launchers..." dialog with edit/delete/reorder (up/down), add new. (Global toggles for pinning and filter visibility were later moved to the arrow's right-click menu.)
 - Draggable + resizable + persisted position/size for the trigger.
 - Cross-platform launching (Windows primary, solid macOS support with .app / name handling, Linux basics).
 - Test data seeds appropriate per platform (macOS uses app names like Calculator/Terminal; Windows uses calc, notepad, explorer, etc.).

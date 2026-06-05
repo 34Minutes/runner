@@ -48,6 +48,7 @@ class Settings:
     position_x: int = 100
     position_y: int = 60
     pinned_open: bool = False
+    show_filter_box: bool = True
 
 
 @dataclass

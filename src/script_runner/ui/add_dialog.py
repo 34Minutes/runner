@@ -16,12 +16,13 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QLineEdit,
-    QCheckBox,
     QPushButton,
     QFileDialog,
     QHBoxLayout,
     QWidget,
 )
+
+from .toggle_switch import ToggleSwitch
 
 from ..config import Launcher
 
@@ -48,7 +49,7 @@ class AddEditDialog(QDialog):
             self._command_edit.setPlaceholderText('e.g. brave  or  /usr/bin/brave')
         self._args_edit = QLineEdit()
         self._args_edit.setPlaceholderText('e.g. https://x.com  or  --new-window')
-        self._enabled_cb = QCheckBox("Include in dropdown list")
+        self._enabled_cb = ToggleSwitch("Include in dropdown list")
         self._enabled_cb.setChecked(True)
 
         # Browse button for command
@@ -72,8 +73,8 @@ class AddEditDialog(QDialog):
         work_layout.addWidget(self._work_dir_edit, 1)
         work_layout.addWidget(self._browse_dir_btn)
 
-        self._run_as_admin_cb = QCheckBox("Run as administrator (Windows)")
-        self._show_console_cb = QCheckBox("Show console / terminal (Windows)")
+        self._run_as_admin_cb = ToggleSwitch("Run as administrator (Windows)")
+        self._show_console_cb = ToggleSwitch("Show console / terminal (Windows)")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel

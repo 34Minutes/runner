@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QDialogButtonBox,
     QMessageBox,
-    QCheckBox,
 )
 
 from ..config import ConfigManager, Launcher
@@ -26,21 +25,16 @@ from .add_dialog import AddEditDialog
 class ManagerDialog(QDialog):
     """Dialog for managing the list of launchers (edit / delete / reorder)."""
 
-    def __init__(self, cfg: ConfigManager, parent=None, pinned_changed_callback=None):
+    def __init__(self, cfg: ConfigManager, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Launchers")
         self.resize(480, 320)
         self._cfg = cfg
         self._launchers: list[Launcher] = list(cfg.config.launchers)  # working copy
-        self._pinned_changed_callback = pinned_changed_callback
 
         self._list = QListWidget()
         self._list.setAlternatingRowColors(True)
         self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-
-        self._pinned_cb = QCheckBox("Pin dropdown open (fully expanded)")
-        self._pinned_cb.setChecked(self._cfg.config.settings.pinned_open)
-        self._pinned_cb.toggled.connect(self._on_pinned_toggled)
 
         # Side buttons
         self._btn_edit = QPushButton("Edit...")
@@ -70,7 +64,6 @@ class ManagerDialog(QDialog):
 
         # Vertical wrapper + bottom Close button
         outer = QVBoxLayout(self)
-        outer.addWidget(self._pinned_cb)
         outer.addLayout(hbox)
 
         bottom = QHBoxLayout()
@@ -89,10 +82,7 @@ class ManagerDialog(QDialog):
 
         self._list.itemDoubleClicked.connect(self._on_edit)
 
-    def _on_pinned_toggled(self, checked):
-        self._cfg.update_settings(pinned_open=checked)
-        if self._pinned_changed_callback:
-            self._pinned_changed_callback(checked)
+
 
     def _refresh_list(self):
         self._list.clear()

@@ -2,13 +2,13 @@
 
 A lightweight floating launcher for any scripts or applications. Single point to launch everything you need.
 
-## Features (ALPHA)
+## Features (BETA)
 - Tiny draggable + resizable trigger widget (downward arrow) that lives on your desktop
 - Hover the arrow → smoothly animated dropdown list of your configured launchers (with live filter/search box)
-- "Pin dropdown open" mode (in Manage) keeps the list fully visible/expanded
+- "Pin dropdown open" and "Show filter box in dropdown" quick toggles available directly in the arrow's right-click menu (also reflected in the Manage dialog for discoverability)
 - Dropdown auto-hides on mouse leave (unless pinned); hover handoff between trigger and list
 - Add / edit / manage launchers (Name, Command/Path + Browse, Parameters/Args, Working dir, Run as admin, Show console, Include in list)
-- Full Manage dialog: list view, edit, delete, reorder (Move Up/Down), add new, toggle pinned
+- Full Manage dialog: list view, edit, delete, reorder (Move Up/Down), add new
 - Launch EXEs, Python scripts, URLs, protocols, or any shell-registered application
 - Persistent config (JSON in platform user config dir, atomic writes)
 - System tray icon + menu (Add, Manage, Reload config, Exit); tray click also opens list
@@ -65,11 +65,11 @@ Note: assets/icon.ico is recommended for a nice taskbar/tray icon (currently pla
 
 ## Usage
 1. The small arrow trigger widget lives on your screen (frameless tool window, no taskbar entry by default).
-2. Hover the arrow → the list of buttons slides/fades in below it.
+2. Hover the arrow → the list of buttons slides/fades in below it (or above it with matching animation if the arrow is near the bottom of the screen). The dropdown automatically flips direction and/or shifts horizontally so it is always fully visible on screen no matter where you drag or resize the trigger (left/right/top/bottom edges or corners).
 3. Click a button to launch (list hides unless "pinned open" mode is active).
-4. Right-click the arrow (or use tray icon) → "Add new launcher..." or "Manage launchers...".
+4. Right-click the arrow (or use tray icon) → quick toggles ("Pin dropdown open", "Show filter box"), "Add new launcher...", or "Manage launchers...".
 5. Drag the widget to move; drag its edges/corners to resize (size persisted).
-6. In Manage dialog you can toggle "Pin dropdown open (fully expanded)" so the launcher list stays visible.
+6. The "Pin dropdown open" and filter visibility settings are also available in the Manage dialog (for discoverability).
 
 ## Configuration
 Stored in your platform user config dir, e.g.:
