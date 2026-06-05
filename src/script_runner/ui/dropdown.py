@@ -46,9 +46,13 @@ class DropdownPanel(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
             # Note: we intentionally allow focus for keyboard (Esc, arrows)
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # Help keep the dropdown visible on macOS when the app is backgrounded
+        # (pairs with LSUIElement + trigger's MacAlwaysShowToolWindow).
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setMouseTracking(True)
 
         # Main container frame for nice border/background

@@ -14,8 +14,8 @@ import os
 block_cipher = None
 
 a = Analysis(
-    ["src/script_runner/main.py"],
-    pathex=["src"],
+    ["scripts/launch.py"],
+    pathex=["src", "scripts"],
     binaries=[],
     datas=[],
     hiddenimports=[],

@@ -45,28 +45,42 @@ On first run it will create a config with sample launchers and position the widg
 
 This app is a desktop utility (floating trigger + tray). Clients should **not** be told to `pip install` or run from source. They need a **standalone bundled app**.
 
-PyInstaller is the supported bundler (already in dev dependencies). Nuitka is an alternative for smaller/faster Windows builds.
-
-### Building on this macOS machine (current dev platform)
-
-```bash
-# One-time: make sure you're in the dev env
-source .venv/bin/activate
-
-# Build a proper macOS .app (recommended: onedir + windowed for Qt/PySide6)
-pyinstaller --clean --noconfirm \
-  --name "Script Runner" \
-  --windowed \
-  --onedir \
-  src/script_runner/main.py
-
-# The bundle is at: dist/Script Runner.app
-
-# Optional but recommended: make it a true background/agent app (no Dock icon)
-# (only the floating arrow + system tray will be visible)
-/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "dist/Script Runner.app/Contents/Info.plist" 2>/dev/null || \
-/usr/libexec/PlistBuddy -c "Set :LSUIElement true" "dist/Script Runner.app/Contents/Info.plist"
+PyInstaller is the supported bundler (already in dev dependencies). Nuitka is an alternative for smaller/faster Windows builds (can produce even smaller single-file exes in some cases):
+```powershell
+python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-filename=ScriptRunner scripts/launch.py
 ```
+
+### Building (recommended: use the helper scripts)
+
+**On macOS (current dev machine):**
+```bash
+source .venv/bin/activate
+./scripts/build-mac.sh
+```
+This produces `dist/Script-Runner-mac.dmg` (ready for client "install" by dragging to Applications).
+
+**On Windows:**
+```powershell
+# In PowerShell, from repo root, after activating venv and `pip install -e ".[dev]"`
+.\scripts\build-windows.ps1
+```
+This produces `dist\ScriptRunner.exe` (portable single-file by default).
+
+You can also use the spec directly:
+```powershell
+pyinstaller script-runner.spec
+```
+
+**Cross-building from macOS to Windows .exe is not reliably supported** with PyInstaller + PySide6 (no Windows bootloader in the macOS PyInstaller installation, plus Qt native libs). Use a real Windows machine (or Parallels/UTM VM) or CI.
+
+### Automated builds with GitHub Actions (recommended for releases)
+Add a `.github/workflows/build.yml` (example in the repo or standard PyInstaller + Nuitka workflows). This can build Windows exe, macOS .app/.dmg, etc. on every tag.
+
+### Using the legacy spec on Windows
+```powershell
+pyinstaller script-runner.spec
+```
+The resulting `dist\ScriptRunner.exe` (or folder) is what you give users.
 
 ### Distribution to clients ("install" methods)
 
@@ -110,7 +124,7 @@ For a more "installed" feel on Windows you can later add Inno Setup / NSIS to cr
 - Config is still stored in the user's platformdirs location even in the bundled app (`~/Library/Application Support/ScriptRunner/config.json` on mac).
 - The old `script-runner.spec` is Windows-oriented and uses older PyInstaller idioms; prefer the CLI commands above for mac builds.
 
-Run `./scripts/build-mac.sh` (or the commands above) locally to produce `dist/Script-Runner-mac.dmg` for the current test-run deliverable. The `dist/` directory is gitignored.
+Run `./scripts/build-mac.sh` from the repo root (it will auto-activate `.venv` if needed, as long as you have run `pip install -e '.[dev]'` at least once). This produces `dist/Script-Runner-mac.dmg`. The `dist/` directory is gitignored.
 
 ## Usage
 1. The small arrow trigger widget lives on your screen (frameless tool window, no taskbar entry by default).

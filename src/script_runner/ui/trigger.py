@@ -26,6 +26,7 @@ class TriggerWidget(QWidget):
     size_changed = Signal(int, int)  # w, h
     request_add = Signal()
     request_manage = Signal()
+    request_reset = Signal()
     request_exit = Signal()
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
@@ -39,8 +40,12 @@ class TriggerWidget(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # Critical for macOS: keep this tool window visible even when other
+        # applications are active or this app is not the frontmost (agent app).
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setMouseTracking(True)
         self._resize_margin = 8
         self._resizing = False
@@ -68,7 +73,7 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter — menu auto-closes on mouse leave), Add, Manage, Exit")
+        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter — menu auto-closes on mouse leave), Add, Manage, Reset position & size, Exit")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)
@@ -76,6 +81,9 @@ class TriggerWidget(QWidget):
 
         self._action_manage = QAction("Manage launchers...", self)
         self._action_manage.triggered.connect(self.request_manage.emit)
+
+        self._action_reset = QAction("Reset position & size", self)
+        self._action_reset.triggered.connect(self.request_reset.emit)
 
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
@@ -88,6 +96,7 @@ class TriggerWidget(QWidget):
         menu = QMenu(self)
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
+        menu.addAction(self._action_reset)
         menu.addSeparator()
 
         # Add the two toggles as actual sliding ToggleSwitch widgets inside the menu

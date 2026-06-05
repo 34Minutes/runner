@@ -13,8 +13,9 @@ Wires together:
 from __future__ import annotations
 
 import sys
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtCore import Qt, QTimer, QPoint, QSize, QRect
+from PySide6.QtGui import QIcon, QAction, QPainter, QPen, QColor, QPixmap
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
     QSystemTrayIcon,
@@ -75,11 +76,24 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
                 cfg: ConfigManager) -> QSystemTrayIcon:
     """Create and return a system tray icon with useful menu."""
     tray = QSystemTrayIcon()
-    icon = QIcon.fromTheme("applications-system")
-    if icon.isNull():
-        # Fallback: use the trigger widget as a pixmap source (the arrow looks decent)
-        icon = QIcon(trigger.grab())
-    tray.setIcon(icon)
+
+    # Draw a crisp small downward arrow for the menu bar / tray.
+    # This looks consistent and professional without needing external icon files.
+    icon_size = 18
+    pix = QPixmap(icon_size, icon_size)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    pen = QPen(QColor("#0a84ff"), 2.0)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    m = 3
+    cx = icon_size // 2
+    p.drawLine(m, m + 1, cx, icon_size - m)
+    p.drawLine(cx, icon_size - m, icon_size - m, m + 1)
+    p.end()
+    tray.setIcon(QIcon(pix))
 
     menu = QMenu()
 
@@ -88,6 +102,9 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
 
     act_manage = QAction("Manage launchers...", menu)
     act_manage.triggered.connect(trigger.request_manage.emit)
+
+    act_reset = QAction("Reset position & size", menu)
+    act_reset.triggered.connect(trigger.request_reset.emit)
 
     act_reload = QAction("Reload config", menu)
     def do_reload():
@@ -105,6 +122,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
 
     menu.addAction(act_add)
     menu.addAction(act_manage)
+    menu.addAction(act_reset)
     menu.addAction(act_reload)
     menu.addSeparator()
     menu.addAction(act_exit)
@@ -134,6 +152,50 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
 
 def main() -> int:
     app = QApplication(sys.argv)
+
+    # --- Single instance enforcement ---
+    # If another copy is running, tell it to show/raise the trigger and exit.
+    server_name = "ScriptRunner_SingleInstance_v1"
+    socket = QLocalSocket()
+    socket.connectToServer(server_name)
+    if socket.waitForConnected(300):
+        socket.write(b"show")
+        socket.waitForBytesWritten(300)
+        socket.close()
+        return 0
+
+    # No other instance running — become the server.
+    local_server = QLocalServer()
+    # Remove any stale socket file (common on macOS after crashes)
+    QLocalServer.removeServer(server_name)
+    if not local_server.listen(server_name):
+        # Fallback: just continue (rare)
+        pass
+
+    _trigger_ref = [None]  # mutable holder so handler can see it later
+
+    def _handle_new_connection():
+        while local_server.hasPendingConnections():
+            client = local_server.nextPendingConnection()
+            client.waitForReadyRead(300)
+            _ = client.readAll()
+            # Any message means "show me"
+            trig = _trigger_ref[0]
+            if trig is not None:
+                trig.show()
+                trig.raise_()
+                trig.activateWindow()
+            client.close()
+
+    local_server.newConnection.connect(_handle_new_connection)
+
+    # Keep server alive
+    app._local_server = local_server
+    app._trigger_ref = _trigger_ref
+    # --- end single instance ---
+
+    # Keep a reference so the handler can always find it (in case of timing)
+    # The mutable list above already handles this.
 
     # Set activation policy as early as possible on macOS.
     # Use integer 1 (Accessory) to avoid enum lookup issues on older system PySide6.
@@ -167,10 +229,35 @@ def main() -> int:
 
     # Create core widgets
     trigger = TriggerWidget(cfg_mgr.config)
+    app._trigger_ref[0] = trigger  # for single-instance handler
     dropdown = DropdownPanel(cfg_mgr.config)
 
     # Initial button population
     dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+
+    # Validate that saved position is still on screen (e.g. after monitor changes)
+    # If not, reset to a safe default.
+    def _validate_trigger_position():
+        pos = trigger.pos()
+        sz = trigger.size()
+        on_screen = False
+        for screen in QApplication.screens():
+            if screen.availableGeometry().intersects(QRect(pos, sz)):
+                on_screen = True
+                break
+        if not on_screen:
+            default_w, default_h = 36, 36
+            default_x, default_y = 100, 100
+            trigger.resize(default_w, default_h)
+            trigger.move(default_x, default_y)
+            cfg_mgr.update_settings(
+                trigger_width=default_w,
+                trigger_height=default_h,
+                position_x=default_x,
+                position_y=default_y,
+            )
+
+    _validate_trigger_position()
     dropdown.refresh_filter_visibility()
 
     # Hover coordination
@@ -215,10 +302,29 @@ def main() -> int:
         if not cfg_mgr.config.settings.pinned_open:
             schedule_hide()
 
+    def reset_position_and_size():
+        """Reset the trigger to a sensible default location and size."""
+        default_w, default_h = 36, 36
+        default_x, default_y = 100, 100
+        cfg_mgr.update_settings(
+            trigger_width=default_w,
+            trigger_height=default_h,
+            position_x=default_x,
+            position_y=default_y,
+        )
+        trigger.resize(default_w, default_h)
+        trigger.move(default_x, default_y)
+        trigger.raise_()
+        if cfg_mgr.config.settings.pinned_open:
+            dropdown.position_adjacent(trigger)
+            dropdown.ensure_visible_and_sized()
+
     trigger.hover_enter.connect(on_trigger_enter)
     trigger.hover_leave.connect(on_trigger_leave)
     dropdown.hover_enter.connect(on_dropdown_enter)
     dropdown.hover_leave.connect(on_dropdown_leave)
+
+    trigger.request_reset.connect(reset_position_and_size)
 
     # Launch handling
     def on_launch(launcher: Launcher):
