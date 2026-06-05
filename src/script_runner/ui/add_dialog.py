@@ -1,10 +1,9 @@
 """Dialog for adding or editing a launcher entry.
 
-Fields per spec:
-- Name (displayed on button)
-- Command / path (separate from parameters)
-- Parameters (args)
-- Checkbox: Include in the drop-down list (enabled)
+Fields:
+- Name, Command/Path (+Browse), Parameters/Args, Include in list (enabled)
+- Working directory (+Browse dir)
+- Run as administrator (Windows), Show console (Windows)
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class AddEditDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Add Launcher" if launcher is None else "Edit Launcher")
         self.setModal(True)
-        self.resize(420, 220)
+        self.resize(440, 340)
 
         self._original = launcher
         self._result_launcher: Launcher | None = None
@@ -62,6 +61,20 @@ class AddEditDialog(QDialog):
         cmd_layout.addWidget(self._command_edit, 1)
         cmd_layout.addWidget(self._browse_btn)
 
+        self._work_dir_edit = QLineEdit()
+        self._work_dir_edit.setPlaceholderText("Optional: run with this working directory")
+        self._browse_dir_btn = QPushButton("Browse...")
+        self._browse_dir_btn.clicked.connect(self._on_browse_dir)
+
+        work_row = QWidget()
+        work_layout = QHBoxLayout(work_row)
+        work_layout.setContentsMargins(0, 0, 0, 0)
+        work_layout.addWidget(self._work_dir_edit, 1)
+        work_layout.addWidget(self._browse_dir_btn)
+
+        self._run_as_admin_cb = QCheckBox("Run as administrator (Windows)")
+        self._show_console_cb = QCheckBox("Show console / terminal (Windows)")
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -76,6 +89,9 @@ class AddEditDialog(QDialog):
         main_layout.addRow("Command / Path:", cmd_row)
         main_layout.addRow("Parameters / Args:", self._args_edit)
         main_layout.addRow("", self._enabled_cb)
+        main_layout.addRow("Working directory:", work_row)
+        main_layout.addRow("", self._run_as_admin_cb)
+        main_layout.addRow("", self._show_console_cb)
         main_layout.addRow(buttons)
 
         self.setLayout(main_layout)
@@ -85,12 +101,13 @@ class AddEditDialog(QDialog):
             self._command_edit.setText(launcher.command)
             self._args_edit.setText(launcher.args)
             self._enabled_cb.setChecked(launcher.enabled)
+            self._work_dir_edit.setText(launcher.working_dir or "")
+            self._run_as_admin_cb.setChecked(launcher.run_as_admin)
+            self._show_console_cb.setChecked(launcher.show_console)
 
         self._name_edit.setFocus()
 
     def _on_browse(self) -> None:
-        # Cross-platform filters. On macOS we need to allow .app bundles
-        # (which are directories but appear selectable in file dialogs).
         if sys.platform == "darwin":
             filt = "Applications (*.app);;All Files (*.*)"
         elif sys.platform == "win32":
@@ -104,21 +121,31 @@ class AddEditDialog(QDialog):
         if path:
             self._command_edit.setText(path)
 
+    def _on_browse_dir(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Select working directory")
+        if d:
+            self._work_dir_edit.setText(d)
+
     def accept(self) -> None:
         name = self._name_edit.text().strip()
         command = self._command_edit.text().strip()
         if not name or not command:
-            # Simple validation
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Missing info", "Name and Command are required.")
             return
 
+        work_dir = self._work_dir_edit.text().strip() or None
+        run_admin = self._run_as_admin_cb.isChecked()
+        show_console = self._show_console_cb.isChecked()
+
         if self._original:
-            # Update in place
             self._original.name = name
             self._original.command = command
             self._original.args = self._args_edit.text().strip()
             self._original.enabled = self._enabled_cb.isChecked()
+            self._original.working_dir = work_dir
+            self._original.run_as_admin = run_admin
+            self._original.show_console = show_console
             self._result_launcher = self._original
         else:
             self._result_launcher = Launcher.new(
@@ -126,6 +153,9 @@ class AddEditDialog(QDialog):
                 command=command,
                 args=self._args_edit.text().strip(),
                 enabled=self._enabled_cb.isChecked(),
+                working_dir=work_dir,
+                run_as_admin=run_admin,
+                show_console=show_console,
             )
 
         super().accept()

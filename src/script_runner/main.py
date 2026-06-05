@@ -123,6 +123,9 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
                 dropdown.ensure_visible_and_sized()
             else:
                 dropdown.start_show_animation()
+            # Ensure arrow stays on top of its list.
+            trigger.raise_()
+            dropdown.stackUnder(trigger)
 
     tray.activated.connect(on_tray_activated)
 
@@ -197,6 +200,11 @@ def main() -> int:
         dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
         if not dropdown.isVisible():
             dropdown.start_show_animation()
+        # Keep the arrow handle above the dropdown list in the window stack.
+        # The dropdown does raise_() when it shows; we re-raise the trigger so
+        # its bottom (the pill/arrow) is not covered by the list's top border/frame.
+        trigger.raise_()
+        dropdown.stackUnder(trigger)
 
     def on_trigger_leave():
         if not cfg_mgr.config.settings.pinned_open:
@@ -236,6 +244,8 @@ def main() -> int:
             else:
                 # ensure it stays fully expanded/sized even after click (in case events caused partial state)
                 QTimer.singleShot(50, dropdown.ensure_visible_and_sized)
+                QTimer.singleShot(55, trigger.raise_)  # re-assert arrow on top after list re-ensure
+                QTimer.singleShot(56, lambda: dropdown.stackUnder(trigger))
 
     dropdown.launch_requested.connect(on_launch)
 
@@ -262,6 +272,9 @@ def main() -> int:
             else:
                 # already visible (e.g. re-apply after manager toggle), just make sure height is full
                 dropdown.update_height_for_content()
+            # Keep the arrow handle above the dropdown list (see on_trigger_enter for rationale).
+            trigger.raise_()
+            dropdown.stackUnder(trigger)  # explicit: force list window below the arrow handle
         else:
             dropdown.force_hide()
 
@@ -283,6 +296,8 @@ def main() -> int:
         if cfg_mgr.config.settings.pinned_open:
             dropdown.position_below(trigger)
             dropdown.ensure_visible_and_sized()
+            trigger.raise_()
+            dropdown.stackUnder(trigger)
 
     trigger.position_changed.connect(save_position)
 
@@ -291,6 +306,8 @@ def main() -> int:
         if cfg_mgr.config.settings.pinned_open:
             dropdown.position_below(trigger)
             dropdown.ensure_visible_and_sized()
+            trigger.raise_()
+            dropdown.stackUnder(trigger)
 
     trigger.size_changed.connect(save_size)
 
@@ -302,9 +319,17 @@ def main() -> int:
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()
+    trigger.raise_()
 
-    # Apply initial pinned state (if enabled, dropdown will be forced open)
-    apply_pinned_state()
+    # Defer the initial apply_pinned_state (and thus any position_below + show/anim of dropdown)
+    # until after the event loop has processed the trigger.show(). This ensures that
+    # trigger.width()/height() and mapToGlobal() reflect any persisted custom trigger size
+    # (from previous resizes) rather than a default size that may be reported immediately
+    # after construction/show on some platforms / with frameless widgets.
+    # Prevents the dropdown from being placed too high, causing the arrow to appear
+    # visually "under" the dropdown list on startup (especially with pinned_open=True
+    # after the trigger was previously resized larger/smaller than the default).
+    QTimer.singleShot(0, apply_pinned_state)
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.

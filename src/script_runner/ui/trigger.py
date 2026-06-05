@@ -218,6 +218,18 @@ class TriggerWidget(QWidget):
         self.hover_leave.emit()
         super().leaveEvent(event)
 
+    def showEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        # Re-apply the (possibly persisted custom) size from settings once the
+        # top-level window is realized. This ensures .width()/.height() and
+        # mapToGlobal return the correct values for initial dropdown positioning
+        # (avoids the arrow appearing under the list on startup after resizes).
+        self.resize(
+            self._config.settings.trigger_width,
+            self._config.settings.trigger_height,
+        )
+        self.raise_()
+
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

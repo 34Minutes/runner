@@ -1,20 +1,21 @@
 # Script Runner
 
-A lightweight, always-on-top floating launcher for any scripts or applications. Single point to launch everything you need.
+A lightweight floating launcher for any scripts or applications. Single point to launch everything you need.
 
-## Features (MVP + planned)
-- Always stays on top of other windows
-- Tiny trigger widget with downward arrow
-- Hover the arrow → smoothly animated dropdown list of your configured launchers
-- Dropdown hides automatically when mouse leaves
-- Add new launchers via menu / tray (Name, Command/Path, Parameters, Include in list)
-- Launch EXEs, Python scripts, URLs, or any shell-registered application
-- Persistent config (JSON in user config dir)
-- Draggable trigger
-- System tray for reliable access
-- Test data pre-seeded: Calculator, Calendar, Web Browser
+## Features (ALPHA)
+- Tiny draggable + resizable trigger widget (downward arrow) that lives on your desktop
+- Hover the arrow → smoothly animated dropdown list of your configured launchers (with live filter/search box)
+- "Pin dropdown open" mode (in Manage) keeps the list fully visible/expanded
+- Dropdown auto-hides on mouse leave (unless pinned); hover handoff between trigger and list
+- Add / edit / manage launchers (Name, Command/Path + Browse, Parameters/Args, Working dir, Run as admin, Show console, Include in list)
+- Full Manage dialog: list view, edit, delete, reorder (Move Up/Down), add new, toggle pinned
+- Launch EXEs, Python scripts, URLs, protocols, or any shell-registered application
+- Persistent config (JSON in platform user config dir, atomic writes)
+- System tray icon + menu (Add, Manage, Reload config, Exit); tray click also opens list
+- Cross-platform (solid on Windows + macOS; basic on Linux)
+- Test data pre-seeded appropriate to platform (Calculator, Calendar, Web Browser, etc.)
 
-See [docs/LANGUAGE_RECOMMENDATION.md](docs/LANGUAGE_RECOMMENDATION.md) for the pre-development analysis and additional ideas.
+See [CHANGELOG.md](CHANGELOG.md) for release history and [docs/LANGUAGE_RECOMMENDATION.md](docs/LANGUAGE_RECOMMENDATION.md) for the original pre-development analysis and many future ideas.
 
 ## Installation (Development)
 
@@ -40,13 +41,15 @@ First run creates `config.json` in your platform user config dir with the sample
 
 On first run it will create a config with sample launchers and position the widget near top-left.
 
-## On Windows (Target)
+## Packaging (Windows target)
 
 After developing on macOS/Linux:
 
 ### Quick single-file EXE (recommended for users)
 ```bash
 pip install pyinstaller
+pyinstaller script-runner.spec
+# or one-off:
 pyinstaller --onefile --noconsole --name ScriptRunner --icon=assets/icon.ico src/script_runner/main.py
 ```
 
@@ -58,12 +61,15 @@ pip install nuitka
 python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-filename=ScriptRunner src/script_runner/main.py
 ```
 
+Note: assets/icon.ico is recommended for a nice taskbar/tray icon (currently placeholder).
+
 ## Usage
-1. The small arrow widget lives on your screen (always on top, no taskbar button by default).
+1. The small arrow trigger widget lives on your screen (frameless tool window, no taskbar entry by default).
 2. Hover the arrow → the list of buttons slides/fades in below it.
-3. Click a button to launch.
-4. Right-click the arrow (or use tray icon) → "Add new launcher..." to configure more.
-5. Move the widget by dragging it.
+3. Click a button to launch (list hides unless "pinned open" mode is active).
+4. Right-click the arrow (or use tray icon) → "Add new launcher..." or "Manage launchers...".
+5. Drag the widget to move; drag its edges/corners to resize (size persisted).
+6. In Manage dialog you can toggle "Pin dropdown open (fully expanded)" so the launcher list stays visible.
 
 ## Configuration
 Stored in your platform user config dir, e.g.:
@@ -74,12 +80,15 @@ You can edit the JSON manually or use the in-app dialogs.
 
 ## Development Notes
 - UI built with PySide6 (Qt).
-- Hover/animation logic is the most delicate part — test thoroughly.
-- Windows-only behaviors (run as admin, file icons, startup shortcut) live in `src/script_runner/utils/windows.py` and are guarded by platform checks.
+- Hover/animation + pinned state machine + layout height calculations are the most delicate parts — test thoroughly on target platforms.
+- Windows-only behaviors (run as admin, show console, ShellExecute fallbacks) live in launcher.py + guarded by platform checks. `src/script_runner/utils/windows.py` is a stub for future helpers (icons, startup, etc.).
 - To test Windows launch behavior, run on Windows or use a VM.
+- See CHANGELOG.md for what landed in ALPHA_1.0.0.
 
 ## Roadmap / Ideas
-Many enhancements documented in the language rec doc (search in list, icons, categories, manage dialog, drag-to-add, etc.).
+Many enhancements documented in [docs/LANGUAGE_RECOMMENDATION.md](docs/LANGUAGE_RECOMMENDATION.md) (search/filter in list, per-item icons, keyboard nav in dropdown, advanced launch options UI, categories, drag-to-add files, portable mode, startup integration, etc.).
+
+See the "Unreleased" section of [CHANGELOG.md](CHANGELOG.md) for active work items.
 
 ## License
 MIT (or whatever you choose at release).

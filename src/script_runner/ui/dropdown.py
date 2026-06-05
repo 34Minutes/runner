@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget as QW,
     QFrame,
     QLabel,
+    QLineEdit,
 )
 
 from ..config import AppConfig, Launcher
@@ -36,6 +37,7 @@ class DropdownPanel(QWidget):
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._do_hide)
+        self._anchor_trigger: QWidget | None = None  # for re-positioning after show() on some platforms
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -63,6 +65,15 @@ class DropdownPanel(QWidget):
         self._layout.setContentsMargins(6, 6, 6, 6)
         self._layout.setSpacing(3)
 
+        self._search_edit = QLineEdit(self._frame)
+        self._search_edit.setPlaceholderText("Filter launchers...")
+        self._search_edit.setStyleSheet(
+            "QLineEdit { background: rgba(25,25,28,200); color: #ddd; border: 1px solid rgba(70,70,75,180); border-radius: 4px; padding: 3px 6px; font-size: 12px; }"
+            "QLineEdit:focus { border: 1px solid rgba(90,120,180,200); }"
+        )
+        self._search_edit.textChanged.connect(self._apply_filter)
+        self._search_edit.installEventFilter(self)
+
         # Scroll area in case there are many items
         self._scroll = QScrollArea(self._frame)
         self._scroll.setWidgetResizable(True)
@@ -81,6 +92,7 @@ class DropdownPanel(QWidget):
         self._button_layout.setSpacing(2)
 
         self._scroll.setWidget(self._button_container)
+        self._layout.addWidget(self._search_edit)
         self._layout.addWidget(self._scroll)
 
         outer = QVBoxLayout(self)
@@ -121,6 +133,22 @@ class DropdownPanel(QWidget):
             self._buttons.append(hint)  # type: ignore  # for cleanup
 
         self._update_height_for_content()
+        # Re-apply any active filter after buttons change (e.g. after add/edit/manage)
+        self._apply_filter(self._search_edit.text())
+
+    def _apply_filter(self, text: str) -> None:
+        """Hide non-matching buttons (by name); show matching. Then recompute height.
+        Empty text shows all.
+        """
+        q = (text or "").strip().lower()
+        for w in self._buttons:
+            if isinstance(w, LaunchButton):
+                match = q == "" or q in w.launcher.name.lower() or q in (w.launcher.command or "").lower()
+                w.setVisible(match)
+            elif isinstance(w, QLabel):
+                # the empty hint label
+                w.setVisible(q == "")
+        self._update_height_for_content()
 
     def _update_height_for_content(self) -> None:
         """Compute the height required so that each button row gets its full height
@@ -136,12 +164,16 @@ class DropdownPanel(QWidget):
         (gaps of -8 instead of +2).
         """
         self._button_container.adjustSize()
+        self._search_edit.adjustSize()
 
         # Explicit sum: robust even when hosted layout reports wrong aggregates.
         inner_h = 0
         sp = self._button_layout.spacing()
-        for i, w in enumerate(self._buttons):
-            if i > 0:
+        visible_count = 0
+        for w in self._buttons:
+            if hasattr(w, 'isVisible') and not w.isVisible():
+                continue
+            if visible_count > 0:
                 inner_h += sp
             if hasattr(w, 'sizeHint'):
                 try:
@@ -152,14 +184,17 @@ class DropdownPanel(QWidget):
                 inner_h += max(sh_h, mh, 20)
             else:
                 inner_h += 20
+            visible_count += 1
 
         m = self._layout.contentsMargins()
         frame_chrome = m.top() + m.bottom()
+        layout_sp = self._layout.spacing()  # between search and scroll
+        search_h = self._search_edit.height() or self._search_edit.sizeHint().height() or 22
         # The button_layout (inside container inside scroll) observes an ~8px top inset
         # (first button y≈8). To give the VBoxLayout a rect tall enough for mins + its
         # own spacing(2), we need extra on top of the pure inner_h.
         viewport_chrome = 22  # extra allowance so the inner button_layout rect is large enough for all minHeights + the full declared spacing(2) between each (previously we were 1px short per gap)
-        target_h = inner_h + frame_chrome + viewport_chrome
+        target_h = inner_h + frame_chrome + viewport_chrome + search_h + layout_sp
         max_h = 420
         target_h = min(target_h, max_h)
         self._frame.setFixedHeight(target_h)
@@ -182,10 +217,19 @@ class DropdownPanel(QWidget):
 
     def position_below(self, trigger: QWidget) -> None:
         """Position this panel directly below the trigger widget."""
-        pos = trigger.mapToGlobal(QPoint(0, trigger.height()))
+        self._anchor_trigger = trigger  # remember for re-apply after show()
+        trig_h = trigger.height()
+        trig_w = trigger.width()
+        pos = trigger.mapToGlobal(QPoint(0, trig_h))
         # Slight horizontal centering or left-align
-        x = pos.x() + (trigger.width() - self.width()) // 2
-        self.move(x, pos.y())
+        x = pos.x() + (trig_w - self.width()) // 2
+        # Slight vertical overlap (negative y) so the trigger's bottom rounded pill
+        # and arrow tuck over the top border of the dropdown. When we call
+        # trigger.raise_() after showing the list (in main.py), the arrow draws
+        # on top, avoiding the "arrow behind list" look.
+        overlap = 3
+        target_y = pos.y() - overlap
+        self.move(x, target_y)
 
     # --- Hover handling (combined area: trigger + this panel) ---
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
@@ -220,6 +264,10 @@ class DropdownPanel(QWidget):
         self._update_height_for_content()
         if not self.isVisible():
             self.show()
+            self.raise_()  # bring list forward (caller will raise trigger after to keep arrow on top)
+            if self._anchor_trigger is not None:
+                self.position_below(self._anchor_trigger)
+                self.raise_()
             self.setWindowOpacity(1.0)
             # Clear anim constraints so our fixed target from _update rules
             self._frame.setMinimumHeight(0)
@@ -235,6 +283,12 @@ class DropdownPanel(QWidget):
         self._cancel_hide()
         self.show()
         self.raise_()
+        if self._anchor_trigger is not None:
+            # Re-apply the computed position *after* show(). On macOS with Frameless+Tool windows,
+            # move() before the native window is created by show() can be ignored or reset; doing it
+            # right after ensures the dropdown ends up at the correct y relative to the trigger.
+            self.position_below(self._anchor_trigger)
+            self.raise_()  # re-raise list after possible re-position
         self.setFocus(Qt.FocusReason.OtherFocusReason)  # allow Esc key
 
         # Ensure we have an accurate target height (buttons + proper spacings) before
@@ -310,6 +364,7 @@ class DropdownPanel(QWidget):
         height_anim.setEasingCurve(QEasingCurve.Type.InCubic)
 
         def on_finished():
+            self._search_edit.clear()
             self.hide()
             self.setWindowOpacity(1.0)
             self._frame.setMinimumHeight(0)
@@ -325,13 +380,26 @@ class DropdownPanel(QWidget):
     def force_hide(self) -> None:
         """Immediate hide (used on launch or escape)."""
         self._cancel_hide()
+        self._search_edit.clear()
         self.hide()
         self.setWindowOpacity(1.0)
 
     def keyPressEvent(self, event):  # type: ignore[override]
         if event.key() == Qt.Key.Key_Escape:
+            if self._search_edit.text():
+                self._search_edit.clear()
+                event.accept()
+                return
             if not self._config.settings.pinned_open:
                 self.force_hide()
             event.accept()
         else:
             super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):  # type: ignore[override]
+        if obj is self._search_edit and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                if self._search_edit.text():
+                    self._search_edit.clear()
+                    return True
+        return super().eventFilter(obj, event)

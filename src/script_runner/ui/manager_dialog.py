@@ -98,11 +98,23 @@ class ManagerDialog(QDialog):
         self._list.clear()
         for launcher in self._launchers:
             text = launcher.name
+            flags = []
             if not launcher.enabled:
-                text += "  (disabled)"
+                flags.append("disabled")
+            if launcher.run_as_admin:
+                flags.append("admin")
+            if launcher.show_console:
+                flags.append("console")
+            if flags:
+                text += "  (" + ", ".join(flags) + ")"
+            if launcher.working_dir:
+                text += "  [wd]"
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, launcher.id)
-            item.setToolTip(f"{launcher.command} {launcher.args}".strip())
+            tip = f"{launcher.command} {launcher.args}".strip()
+            if launcher.working_dir:
+                tip += f"  (wd: {launcher.working_dir})"
+            item.setToolTip(tip)
             self._list.addItem(item)
 
     def _get_selected_launcher(self) -> Launcher | None:
