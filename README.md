@@ -41,27 +41,76 @@ First run creates `config.json` in your platform user config dir with the sample
 
 On first run it will create a config with sample launchers and position the widget near top-left.
 
-## Packaging (Windows target)
+## Packaging & Deployment (Client installs)
 
-After developing on macOS/Linux:
+This app is a desktop utility (floating trigger + tray). Clients should **not** be told to `pip install` or run from source. They need a **standalone bundled app**.
 
-### Quick single-file EXE (recommended for users)
+PyInstaller is the supported bundler (already in dev dependencies). Nuitka is an alternative for smaller/faster Windows builds.
+
+### Building on this macOS machine (current dev platform)
+
 ```bash
-pip install pyinstaller
-pyinstaller script-runner.spec
-# or one-off:
-pyinstaller --onefile --noconsole --name ScriptRunner --icon=assets/icon.ico src/script_runner/main.py
+# One-time: make sure you're in the dev env
+source .venv/bin/activate
+
+# Build a proper macOS .app (recommended: onedir + windowed for Qt/PySide6)
+pyinstaller --clean --noconfirm \
+  --name "Script Runner" \
+  --windowed \
+  --onedir \
+  src/script_runner/main.py
+
+# The bundle is at: dist/Script Runner.app
+
+# Optional but recommended: make it a true background/agent app (no Dock icon)
+# (only the floating arrow + system tray will be visible)
+/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "dist/Script Runner.app/Contents/Info.plist" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :LSUIElement true" "dist/Script Runner.app/Contents/Info.plist"
 ```
 
-The resulting `dist/ScriptRunner.exe` is what you give users.
+### Distribution to clients ("install" methods)
 
-### Better size/performance (Nuitka)
+**For macOS clients (easiest test run from this machine):**
+
+Create a `.dmg` (best user experience — feels like a real install):
+
 ```bash
-pip install nuitka
-python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-filename=ScriptRunner src/script_runner/main.py
+hdiutil create -volname "Script Runner" \
+  -srcfolder "dist/Script Runner.app" \
+  -ov -format UDZO "dist/Script-Runner-mac.dmg"
 ```
 
-Note: assets/icon.ico is recommended for a nice taskbar/tray icon (currently placeholder).
+Client experience:
+1. Download `Script-Runner-mac.dmg`.
+2. Double-click the .dmg.
+3. Drag the "Script Runner" icon to the Applications folder (shown inside the dmg).
+4. Eject the dmg. Launch from Applications or Spotlight.
+
+Alternative for quick test: Just zip the .app (`zip -r Script-Runner-mac.zip "dist/Script Runner.app"`) and tell the client to unzip + drag to /Applications.
+
+**For Windows clients:**
+
+```bash
+pyinstaller --clean --noconfirm --onefile --noconsole --name ScriptRunner src/script_runner/main.py
+# or use the (older) script-runner.spec for more control
+```
+
+Give the client `dist/ScriptRunner.exe` (portable — they can run it from anywhere, or copy to a folder). Or put it in a .zip.
+
+For a more "installed" feel on Windows you can later add Inno Setup / NSIS to create a proper installer with shortcuts/uninstaller.
+
+### Current artifacts (after build on this machine)
+- `dist/Script Runner.app` — the macOS bundle (copy to /Applications to test locally).
+- `dist/Script-Runner-mac.dmg` — ready-to-send disk image for mac clients.
+
+**Important notes**
+- First launch on a client's Mac will likely trigger a Gatekeeper warning ("unidentified developer") because the app is not code-signed/notarized. Client can right-click the app → Open, or approve in System Settings → Privacy & Security.
+- For production distribution you'd want an Apple Developer ID + notarization + hardened runtime.
+- The tray icon currently falls back to a screenshot of the arrow widget if no system icon is available. A proper `assets/icon.icns` (and .ico for Windows) would be a nice polish item.
+- Config is still stored in the user's platformdirs location even in the bundled app (`~/Library/Application Support/ScriptRunner/config.json` on mac).
+- The old `script-runner.spec` is Windows-oriented and uses older PyInstaller idioms; prefer the CLI commands above for mac builds.
+
+Run `./scripts/build-mac.sh` (or the commands above) locally to produce `dist/Script-Runner-mac.dmg` for the current test-run deliverable. The `dist/` directory is gitignored.
 
 ## Usage
 1. The small arrow trigger widget lives on your screen (frameless tool window, no taskbar entry by default).

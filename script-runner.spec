@@ -1,9 +1,12 @@
-# PyInstaller spec for building a single-file Windows exe
-# Usage (on Windows):
-#   pyinstaller script-runner.spec
+# PyInstaller spec (primarily for Windows .exe builds).
+# This is legacy / Windows-oriented.
 #
-# On macOS you can still build the Windows exe with:
-#   pyinstaller --target-arch x86_64 script-runner.spec   (cross not fully supported for all, better on Windows)
+# Recommended for current development (especially macOS builds):
+#   See the "Packaging & Deployment" section in README.md
+#   (uses modern pyinstaller CLI + post-processing for .app / .dmg).
+#
+# Usage on Windows:
+#   pyinstaller script-runner.spec
 
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT
 import os
