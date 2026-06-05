@@ -1,6 +1,6 @@
 [project]
 name = "script-runner"
-version = "1.0.0b1"
+version = "1.0.0b2"
 description = "A lightweight, always-on-top single launcher for scripts and applications on Windows."
 readme = "README.md"
 requires-python = ">=3.9"
