@@ -19,8 +19,6 @@ dev = [
     "nuitka; platform_system != 'Darwin'",  # Nuitka better on Windows/Linux for size
     "pytest>=8.0",
     "pytest-qt>=4.4",
-    "pytest-cov>=4.0",
-    "pytest-mock>=3.10",
 ]
 
 [project.scripts]
@@ -39,23 +37,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-
-[tool.coverage.run]
-source = ["src/script_runner"]
-branch = true
-omit = [
-    "*/tests/*",
-    "*/__pycache__/*",
-    "*/egg-info/*",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if __name__ == .__main__.:",
-    "raise NotImplementedError",
-    "pass",
-]
-show_missing = true
-precision = 1

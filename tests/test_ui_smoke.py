@@ -416,8 +416,9 @@ def test_seed_test_data_if_needed(tmp_path, monkeypatch):
     assert any("Browser" in n or "Web" in n for n in names)
 
 
-def test_main_test_quit_parsing_and_setup(qapp, monkeypatch, mocker):
+def test_main_test_quit_parsing_and_setup(qapp, monkeypatch):
     """Covers the --test-quit-after handling, seed call, and high-level wiring without running real app.exec or creating visible widgets."""
+    from unittest.mock import patch, MagicMock
     from script_runner import main as main_mod
 
     # Force a clean empty config for this test
@@ -432,29 +433,24 @@ def test_main_test_quit_parsing_and_setup(qapp, monkeypatch, mocker):
     )
 
     # Heavy mocks so main() does the setup but doesn't block or pop real windows/tray
-    mock_app = mocker.MagicMock(spec=QApplication)
+    mock_app = MagicMock(spec=QApplication)
     mock_app.exec.return_value = 0
-    mocker.patch("script_runner.main.QApplication", return_value=mock_app)
 
-    # Patch the widget and tray creators (we don't need real instances for arg/seed/wiring coverage)
-    mocker.patch("script_runner.main.TriggerWidget")
-    mocker.patch("script_runner.main.DropdownPanel")
-    mocker.patch("script_runner.main.create_tray", return_value=mocker.MagicMock())
+    with patch("script_runner.main.QApplication", return_value=mock_app), \
+         patch("script_runner.main.TriggerWidget"), \
+         patch("script_runner.main.DropdownPanel"), \
+         patch("script_runner.main.create_tray", return_value=MagicMock()), \
+         patch("script_runner.main.QTimer") as mock_timer, \
+         patch("script_runner.main.seed_test_data_if_needed") as mock_seed:
+        mock_timer.singleShot = MagicMock()
 
-    # Also patch QTimer.singleShot to avoid real timers during test
-    mock_timer = mocker.patch("script_runner.main.QTimer")
-    mock_timer.singleShot = mocker.MagicMock()
+        # Simulate CLI arg
+        monkeypatch.setattr(sys, "argv", ["script-runner", "--test-quit-after", "42"])
 
-    # Patch seed so we can assert it was called
-    mock_seed = mocker.patch("script_runner.main.seed_test_data_if_needed")
-
-    # Simulate CLI arg
-    monkeypatch.setattr(sys, "argv", ["script-runner", "--test-quit-after", "42"])
-
-    ret = main_mod.main()
-    assert ret == 0
-    mock_seed.assert_called_once()
-    # The test-quit singleShot(42, app.quit) path was taken (we mocked the singleShot)
-    assert any(
-        call.args[0] == 42 for call in mock_timer.singleShot.call_args_list
-    ) or mock_timer.singleShot.called
+        ret = main_mod.main()
+        assert ret == 0
+        mock_seed.assert_called_once()
+        # The test-quit singleShot(42, app.quit) path was taken (we mocked the singleShot)
+        assert any(
+            call.args[0] == 42 for call in mock_timer.singleShot.call_args_list
+        ) or mock_timer.singleShot.called
