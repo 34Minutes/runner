@@ -7,13 +7,14 @@
 #   3. python -m venv .venv
 #   4. .\.venv\Scripts\Activate.ps1
 #   5. pip install -e ".[dev]"
-#   6. (Optional) Place a Windows icon at assets\icon.ico
+#   6. Icon is now included (assets\icon.ico - an arrow matching the trigger)
 #
 # Then run:
 #   .\scripts\build-windows.ps1
 #
-# Output will be in dist\ScriptRunner.exe (onefile by default in this script for simplicity)
-# or adjust to onedir.
+# Output will be in dist\ScriptRunner.exe (onefile by default).
+# Unused Qt modules (PDF, QML/Quick, Virtual Keyboard, SVG, extra codecs) are
+# stripped by script-runner.spec so the exe stays Widgets-only.
 
 param(
     [switch]$OneFile = $true
@@ -27,46 +28,31 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $projectRoot = Split-Path -Parent $scriptDir
 Set-Location $projectRoot
 
-$pyinstallerArgs = @(
-    "--clean",
-    "--noconfirm",
-    "--name", "ScriptRunner",
-    "--windowed",
-    "--paths", "src",
-    "--paths", "scripts",
-    "scripts/launch.py"
-)
-
+# Canonical spec excludes unused Qt modules/plugins/translations and embeds
+# the Windows icon + version info. Override onedir vs onefile via env var.
 if ($OneFile) {
-    $pyinstallerArgs += "--onefile"
+    $env:SCRIPTRUNNER_ONEFILE = "1"
 } else {
-    $pyinstallerArgs += "--onedir"
+    $env:SCRIPTRUNNER_ONEFILE = "0"
 }
 
-# Icon (optional)
 if (Test-Path "assets\icon.ico") {
-    $pyinstallerArgs += "--icon", "assets\icon.ico"
+    Write-Host "Using assets\icon.ico for exe icon and taskbar (via script-runner.spec)."
 } else {
-    Write-Host "Note: No assets\icon.ico found. Using default icon."
+    Write-Host "Note: assets\icon.ico not found. The exe will use a default icon."
 }
 
-# Common excludes to reduce size
-$pyinstallerArgs += "--exclude-module", "tkinter"
-$pyinstallerArgs += "--exclude-module", "matplotlib"
-$pyinstallerArgs += "--exclude-module", "numpy"
-$pyinstallerArgs += "--exclude-module", "PyQt5"
-$pyinstallerArgs += "--exclude-module", "PyQt6"
-
-Write-Host "Running: pyinstaller $($pyinstallerArgs -join ' ')"
-pyinstaller @pyinstallerArgs
+Write-Host "Running: pyinstaller --clean --noconfirm script-runner.spec"
+pyinstaller --clean --noconfirm script-runner.spec
 
 Write-Host ""
 Write-Host "==> Build complete!"
 if ($OneFile) {
     Write-Host "Executable: dist\ScriptRunner.exe"
+    Write-Host "Right-click the exe -> Properties to verify 'Script Runner' as Product name."
 } else {
     Write-Host "Folder: dist\ScriptRunner\"
 }
 Write-Host ""
-Write-Host "To test: Run the exe on a Windows machine."
-Write-Host "For distribution, consider wrapping in an installer (Inno Setup recommended)."
+Write-Host "To test: Copy ScriptRunner.exe to a real Windows machine and run it."
+Write-Host "The app is designed as a portable single-file exe (config goes to AppData by default)."

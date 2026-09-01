@@ -454,3 +454,98 @@ def test_main_test_quit_parsing_and_setup(qapp, monkeypatch):
         assert any(
             call.args[0] == 42 for call in mock_timer.singleShot.call_args_list
         ) or mock_timer.singleShot.called
+
+
+def test_dropdown_keyboard_navigation(qapp, qtbot):
+    """Cover arrow key selection, Enter-to-launch, Home/End, Down-from-filter, filter auto-select, and Esc paths."""
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent
+
+    cfg = AppConfig()
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+
+    launchers = [
+        Launcher.new("Alpha", "alpha-cmd"),
+        Launcher.new("Beta", "beta-cmd"),
+        Launcher.new("Gamma", "gamma-cmd"),
+    ]
+    panel.rebuild_buttons(launchers)
+    panel.show()
+    QApplication.processEvents()
+
+    # After show + rebuild, first should be auto-selected via _select_first_visible path
+    assert panel._current_button is not None
+    assert panel._current_button.launcher.name == "Alpha"
+    assert panel._current_button.is_keyboard_selected()
+
+    # Down moves to Beta
+    down = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(down)
+    assert panel._current_button.launcher.name == "Beta"
+
+    # Up back to Alpha
+    up = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(up)
+    assert panel._current_button.launcher.name == "Alpha"
+
+    # End -> Gamma
+    end = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_End, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(end)
+    assert panel._current_button.launcher.name == "Gamma"
+
+    # Home -> Alpha
+    home = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Home, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(home)
+    assert panel._current_button.launcher.name == "Alpha"
+
+    # Capture launches
+    launched = []
+    def _cap(l):
+        launched.append(l.name)
+    panel.launch_requested.connect(_cap)
+
+    # Enter on Alpha should emit
+    enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(enter)
+    assert launched == ["Alpha"]
+
+    # Now filter to only Beta + Gamma
+    panel._search_edit.setText("beta")
+    QApplication.processEvents()
+    # Filter auto-selects the (now first) match
+    assert panel._current_button is not None
+    assert panel._current_button.launcher.name == "Beta"
+    assert panel._current_button.isVisible()
+
+    # Down-from-search: simulate key on the edit (eventFilter path)
+    down_evt = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    # eventFilter returns True when consumed
+    consumed = panel.eventFilter(panel._search_edit, down_evt)
+    assert consumed is True
+    # Current should still be on a visible (Beta)
+    assert panel._current_button is not None and panel._current_button.launcher.name == "Beta"
+
+    # Clear filter via Esc in search (eventFilter)
+    panel._search_edit.setText("g")
+    esc_in_search = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    panel.eventFilter(panel._search_edit, esc_in_search)
+    assert panel._search_edit.text() == ""
+    # After clear, first visible (Alpha) re-selected
+    assert panel._current_button is not None
+    assert panel._current_button.launcher.name == "Alpha"
+
+    # Full Esc on panel (empty filter) -> force hide (not pinned)
+    cfg.settings.pinned_open = False
+    esc = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(esc)
+    # hide path taken (we don't assert visibility strictly in offscreen, but no crash + cleared)
+    assert panel._current_button is None or not panel._current_button.is_keyboard_selected()
+
+    # Rebuild with filter active exercises visible list rebuild + select
+    panel.rebuild_buttons(launchers)
+    panel._search_edit.setText("ga")
+    QApplication.processEvents()
+    assert any(b.launcher.name == "Gamma" and b.isVisible() for b in panel._buttons if hasattr(b, "launcher"))
+    assert panel._current_button is not None
+    assert panel._current_button.launcher.name == "Gamma"

@@ -30,6 +30,11 @@ from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
 from .ui.manager_dialog import ManagerDialog
 
+if sys.platform == "win32":
+    from .utils import windows as win_utils  # type: ignore
+else:
+    win_utils = None  # type: ignore
+
 
 def seed_test_data_if_needed(cfg: ConfigManager) -> None:
     """Add the requested test data on first run (calc, calendar, web browser)."""
@@ -154,7 +159,20 @@ def main() -> int:
     app = QApplication(sys.argv)
 
     # --- Single instance enforcement ---
-    # If another copy is running, tell it to show/raise the trigger and exit.
+    # Windows: try a named mutex first (very reliable even across elevation differences).
+    if sys.platform == "win32" and win_utils is not None:
+        if not win_utils.acquire_single_instance_mutex():
+            # Another instance is running — try to wake it via the socket and exit.
+            server_name = "ScriptRunner_SingleInstance_v1"
+            socket = QLocalSocket()
+            socket.connectToServer(server_name)
+            if socket.waitForConnected(300):
+                socket.write(b"show")
+                socket.waitForBytesWritten(300)
+            socket.close()
+            return 0
+
+    # If another copy is running (non-Windows or mutex passed), tell it to show/raise the trigger and exit.
     server_name = "ScriptRunner_SingleInstance_v1"
     socket = QLocalSocket()
     socket.connectToServer(server_name)
@@ -406,6 +424,19 @@ def main() -> int:
                 dropdown.position_adjacent(trigger)
 
     trigger.filter_toggled.connect(on_filter_toggled)
+
+    # Windows startup integration
+    if sys.platform == "win32" and win_utils is not None:
+        # On launch, if the user wants startup, (re)create the Run entry.
+        # This makes it resilient if the user moved ScriptRunner.exe.
+        if cfg_mgr.config.settings.launch_at_startup:
+            win_utils.ensure_startup_entry(True)
+
+        def on_startup_toggled(checked):
+            cfg_mgr.update_settings(launch_at_startup=checked)
+            win_utils.ensure_startup_entry(checked)
+
+        trigger.startup_toggled.connect(on_startup_toggled)
 
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):

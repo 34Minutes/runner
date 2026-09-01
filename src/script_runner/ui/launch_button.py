@@ -16,6 +16,15 @@ class LaunchButton(QPushButton):
         self.launcher = launcher
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(28)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._kb_selected = False
+        self._apply_style()
+        # Future: add icon on left
+        self.setToolTip(f"Launch: {launcher.command} {launcher.args}".strip())
+
+    def _apply_style(self) -> None:
+        # Base + hover + pressed + keyboard-selected (for arrow nav highlight)
+        # Use attribute selector for kbSelected so we can toggle via setProperty + polish
         self.setStyleSheet(
             """
             QPushButton {
@@ -34,10 +43,27 @@ class LaunchButton(QPushButton):
             QPushButton:pressed {
                 background-color: rgba(50, 85, 140, 230);
             }
+            QPushButton[kbSelected="true"] {
+                background-color: rgba(65, 95, 145, 225);
+                border: 1px solid rgba(120, 160, 220, 240);
+            }
+            QPushButton[kbSelected="true"]:hover {
+                background-color: rgba(75, 115, 175, 230);
+                border: 1px solid rgba(130, 170, 230, 250);
+            }
             """
         )
-        # Future: add icon on left
-        self.setToolTip(f"Launch: {launcher.command} {launcher.args}".strip())
+
+    def set_keyboard_selected(self, selected: bool) -> None:
+        """Highlight this button as the current keyboard-navigated item."""
+        self._kb_selected = selected
+        self.setProperty("kbSelected", "true" if selected else "false")
+        # Force style recompute
+        self.style().polish(self)
+        self.update()
+
+    def is_keyboard_selected(self) -> bool:
+        return self._kb_selected
 
     def sizeHint(self):
         sh = super().sizeHint()

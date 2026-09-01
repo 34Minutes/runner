@@ -12,6 +12,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QPointF, QTimer, QObject
 from PySide6.QtGui import QAction, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtWidgets import QWidget, QMenu, QApplication, QWidgetAction
+import sys
 
 from ..config import AppConfig, Launcher
 from .toggle_switch import ToggleSwitch
@@ -30,6 +31,7 @@ class TriggerWidget(QWidget):
     request_exit = Signal()
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
+    startup_toggled = Signal(bool)  # Windows only
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -118,6 +120,16 @@ class TriggerWidget(QWidget):
         filter_action.setDefaultWidget(filter_switch)
         filter_switch.toggled.connect(lambda checked: self.filter_toggled.emit(checked))
         menu.addAction(filter_action)
+
+        # Windows startup toggle (only really useful on Windows)
+        if sys.platform == "win32":
+            startup_switch = ToggleSwitch("Launch at Windows startup")
+            startup_switch.setChecked(getattr(self._config.settings, "launch_at_startup", False))
+            startup_switch.setPalette(menu.palette())
+            startup_action = QWidgetAction(menu)
+            startup_action.setDefaultWidget(startup_switch)
+            startup_switch.toggled.connect(lambda checked: self.startup_toggled.emit(checked))
+            menu.addAction(startup_action)
 
         menu.addSeparator()
         menu.addAction(self._action_exit)

@@ -29,15 +29,9 @@ echo "==> PyInstaller version: $(python -m PyInstaller --version 2>/dev/null || 
 
 echo "==> Building Script Runner macOS bundle..."
 
-# Use scripts/launch.py as the entry point (bootstrap) + --paths src
-# so that the app is started via the package (absolute imports work)
-# and relative imports inside script_runner/* succeed.
-pyinstaller --clean --noconfirm \
-  --name "Script Runner" \
-  --windowed \
-  --onedir \
-  --paths src \
-  scripts/launch.py
+# Canonical spec excludes unused Qt modules/plugins/translations (PDF, QML,
+# Virtual Keyboard, SVG, extra image codecs) so the .app stays Widgets-only.
+pyinstaller --clean --noconfirm "$PROJECT_ROOT/script-runner.spec"
 
 APP="dist/Script Runner.app"
 

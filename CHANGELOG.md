@@ -8,13 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- (planning) Keyboard navigation (arrow keys, Enter, Esc) within the open dropdown.
 - (planning) Per-launcher icons (auto + custom).
 
-### Changed
-- Development version bumped to 1.0.0b2 post BETA_1.0.0 tag.
+## [BETA_1.0.1] - 2026-09-01
 
-### Fixed
+Second beta release of Script Runner.
+
+### Added
+- Keyboard navigation in the dropdown: Up/Down arrows to move selection, Home/End for first/last, Enter/Return to launch the current item, Esc to clear filter or hide list. Down arrow from the filter search box jumps focus into the results list. Live filter auto-selects the first matching launcher for immediate keyboard launch. Selection is visually highlighted (distinct border/background) and scrolls into view. Works in both pinned and hover-triggered modes.
+- Windows: "Launch at Windows startup" toggle in the arrow right-click menu (persisted, creates/updates a HKCU Run entry). The entry is re-created on launch if enabled (survives moving the exe).
+- Windows: Improved single-instance handling using a named mutex (in addition to the existing local socket "wake up" mechanism).
+- Proper Windows executable metadata: `Script Runner` as Product Name (visible in File Properties, Task Manager, etc.) via `file_version_info.txt`.
+- `assets/icon.ico`: Multi-resolution arrow icon (dark rounded background + blue chevron) matching the trigger widget style. Used for the .exe icon and taskbar.
+
+### Changed
+- Version bump to 1.0.1b1 for BETA_1.0.1.
+- PyInstaller builds strip unused Qt (PDF, QML/Quick, Virtual Keyboard, OpenGL, SVG, extra image codecs, translations). macOS `.app` is ~58 MB (was ~88 MB); `.dmg` is ~23 MB (was ~36 MB). `script-runner.spec` is now the canonical packager for macOS and Windows.
 
 ## [BETA_1.0.0] - 2026-06-05
 

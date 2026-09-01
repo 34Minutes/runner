@@ -45,7 +45,7 @@ On first run it will create a config with sample launchers and position the widg
 
 This app is a desktop utility (floating trigger + tray). Clients should **not** be told to `pip install` or run from source. They need a **standalone bundled app**.
 
-PyInstaller is the supported bundler (already in dev dependencies). Nuitka is an alternative for smaller/faster Windows builds (can produce even smaller single-file exes in some cases):
+PyInstaller is the supported bundler (already in dev dependencies). Both platforms use `script-runner.spec`, which keeps only the Qt Widgets stack this app uses (QtCore, QtGui, QtWidgets, QtNetwork, QtDBus) and strips unused Qt (PDF, QML/Quick, Virtual Keyboard, OpenGL, SVG, extra image codecs, translations). Nuitka is an alternative for smaller/faster Windows builds:
 ```powershell
 python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-filename=ScriptRunner scripts/launch.py
 ```
@@ -66,21 +66,19 @@ This produces `dist/Script-Runner-mac.dmg` (ready for client "install" by draggi
 ```
 This produces `dist\ScriptRunner.exe` (portable single-file by default).
 
+The build now embeds:
+- A proper arrow icon (`assets/icon.ico`) matching the trigger widget.
+- Rich version info with Product Name "Script Runner".
+
 You can also use the spec directly:
-```powershell
-pyinstaller script-runner.spec
+```bash
+pyinstaller --clean --noconfirm script-runner.spec
 ```
 
 **Cross-building from macOS to Windows .exe is not reliably supported** with PyInstaller + PySide6 (no Windows bootloader in the macOS PyInstaller installation, plus Qt native libs). Use a real Windows machine (or Parallels/UTM VM) or CI.
 
 ### Automated builds with GitHub Actions (recommended for releases)
 Add a `.github/workflows/build.yml` (example in the repo or standard PyInstaller + Nuitka workflows). This can build Windows exe, macOS .app/.dmg, etc. on every tag.
-
-### Using the legacy spec on Windows
-```powershell
-pyinstaller script-runner.spec
-```
-The resulting `dist\ScriptRunner.exe` (or folder) is what you give users.
 
 ### Distribution to clients ("install" methods)
 
@@ -104,25 +102,25 @@ Alternative for quick test: Just zip the .app (`zip -r Script-Runner-mac.zip "di
 
 **For Windows clients:**
 
-```bash
-pyinstaller --clean --noconfirm --onefile --noconsole --name ScriptRunner src/script_runner/main.py
-# or use the (older) script-runner.spec for more control
+```powershell
+.\scripts\build-windows.ps1
+# or: pyinstaller --clean --noconfirm script-runner.spec
 ```
 
-Give the client `dist/ScriptRunner.exe` (portable — they can run it from anywhere, or copy to a folder). Or put it in a .zip.
+Give the client `dist/ScriptRunner.exe` (portable — they can run it from anywhere, or copy to a folder). Or put it in a .zip. Do not use a raw `pyinstaller --onefile` CLI invocation; that skips the unused-Qt strip in `script-runner.spec`.
 
 For a more "installed" feel on Windows you can later add Inno Setup / NSIS to create a proper installer with shortcuts/uninstaller.
 
 ### Current artifacts (after build on this machine)
-- `dist/Script Runner.app` — the macOS bundle (copy to /Applications to test locally).
-- `dist/Script-Runner-mac.dmg` — ready-to-send disk image for mac clients.
+- `dist/Script Runner.app` — the macOS bundle (~58 MB after unused-Qt strip; copy to /Applications to test locally).
+- `dist/Script-Runner-mac.dmg` — ready-to-send disk image (~23 MB) for mac clients.
 
 **Important notes**
 - First launch on a client's Mac will likely trigger a Gatekeeper warning ("unidentified developer") because the app is not code-signed/notarized. Client can right-click the app → Open, or approve in System Settings → Privacy & Security.
 - For production distribution you'd want an Apple Developer ID + notarization + hardened runtime.
 - The tray icon currently falls back to a screenshot of the arrow widget if no system icon is available. A proper `assets/icon.icns` (and .ico for Windows) would be a nice polish item.
 - Config is still stored in the user's platformdirs location even in the bundled app (`~/Library/Application Support/ScriptRunner/config.json` on mac).
-- The old `script-runner.spec` is Windows-oriented and uses older PyInstaller idioms; prefer the CLI commands above for mac builds.
+- `script-runner.spec` is the canonical packager for macOS and Windows. It drops Qt modules this Widgets app never imports.
 
 Run `./scripts/build-mac.sh` from the repo root (it will auto-activate `.venv` if needed, as long as you have run `pip install -e '.[dev]'` at least once). This produces `dist/Script-Runner-mac.dmg`. The `dist/` directory is gitignored.
 

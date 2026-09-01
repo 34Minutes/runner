@@ -49,6 +49,7 @@ class Settings:
     position_y: int = 60
     pinned_open: bool = False
     show_filter_box: bool = True
+    launch_at_startup: bool = False  # Windows only; managed via registry Run key
 
 
 @dataclass

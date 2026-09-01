@@ -7,7 +7,7 @@ stays visible while the mouse travels from the arrow into the list.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QTimer, Signal, QPoint, QRect
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QKeyEvent
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -42,6 +42,10 @@ class DropdownPanel(QWidget):
         self._grow_from_top: bool = True
         self._fixed_edge_y: int = 0
         self._grow_direction: str = "below"
+
+        # Keyboard navigation state
+        self._current_button: LaunchButton | None = None
+        self._visible_buttons: list[LaunchButton] = []  # subset of _buttons that are currently visible (post-filter)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -137,10 +141,14 @@ class DropdownPanel(QWidget):
 
     def rebuild_buttons(self, launchers: list[Launcher]) -> None:
         """Replace all buttons with current enabled launchers."""
+        # Clear previous selection styling
+        self._clear_keyboard_selection()
+
         # Clear
         for b in self._buttons:
             b.deleteLater()
         self._buttons.clear()
+        self._visible_buttons.clear()
 
         for launcher in launchers:
             btn = LaunchButton(launcher, self._button_container)
@@ -163,16 +171,34 @@ class DropdownPanel(QWidget):
     def _apply_filter(self, text: str) -> None:
         """Hide non-matching buttons (by name); show matching. Then recompute height.
         Empty text shows all.
+        Also refreshes the keyboard-visible list and auto-selects first match for nav.
         """
         q = (text or "").strip().lower()
+        self._clear_keyboard_selection()
+        self._visible_buttons.clear()
+
         for w in self._buttons:
             if isinstance(w, LaunchButton):
                 match = q == "" or q in w.launcher.name.lower() or q in (w.launcher.command or "").lower()
                 w.setVisible(match)
+                if match:
+                    self._visible_buttons.append(w)
             elif isinstance(w, QLabel):
                 # the empty hint label
                 w.setVisible(q == "")
+
         self._update_height_for_content()
+
+        # Keep keyboard selection sensible after filter/rebuild:
+        # - If we have visible items and panel is (or will be) shown, ensure a current selection.
+        # - Prefer keeping a still-visible previous current; otherwise pick first.
+        if self.isVisible() or getattr(self, "_anchor_trigger", None) is not None:
+            vis = self._visible_buttons or [b for b in self._buttons if isinstance(b, LaunchButton) and b.isVisible()]
+            if vis:
+                if not self._current_button or not self._current_button.isVisible():
+                    self._set_keyboard_current(vis[0])
+            else:
+                self._clear_keyboard_selection()
 
     def _update_height_for_content(self) -> None:
         """Compute the height required so that each button row gets its full height
@@ -251,6 +277,66 @@ class DropdownPanel(QWidget):
     def _on_button_clicked(self, launcher: Launcher) -> None:
         self.launch_requested.emit(launcher)
         # Note: hide decision (respecting pinned state) is now handled in main.py's on_launch
+
+    # --- Keyboard navigation helpers ---
+
+    def _clear_keyboard_selection(self) -> None:
+        if self._current_button is not None:
+            try:
+                self._current_button.set_keyboard_selected(False)
+            except Exception:
+                pass
+        self._current_button = None
+
+    def _set_keyboard_current(self, btn: LaunchButton | None) -> None:
+        """Set the visually (and navigationally) current button for keyboard ops."""
+        if self._current_button is btn:
+            return
+        self._clear_keyboard_selection()
+        self._current_button = btn
+        if btn is not None:
+            btn.set_keyboard_selected(True)
+            # Ensure it's scrolled into view (important for long lists)
+            try:
+                self._scroll.ensureWidgetVisible(btn)
+            except Exception:
+                pass
+
+    def _get_visible_launch_buttons(self) -> list[LaunchButton]:
+        """Return currently visible LaunchButtons (post filter)."""
+        # Prefer the maintained list; fall back to live scan if needed
+        if self._visible_buttons:
+            return [b for b in self._visible_buttons if b.isVisible()]
+        return [b for b in self._buttons if isinstance(b, LaunchButton) and b.isVisible()]
+
+    def _select_first_visible(self) -> None:
+        vis = self._get_visible_launch_buttons()
+        if vis:
+            self._set_keyboard_current(vis[0])
+        else:
+            self._clear_keyboard_selection()
+
+    def _select_last_visible(self) -> None:
+        vis = self._get_visible_launch_buttons()
+        if vis:
+            self._set_keyboard_current(vis[-1])
+        else:
+            self._clear_keyboard_selection()
+
+    def _move_selection(self, delta: int) -> None:
+        vis = self._get_visible_launch_buttons()
+        if not vis:
+            return
+        try:
+            idx = vis.index(self._current_button) if self._current_button in vis else -1
+        except ValueError:
+            idx = -1
+        new_idx = idx + delta
+        if new_idx < 0:
+            new_idx = 0
+        if new_idx >= len(vis):
+            new_idx = len(vis) - 1
+        self._set_keyboard_current(vis[new_idx])
 
     def position_adjacent(self, trigger: QWidget) -> None:
         """Position the dropdown relative to the trigger.
@@ -383,6 +469,9 @@ class DropdownPanel(QWidget):
             self._frame.setMaximumHeight(16777215)
             self._frame.updateGeometry()
             self.updateGeometry()
+        # Keyboard: ensure a current item is selected for arrow/Enter use
+        if not self._current_button or not self._current_button.isVisible():
+            self._select_first_visible()
 
     def _do_hide(self) -> None:
         self.start_hide_animation()
@@ -398,6 +487,8 @@ class DropdownPanel(QWidget):
         self.setFocus(Qt.FocusReason.OtherFocusReason)
 
         self._update_height_for_content()
+        # Prepare keyboard nav: pick first visible result (after filter applied in rebuild path)
+        QTimer.singleShot(0, self._select_first_visible)  # after layout settles
 
         self._button_container.setMinimumHeight(0)
         self._scroll.setMinimumHeight(0)
@@ -498,6 +589,8 @@ class DropdownPanel(QWidget):
 
         def on_finished():
             self._search_edit.clear()
+            self._clear_keyboard_selection()
+            self._visible_buttons.clear()
             self.hide()
             self.setWindowOpacity(1.0)
             self._frame.setMinimumHeight(0)
@@ -516,6 +609,8 @@ class DropdownPanel(QWidget):
         """Immediate hide (used on launch or escape)."""
         self._cancel_hide()
         self._search_edit.clear()
+        self._clear_keyboard_selection()
+        self._visible_buttons.clear()
         self.hide()
         self.setWindowOpacity(1.0)
         self._grow_from_top = True
@@ -523,21 +618,83 @@ class DropdownPanel(QWidget):
         self._grow_direction = "below"
 
     def keyPressEvent(self, event):  # type: ignore[override]
-        if event.key() == Qt.Key.Key_Escape:
+        key = event.key()
+
+        if key == Qt.Key.Key_Escape:
             if self._search_edit.text():
                 self._search_edit.clear()
+                # After clearing filter, re-select first visible
+                QTimer.singleShot(0, self._select_first_visible)
                 event.accept()
                 return
             if not self._config.settings.pinned_open:
                 self.force_hide()
             event.accept()
-        else:
-            super().keyPressEvent(event)
+            return
+
+        if key in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Home, Qt.Key.Key_End,
+                   Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            vis = self._get_visible_launch_buttons()
+            if not vis:
+                super().keyPressEvent(event)
+                return
+
+            if key == Qt.Key.Key_Down:
+                if self._current_button is None or self._current_button not in vis:
+                    self._set_keyboard_current(vis[0])
+                else:
+                    self._move_selection(+1)
+                event.accept()
+                return
+            if key == Qt.Key.Key_Up:
+                if self._current_button is None or self._current_button not in vis:
+                    self._set_keyboard_current(vis[0])
+                else:
+                    self._move_selection(-1)
+                event.accept()
+                return
+            if key == Qt.Key.Key_Home:
+                self._select_first_visible()
+                event.accept()
+                return
+            if key == Qt.Key.Key_End:
+                self._select_last_visible()
+                event.accept()
+                return
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if self._current_button is not None and self._current_button.isVisible():
+                    # Emit launch for the keyboard-chosen item
+                    self._on_button_clicked(self._current_button.launcher)
+                event.accept()
+                return
+
+        # Let other keys (typing) fall through to search or children
+        super().keyPressEvent(event)
 
     def eventFilter(self, obj, event):  # type: ignore[override]
         if obj is self._search_edit and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Escape:
-                if self._search_edit.text():
-                    self._search_edit.clear()
-                    return True
+            if isinstance(event, QKeyEvent):
+                if event.key() == Qt.Key.Key_Escape:
+                    if self._search_edit.text():
+                        self._search_edit.clear()
+                        QTimer.singleShot(0, self._select_first_visible)
+                        return True
+                if event.key() == Qt.Key.Key_Down:
+                    # From filter box, Down jumps into the list (first result)
+                    vis = self._get_visible_launch_buttons()
+                    if vis:
+                        self._set_keyboard_current(vis[0])
+                        # Move focus so further arrows stay in our keyPress path if needed
+                        try:
+                            vis[0].setFocus(Qt.FocusReason.OtherFocusReason)
+                        except Exception:
+                            pass
+                        return True  # consume so it doesn't insert text
+                if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    # Enter while in search: launch the current (or first) selection
+                    vis = self._get_visible_launch_buttons()
+                    target = self._current_button if (self._current_button and self._current_button.isVisible()) else (vis[0] if vis else None)
+                    if target:
+                        self._on_button_clicked(target.launcher)
+                        return True
         return super().eventFilter(obj, event)
