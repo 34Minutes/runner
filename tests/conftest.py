@@ -1,4 +1,4 @@
-"""Pytest configuration for Script Runner Qt tests."""
+"""Pytest configuration for Runner Qt tests."""
 
 import pytest
 

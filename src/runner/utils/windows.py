@@ -24,7 +24,7 @@ def _get_executable_path() -> str:
 
 
 def is_in_startup() -> bool:
-    """Return whether a Run entry for Script Runner exists for the current user."""
+    """Return whether a Run entry for Runner exists for the current user."""
     try:
         import winreg  # type: ignore
     except Exception:
@@ -34,7 +34,7 @@ def is_in_startup() -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
             try:
-                winreg.QueryValueEx(key, "Script Runner")
+                winreg.QueryValueEx(key, "Runner")
                 return True
             except FileNotFoundError:
                 return False
@@ -43,7 +43,7 @@ def is_in_startup() -> bool:
 
 
 def add_to_startup() -> bool:
-    """Create (or update) the current-user Run entry so Script Runner starts with Windows.
+    """Create (or update) the current-user Run entry so Runner starts with Windows.
 
     Returns True on success.
     """
@@ -60,7 +60,7 @@ def add_to_startup() -> bool:
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-            winreg.SetValueEx(key, "Script Runner", 0, winreg.REG_SZ, exe)
+            winreg.SetValueEx(key, "Runner", 0, winreg.REG_SZ, exe)
         return True
     except Exception:
         return False
@@ -77,7 +77,7 @@ def remove_from_startup() -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
             try:
-                winreg.DeleteValue(key, "Script Runner")
+                winreg.DeleteValue(key, "Runner")
             except FileNotFoundError:
                 pass  # already gone
         return True
@@ -117,7 +117,7 @@ def acquire_single_instance_mutex() -> bool:
         return True
 
     try:
-        mutex_name = "ScriptRunner_SingleInstance_Mutex_v1"
+        mutex_name = "Runner_SingleInstance_Mutex_v1"
         handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if not handle:
             return True

@@ -1,4 +1,4 @@
-# Script Runner
+# Runner
 
 A lightweight floating launcher for any scripts or applications. Single point to launch everything you need.
 
@@ -29,11 +29,11 @@ pip install -e ".[dev]"
 ## Running (after pip install -e . )
 
 ```bash
-script-runner
+runner
 # or from source tree
-PYTHONPATH=src python -m script_runner
+PYTHONPATH=src python -m runner
 # or
-python -m script_runner.main
+python -m runner.main
 ```
 
 First run creates `config.json` in your platform user config dir with the sample launchers (Calculator, Calendar, Web Browser, etc).
@@ -45,9 +45,9 @@ On first run it will create a config with sample launchers and position the widg
 
 This app is a desktop utility (floating trigger + tray). Clients should **not** be told to `pip install` or run from source. They need a **standalone bundled app**.
 
-PyInstaller is the supported bundler (already in dev dependencies). Both platforms use `script-runner.spec`, which keeps only the Qt Widgets stack this app uses (QtCore, QtGui, QtWidgets, QtNetwork, QtDBus) and strips unused Qt (PDF, QML/Quick, Virtual Keyboard, OpenGL, SVG, extra image codecs, translations). Nuitka is an alternative for smaller/faster Windows builds:
+PyInstaller is the supported bundler (already in dev dependencies). Both platforms use `runner.spec`, which keeps only the Qt Widgets stack this app uses (QtCore, QtGui, QtWidgets, QtNetwork, QtDBus) and strips unused Qt (PDF, QML/Quick, Virtual Keyboard, OpenGL, SVG, extra image codecs, translations). Nuitka is an alternative for smaller/faster Windows builds:
 ```powershell
-python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-filename=ScriptRunner scripts/launch.py
+python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-filename=Runner scripts/launch.py
 ```
 
 ### Building (recommended: use the helper scripts)
@@ -57,22 +57,22 @@ python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-
 source .venv/bin/activate
 ./scripts/build-mac.sh
 ```
-This produces `dist/Script-Runner-mac.dmg` (ready for client "install" by dragging to Applications).
+This produces `dist/Runner.dmg` (ready for client "install" by dragging to Applications).
 
 **On Windows:**
 ```powershell
 # In PowerShell, from repo root, after activating venv and `pip install -e ".[dev]"`
 .\scripts\build-windows.ps1
 ```
-This produces `dist\ScriptRunner.exe` (portable single-file by default).
+This produces `dist\Runner.exe` (portable single-file by default).
 
 The build now embeds:
 - A proper arrow icon (`assets/icon.ico`) matching the trigger widget.
-- Rich version info with Product Name "Script Runner".
+- Rich version info with Product Name "Runner".
 
 You can also use the spec directly:
 ```bash
-pyinstaller --clean --noconfirm script-runner.spec
+pyinstaller --clean --noconfirm runner.spec
 ```
 
 **Cross-building from macOS to Windows .exe is not reliably supported** with PyInstaller + PySide6 (no Windows bootloader in the macOS PyInstaller installation, plus Qt native libs). Use a real Windows machine (or Parallels/UTM VM) or CI.
@@ -87,42 +87,42 @@ Add a `.github/workflows/build.yml` (example in the repo or standard PyInstaller
 Create a `.dmg` (best user experience — feels like a real install):
 
 ```bash
-hdiutil create -volname "Script Runner" \
-  -srcfolder "dist/Script Runner.app" \
-  -ov -format UDZO "dist/Script-Runner-mac.dmg"
+hdiutil create -volname "Runner" \
+  -srcfolder "dist/Runner.app" \
+  -ov -format UDZO "dist/Runner.dmg"
 ```
 
 Client experience:
-1. Download `Script-Runner-mac.dmg`.
+1. Download `Runner.dmg`.
 2. Double-click the .dmg.
-3. Drag the "Script Runner" icon to the Applications folder (shown inside the dmg).
+3. Drag the "Runner" icon to the Applications folder (shown inside the dmg).
 4. Eject the dmg. Launch from Applications or Spotlight.
 
-Alternative for quick test: Just zip the .app (`zip -r Script-Runner-mac.zip "dist/Script Runner.app"`) and tell the client to unzip + drag to /Applications.
+Alternative for quick test: Just zip the .app (`zip -r Runner.zip "dist/Runner.app"`) and tell the client to unzip + drag to /Applications.
 
 **For Windows clients:**
 
 ```powershell
 .\scripts\build-windows.ps1
-# or: pyinstaller --clean --noconfirm script-runner.spec
+# or: pyinstaller --clean --noconfirm runner.spec
 ```
 
-Give the client `dist/ScriptRunner.exe` (portable — they can run it from anywhere, or copy to a folder). Or put it in a .zip. Do not use a raw `pyinstaller --onefile` CLI invocation; that skips the unused-Qt strip in `script-runner.spec`.
+Give the client `dist/Runner.exe` (portable — they can run it from anywhere, or copy to a folder). Or put it in a .zip. Do not use a raw `pyinstaller --onefile` CLI invocation; that skips the unused-Qt strip in `runner.spec`.
 
 For a more "installed" feel on Windows you can later add Inno Setup / NSIS to create a proper installer with shortcuts/uninstaller.
 
 ### Current artifacts (after build on this machine)
-- `dist/Script Runner.app` — the macOS bundle (~58 MB after unused-Qt strip; copy to /Applications to test locally).
-- `dist/Script-Runner-mac.dmg` — ready-to-send disk image (~23 MB) for mac clients.
+- `dist/Runner.app` — the macOS bundle (~58 MB after unused-Qt strip; copy to /Applications to test locally).
+- `dist/Runner.dmg` — ready-to-send disk image (~23 MB) for mac clients.
 
 **Important notes**
 - First launch on a client's Mac will likely trigger a Gatekeeper warning ("unidentified developer") because the app is not code-signed/notarized. Client can right-click the app → Open, or approve in System Settings → Privacy & Security.
 - For production distribution you'd want an Apple Developer ID + notarization + hardened runtime.
 - The tray icon currently falls back to a screenshot of the arrow widget if no system icon is available. A proper `assets/icon.icns` (and .ico for Windows) would be a nice polish item.
-- Config is still stored in the user's platformdirs location even in the bundled app (`~/Library/Application Support/ScriptRunner/config.json` on mac).
-- `script-runner.spec` is the canonical packager for macOS and Windows. It drops Qt modules this Widgets app never imports.
+- Config is still stored in the user's platformdirs location even in the bundled app (`~/Library/Application Support/Runner/config.json` on mac).
+- `runner.spec` is the canonical packager for macOS and Windows. It drops Qt modules this Widgets app never imports.
 
-Run `./scripts/build-mac.sh` from the repo root (it will auto-activate `.venv` if needed, as long as you have run `pip install -e '.[dev]'` at least once). This produces `dist/Script-Runner-mac.dmg`. The `dist/` directory is gitignored.
+Run `./scripts/build-mac.sh` from the repo root (it will auto-activate `.venv` if needed, as long as you have run `pip install -e '.[dev]'` at least once). This produces `dist/Runner.dmg`. The `dist/` directory is gitignored.
 
 ## Usage
 1. The small arrow trigger widget lives on your screen (frameless tool window, no taskbar entry by default).
@@ -134,15 +134,15 @@ Run `./scripts/build-mac.sh` from the repo root (it will auto-activate `.venv` i
 
 ## Configuration
 Stored in your platform user config dir, e.g.:
-- Windows: `%APPDATA%\ScriptRunner\config.json`
-- macOS: `~/Library/Application Support/ScriptRunner/config.json`
+- Windows: `%APPDATA%\Runner\config.json`
+- macOS: `~/Library/Application Support/Runner/config.json`
 
 You can edit the JSON manually or use the in-app dialogs.
 
 ## Development Notes
 - UI built with PySide6 (Qt).
 - Hover/animation + pinned state machine + layout height calculations are the most delicate parts — test thoroughly on target platforms.
-- Windows-only behaviors (run as admin, show console, ShellExecute fallbacks) live in launcher.py + guarded by platform checks. `src/script_runner/utils/windows.py` is a stub for future helpers (icons, startup, etc.).
+- Windows-only behaviors (run as admin, show console, ShellExecute fallbacks) live in launcher.py + guarded by platform checks. `src/runner/utils/windows.py` is a stub for future helpers (icons, startup, etc.).
 - To test Windows launch behavior, run on Windows or use a VM.
 - See CHANGELOG.md for what landed in ALPHA_1.0.0.
 

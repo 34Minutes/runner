@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from script_runner.config import AppConfig, ConfigManager, Launcher, Settings
+from runner.config import AppConfig, ConfigManager, Launcher, Settings
 
 
 def test_launcher_new_and_fields():
@@ -43,9 +43,9 @@ def test_appconfig_roundtrip():
 
 def test_configmanager_save_load(tmp_path, monkeypatch):
     # Redirect config dir to temp for test
-    test_dir = tmp_path / "ScriptRunnerTest"
+    test_dir = tmp_path / "RunnerTest"
     monkeypatch.setattr(
-        "script_runner.config.platformdirs.user_config_dir",
+        "runner.config.platformdirs.user_config_dir",
         lambda *a, **k: str(test_dir)
     )
 
@@ -130,9 +130,9 @@ def test_old_config_without_show_filter_box_defaults_true():
 
 
 def test_configmanager_update_settings_for_filter_and_pin(tmp_path, monkeypatch):
-    test_dir = tmp_path / "ScriptRunnerTestFilter"
+    test_dir = tmp_path / "RunnerTestFilter"
     monkeypatch.setattr(
-        "script_runner.config.platformdirs.user_config_dir",
+        "runner.config.platformdirs.user_config_dir",
         lambda *a, **k: str(test_dir)
     )
     mgr = ConfigManager()

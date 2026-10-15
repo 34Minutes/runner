@@ -1,4 +1,4 @@
-"""Main entry point for Script Runner.
+"""Main entry point for Runner.
 
 Wires together:
 - Config
@@ -122,7 +122,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
         # reposition if needed
     act_reload.triggered.connect(do_reload)
 
-    act_exit = QAction("Exit Script Runner", menu)
+    act_exit = QAction("Exit Runner", menu)
     act_exit.triggered.connect(app.quit)
 
     menu.addAction(act_add)
@@ -133,7 +133,7 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     menu.addAction(act_exit)
 
     tray.setContextMenu(menu)
-    tray.setToolTip("Script Runner")
+    tray.setToolTip("Runner")
     tray.show()
 
     # Also allow left-click on tray to toggle the list (nice extra)
@@ -163,7 +163,7 @@ def main() -> int:
     if sys.platform == "win32" and win_utils is not None:
         if not win_utils.acquire_single_instance_mutex():
             # Another instance is running — try to wake it via the socket and exit.
-            server_name = "ScriptRunner_SingleInstance_v1"
+            server_name = "Runner_SingleInstance_v1"
             socket = QLocalSocket()
             socket.connectToServer(server_name)
             if socket.waitForConnected(300):
@@ -173,7 +173,7 @@ def main() -> int:
             return 0
 
     # If another copy is running (non-Windows or mutex passed), tell it to show/raise the trigger and exit.
-    server_name = "ScriptRunner_SingleInstance_v1"
+    server_name = "Runner_SingleInstance_v1"
     socket = QLocalSocket()
     socket.connectToServer(server_name)
     if socket.waitForConnected(300):
@@ -223,7 +223,7 @@ def main() -> int:
         except Exception:
             pass
 
-    app.setApplicationName("Script Runner")
+    app.setApplicationName("Runner")
     app.setQuitOnLastWindowClosed(False)  # tray + floating widget
 
     # NOTE: We intentionally do NOT create a hidden QMainWindow here.
@@ -231,7 +231,7 @@ def main() -> int:
     # can easily trigger AppKit assertions (EXC_BREAKPOINT / SIGTRAP).
     # The setQuitOnLastWindowClosed(False) + early activation policy is usually sufficient.
 
-    # Support for automated testing: script-runner --test-quit-after 1500
+    # Support for automated testing: runner --test-quit-after 1500
     test_quit_ms = 0
     if "--test-quit-after" in sys.argv:
         try:
@@ -428,7 +428,7 @@ def main() -> int:
     # Windows startup integration
     if sys.platform == "win32" and win_utils is not None:
         # On launch, if the user wants startup, (re)create the Run entry.
-        # This makes it resilient if the user moved ScriptRunner.exe.
+        # This makes it resilient if the user moved Runner.exe.
         if cfg_mgr.config.settings.launch_at_startup:
             win_utils.ensure_startup_entry(True)
 

@@ -8,13 +8,13 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from PySide6.QtGui import QMouseEvent
 from unittest.mock import patch, MagicMock
 
-from script_runner.config import Launcher, ConfigManager, AppConfig
-from script_runner.ui.add_dialog import AddEditDialog
-from script_runner.ui.dropdown import DropdownPanel
-from script_runner.ui.launch_button import LaunchButton
-from script_runner.ui.manager_dialog import ManagerDialog
-from script_runner.ui.trigger import TriggerWidget
-from script_runner.ui.toggle_switch import ToggleSwitch
+from runner.config import Launcher, ConfigManager, AppConfig
+from runner.ui.add_dialog import AddEditDialog
+from runner.ui.dropdown import DropdownPanel
+from runner.ui.launch_button import LaunchButton
+from runner.ui.manager_dialog import ManagerDialog
+from runner.ui.trigger import TriggerWidget
+from runner.ui.toggle_switch import ToggleSwitch
 
 
 @pytest.fixture(scope="module")
@@ -157,7 +157,7 @@ def test_dropdown_position_adjacent_and_anim_branches(qapp, qtbot):
     # fits_below calc see target_h=300 > space_below~60 and take the "above" branch.
     with patch.object(panel, "_update_height_for_content", lambda: None):
         panel._frame.setFixedHeight(300)  # re-force after possible prior update
-        with patch("script_runner.ui.dropdown.QApplication.screenAt", return_value=fake_screen):
+        with patch("runner.ui.dropdown.QApplication.screenAt", return_value=fake_screen):
             panel.position_adjacent(fake_trigger)
             # Now with forced tall target_h + low space_below, must have flipped to above
             assert getattr(panel, "_grow_from_top", True) is False, "should grow upward when near bottom"
@@ -215,7 +215,7 @@ def test_manager_dialog_list_and_add_flow(qapp, qtbot, tmp_path):
 
     # Select and "edit" by mocking AddEditDialog (avoid real modal exec)
     dlg._list.setCurrentRow(0)
-    with patch("script_runner.ui.manager_dialog.AddEditDialog") as mock_add:
+    with patch("runner.ui.manager_dialog.AddEditDialog") as mock_add:
         inst = mock_add.return_value
         inst.result_launcher = Launcher.new("A-edited", "calc.exe")
         inst.exec.return_value = True
@@ -229,7 +229,7 @@ def test_manager_dialog_list_and_add_flow(qapp, qtbot, tmp_path):
     qtbot.mouseClick(dlg._btn_down, Qt.LeftButton)
 
     # Add via the button (mocked dialog)
-    with patch("script_runner.ui.manager_dialog.AddEditDialog") as mock_add2:
+    with patch("runner.ui.manager_dialog.AddEditDialog") as mock_add2:
         inst2 = mock_add2.return_value
         inst2.result_launcher = Launcher.new("C-new", "foo")
         inst2.exec.return_value = True
@@ -291,7 +291,7 @@ def test_dropdown_filter_hint_keypress_force_ensure(qapp, qtbot):
     tiny_left_screen = MagicMock()
     tiny_left_screen.availableGeometry.return_value = QRect(0, 0, 200, 800)  # narrow so wide dropdown clamps
     panel.setFixedWidth(300)  # wider than avail to trigger left clamp in position
-    with patch("script_runner.ui.dropdown.QApplication.screenAt", return_value=tiny_left_screen):
+    with patch("runner.ui.dropdown.QApplication.screenAt", return_value=tiny_left_screen):
         with patch.object(panel, "_update_height_for_content", lambda: None):
             panel._frame.setFixedHeight(100)
             panel.position_adjacent(fake_trigger)
@@ -398,10 +398,10 @@ def test_trigger_mouse_resize_drag_hover(qapp, qtbot):
 
 def test_seed_test_data_if_needed(tmp_path, monkeypatch):
     """Directly exercises the seed function (platform specific seeds + add_launcher)."""
-    from script_runner import main as main_mod
-    test_dir = tmp_path / "ScriptRunnerSeedTest"
+    from runner import main as main_mod
+    test_dir = tmp_path / "RunnerSeedTest"
     monkeypatch.setattr(
-        "script_runner.config.platformdirs.user_config_dir",
+        "runner.config.platformdirs.user_config_dir",
         lambda *a, **k: str(test_dir)
     )
     mgr = ConfigManager()
@@ -419,7 +419,7 @@ def test_seed_test_data_if_needed(tmp_path, monkeypatch):
 def test_main_test_quit_parsing_and_setup(qapp, monkeypatch):
     """Covers the --test-quit-after handling, seed call, and high-level wiring without running real app.exec or creating visible widgets."""
     from unittest.mock import patch, MagicMock
-    from script_runner import main as main_mod
+    from runner import main as main_mod
 
     # Force a clean empty config for this test
     test_dir = Path("/tmp/sr_main_test_quit")
@@ -428,7 +428,7 @@ def test_main_test_quit_parsing_and_setup(qapp, monkeypatch):
     if cfg_path.exists():
         cfg_path.unlink()
     monkeypatch.setattr(
-        "script_runner.config.platformdirs.user_config_dir",
+        "runner.config.platformdirs.user_config_dir",
         lambda *a, **k: str(test_dir)
     )
 
@@ -436,16 +436,16 @@ def test_main_test_quit_parsing_and_setup(qapp, monkeypatch):
     mock_app = MagicMock(spec=QApplication)
     mock_app.exec.return_value = 0
 
-    with patch("script_runner.main.QApplication", return_value=mock_app), \
-         patch("script_runner.main.TriggerWidget"), \
-         patch("script_runner.main.DropdownPanel"), \
-         patch("script_runner.main.create_tray", return_value=MagicMock()), \
-         patch("script_runner.main.QTimer") as mock_timer, \
-         patch("script_runner.main.seed_test_data_if_needed") as mock_seed:
+    with patch("runner.main.QApplication", return_value=mock_app), \
+         patch("runner.main.TriggerWidget"), \
+         patch("runner.main.DropdownPanel"), \
+         patch("runner.main.create_tray", return_value=MagicMock()), \
+         patch("runner.main.QTimer") as mock_timer, \
+         patch("runner.main.seed_test_data_if_needed") as mock_seed:
         mock_timer.singleShot = MagicMock()
 
         # Simulate CLI arg
-        monkeypatch.setattr(sys, "argv", ["script-runner", "--test-quit-after", "42"])
+        monkeypatch.setattr(sys, "argv", ["runner", "--test-quit-after", "42"])
 
         ret = main_mod.main()
         assert ret == 0

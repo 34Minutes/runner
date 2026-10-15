@@ -1,4 +1,4 @@
-"""Configuration persistence for Script Runner.
+"""Configuration persistence for Runner.
 
 Stores launchers and UI settings in a JSON file under the platform user config dir.
 """
@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import platformdirs
 
-APP_NAME = "ScriptRunner"
+APP_NAME = "Runner"
 CONFIG_FILENAME = "config.json"
 
 

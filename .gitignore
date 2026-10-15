@@ -29,7 +29,7 @@ MANIFEST
 # PyInstaller build artifacts
 *.manifest
 # Keep our hand-written .spec in the repo for reproducible Windows builds
-# *.spec   <--- commented so our script-runner.spec is tracked
+# *.spec   <--- commented so our runner.spec is tracked
 
 # Installer logs
 pip-log.txt
@@ -154,5 +154,5 @@ Desktop.ini
 # App specific
 *.log
 config.json
-ScriptRunner.exe
+Runner.exe
 dist/

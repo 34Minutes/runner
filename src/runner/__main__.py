@@ -1,4 +1,4 @@
-"""Allow running the package directly: python -m script_runner"""
+"""Allow running the package directly: python -m runner"""
 
 from .main import main
 

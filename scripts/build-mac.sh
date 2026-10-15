@@ -27,23 +27,23 @@ source "$VENV_DIR/bin/activate"
 echo "==> Using Python from venv: $(which python)"
 echo "==> PyInstaller version: $(python -m PyInstaller --version 2>/dev/null || echo 'not importable')"
 
-echo "==> Building Script Runner macOS bundle..."
+echo "==> Building Runner macOS bundle..."
 
 # Canonical spec excludes unused Qt modules/plugins/translations (PDF, QML,
 # Virtual Keyboard, SVG, extra image codecs) so the .app stays Widgets-only.
-pyinstaller --clean --noconfirm "$PROJECT_ROOT/script-runner.spec"
+pyinstaller --clean --noconfirm "$PROJECT_ROOT/runner.spec"
 
-APP="dist/Script Runner.app"
+APP="dist/Runner.app"
 
 echo "==> Making it a background/agent app (no Dock icon) and setting nice names..."
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP/Contents/Info.plist" 2>/dev/null || \
 /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP/Contents/Info.plist"
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Script Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Set :CFBundleName 'Script Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleName 'Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
 
 # Use a stable bundle identifier (change if you want)
-BUNDLE_ID="com.douglie.scriptrunner"
+BUNDLE_ID="com.douglie.runner"
  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID" "$APP/Contents/Info.plist" 2>/dev/null || \
  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
 
@@ -51,17 +51,13 @@ echo "==> Ad-hoc code signing the bundle (helps with local Gatekeeper)..."
 codesign --force --deep --sign - "$APP" 2>&1 | cat || echo "Signing warning (non-fatal for local use)"
 
 echo "==> Creating distributable .dmg..."
-rm -f "dist/Script-Runner-mac.dmg"
-hdiutil create -volname "Script Runner" \
+rm -f "dist/Runner.dmg"
+hdiutil create -volname "Runner" \
   -srcfolder "$APP" \
-  -ov -format UDZO "dist/Script-Runner-mac.dmg"
-
-# Clean up the .spec file that PyInstaller generates next to the script
-# (we don't want to commit build-time specs with spaces in the name)
-rm -f "Script Runner.spec" 2>/dev/null || true
+  -ov -format UDZO "dist/Runner.dmg"
 
 echo "==> Done."
-ls -lh "dist/Script-Runner-mac.dmg" "$APP"
+ls -lh "dist/Runner.dmg" "$APP"
 echo
 echo "To 'install' on this machine for testing: cp -R '$APP' /Applications/"
 echo "Client: give them the .dmg (drag app to Applications inside the dmg)."

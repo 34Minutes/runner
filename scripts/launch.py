@@ -6,7 +6,7 @@ instead of running main.py directly (which breaks relative imports).
 Used only for building the standalone app.
 """
 
-from script_runner.main import main
+from runner.main import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

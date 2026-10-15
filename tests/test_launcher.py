@@ -5,8 +5,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from script_runner.config import Launcher
-from script_runner import launcher as launcher_mod
+from runner.config import Launcher
+from runner import launcher as launcher_mod
 
 
 def _win32_subprocess_mock():
@@ -55,7 +55,7 @@ def test_launch_empty_raises():
         launcher_mod.launch(l)
 
 
-@patch("script_runner.launcher.subprocess.Popen")
+@patch("runner.launcher.subprocess.Popen")
 def test_launch_url_non_windows(mock_popen):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("Web", "https://example.com")
@@ -63,7 +63,7 @@ def test_launch_url_non_windows(mock_popen):
         mock_popen.assert_called()
 
 
-@patch("script_runner.launcher.subprocess.Popen")
+@patch("runner.launcher.subprocess.Popen")
 def test_launch_python_non_windows(mock_popen):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("Script", "myscript.py")
@@ -71,7 +71,7 @@ def test_launch_python_non_windows(mock_popen):
         mock_popen.assert_called()
 
 
-@patch("script_runner.launcher.subprocess.Popen")
+@patch("runner.launcher.subprocess.Popen")
 def test_launch_darwin_app(mock_popen):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("Brave", "Brave Browser", args="https://x.com")
@@ -79,7 +79,7 @@ def test_launch_darwin_app(mock_popen):
         mock_popen.assert_called()
 
 
-@patch("script_runner.launcher.subprocess.Popen")
+@patch("runner.launcher.subprocess.Popen")
 def test_launch_darwin_app_with_flags(mock_popen):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("Brave", "Brave Browser", args="--incognito https://x.com")
@@ -88,7 +88,7 @@ def test_launch_darwin_app_with_flags(mock_popen):
 
 
 @pytest.mark.xfail(reason="win32 admin path not fully mockable on darwin without deeper patches")
-@patch("script_runner.launcher._launch_as_admin_windows")
+@patch("runner.launcher._launch_as_admin_windows")
 def test_launch_run_as_admin_calls_helper(mock_admin):
     with patch("sys.platform", "win32"):
         l = Launcher.new("Admin", "cmd", run_as_admin=True)
@@ -101,7 +101,7 @@ def test_get_default_icon_placeholder():
     assert launcher_mod.get_default_icon_for_launcher(l) is None
 
 
-@patch("script_runner.launcher.subprocess.Popen")
+@patch("runner.launcher.subprocess.Popen")
 def test_launch_with_working_dir(mock_popen, tmp_path):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("App", "echo", working_dir=str(tmp_path))
@@ -109,7 +109,7 @@ def test_launch_with_working_dir(mock_popen, tmp_path):
         mock_popen.assert_called()
 
 
-@patch("script_runner.launcher.subprocess.Popen")
+@patch("runner.launcher.subprocess.Popen")
 def test_launch_python_explicit_on_darwin(mock_popen):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("Py", "python", args="-c 'print(1)'")
@@ -129,14 +129,14 @@ def test_is_python_script_edge():
 def test_launch_url_windows():
     with patch("sys.platform", "win32"):
         # create=True lets us add the win32-only attr to the os module object for this test
-        with patch("script_runner.launcher.os.startfile", create=True) as mock_start:
+        with patch("runner.launcher.os.startfile", create=True) as mock_start:
             l = Launcher.new("Web", "https://example.com")
             res = launcher_mod.launch(l)
             assert res is None
             mock_start.assert_called_once_with("https://example.com")
 
 
-@patch("script_runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
+@patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
 def test_launch_python_windows(mock_sub):
     with patch("sys.platform", "win32"):
         l = Launcher.new("Script", "myscript.py")
@@ -145,7 +145,7 @@ def test_launch_python_windows(mock_sub):
         assert mock_sub.Popen.called
 
 
-@patch("script_runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
+@patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
 def test_launch_win32_bare_command_shell(mock_sub):
     with patch("sys.platform", "win32"):
         l = Launcher.new("Calc", "calc")
@@ -157,7 +157,7 @@ def test_launch_win32_bare_command_shell(mock_sub):
         assert call[1].get("shell") is True or "shell" in str(call)
 
 
-@patch("script_runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
+@patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
 def test_launch_win32_show_console(mock_sub):
     with patch("sys.platform", "win32"):
         l = Launcher.new("Cmd", "cmd", show_console=True)
@@ -165,7 +165,7 @@ def test_launch_win32_show_console(mock_sub):
         assert mock_sub.Popen.called
 
 
-@patch("script_runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
+@patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
 def test_launch_win32_python_wrapped_console(mock_sub):
     with patch("sys.platform", "win32"):
         l = Launcher.new("PyScript", "python", args="myscript.py", show_console=True)
@@ -180,7 +180,7 @@ def test_launch_run_as_admin_windows_body_covered():
     """
     fake_ctypes = MagicMock()
     with patch("sys.platform", "win32"), \
-         patch("script_runner.launcher.subprocess") as mock_sub, \
+         patch("runner.launcher.subprocess") as mock_sub, \
          patch.dict("sys.modules", {"ctypes": fake_ctypes}):
         mock_sub.CREATE_NEW_CONSOLE = 0x10
         mock_sub.CREATE_NO_WINDOW = 0x08000000

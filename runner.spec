@@ -1,4 +1,4 @@
-# Canonical PyInstaller spec for Script Runner (macOS .app, Windows .exe).
+# Canonical PyInstaller spec for Runner (macOS .app, Windows .exe).
 #
 # The app only imports QtCore, QtGui, QtWidgets, and QtNetwork. PyInstaller's
 # Qt hooks still collect every image/input plugin under QtGui, which then pulls
@@ -6,12 +6,12 @@
 # unused bindings and strips the leftover binaries/translations after Analysis.
 #
 # Usage:
-#   pyinstaller --clean --noconfirm script-runner.spec
+#   pyinstaller --clean --noconfirm runner.spec
 #   ./scripts/build-mac.sh
 #   .\scripts\build-windows.ps1
 #
 # Windows onedir instead of onefile:
-#   $env:SCRIPTRUNNER_ONEFILE = "0"; pyinstaller --clean --noconfirm script-runner.spec
+#   $env:RUNNER_ONEFILE = "0"; pyinstaller --clean --noconfirm runner.spec
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ block_cipher = None
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 # macOS always ships an .app bundle (onedir). Windows defaults to a single exe.
-ONEFILE = (not IS_MAC) and os.environ.get("SCRIPTRUNNER_ONEFILE", "1") != "0"
+ONEFILE = (not IS_MAC) and os.environ.get("RUNNER_ONEFILE", "1") != "0"
 
 # Qt modules this app actually uses (plus DBus, which QtGui links on macOS).
 KEEP_QT_MODULES = frozenset({"Core", "Gui", "Widgets", "Network", "DBus"})
@@ -205,7 +205,7 @@ a.datas = _filter_toc(a.datas, "datas")
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-APP_NAME = "Script Runner" if IS_MAC else "ScriptRunner"
+APP_NAME = "Runner"
 
 exe_kwargs = dict(
     debug=False,
@@ -260,13 +260,13 @@ else:
     if IS_MAC:
         app = BUNDLE(
             coll,
-            name="Script Runner.app",
+            name="Runner.app",
             icon=None,
-            bundle_identifier="com.douglie.scriptrunner",
+            bundle_identifier="com.douglie.runner",
             info_plist={
                 "LSUIElement": True,
-                "CFBundleName": "Script Runner",
-                "CFBundleDisplayName": "Script Runner",
+                "CFBundleName": "Runner",
+                "CFBundleDisplayName": "Runner",
                 "NSHighResolutionCapable": True,
             },
         )

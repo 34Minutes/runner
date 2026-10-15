@@ -1,6 +1,6 @@
-# Script Runner - Pre-Development Recommendation & Ideas
+# Runner - Pre-Development Recommendation & Ideas
 
-**Project**: Script Runner  
+**Project**: Runner  
 **Goal**: A lightweight, always-on-top single launcher for any scripts or applications on Windows.  
 **Date**: 2026
 
@@ -32,7 +32,7 @@
 | Configurable UI size             | Simple QWidget resize + persisted settings            | Easy |
 | System tray + context menu       | `QSystemTrayIcon` + `QMenu`                           | Required for good UX |
 | Theming / button styles          | QSS (Qt Style Sheets) – CSS-like                      | Modern minimal look without native widget limits |
-| Single-file Windows distribution | PyInstaller (`--onefile --noconsole`) or Nuitka       | Produces `ScriptRunner.exe` |
+| Single-file Windows distribution | PyInstaller (`--onefile --noconsole`) or Nuitka       | Produces `Runner.exe` |
 | Python script launching          | First-class (detect .py, choose interpreter, venvs later) | Aligns with your use case |
 | Learning / iteration speed       | Very high                                             | Quick to prototype the tricky hover state machine |
 | Future cross-platform            | Possible (with some Windows-specific launch code)     | Bonus |
@@ -217,7 +217,7 @@ Extra good seeds:
   show_console: bool = False
   ```
 - `Settings`: trigger_width, trigger_height, dropdown_width, position_x, position_y, hover_delay_ms, animation_duration_ms, theme, hotkey, etc.
-- JSON file in `platformdirs.user_config_dir("ScriptRunner") / "config.json"`
+- JSON file in `platformdirs.user_config_dir("Runner") / "config.json"`
 - Atomic write helper.
 - Load on startup, save on changes + on exit.
 
@@ -267,7 +267,7 @@ Extra good seeds:
 
 ### Project Layout (proposed)
 ```
-script-runner/
+runner/
 ├── docs/
 │   └── LANGUAGE_RECOMMENDATION.md   (this file)
 ├── assets/

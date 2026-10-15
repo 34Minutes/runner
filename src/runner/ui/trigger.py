@@ -75,7 +75,7 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Script Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter — menu auto-closes on mouse leave), Add, Manage, Reset position & size, Exit")
+        self.setToolTip("Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter — menu auto-closes on mouse leave), Add, Manage, Reset position & size, Exit")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)

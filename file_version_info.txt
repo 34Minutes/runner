@@ -2,8 +2,7 @@
 # This gives the .exe proper metadata visible in File Properties,
 # Task Manager, "Open with", etc.
 #
-# ProductName is set to "Script Runner" (with space) as requested.
-# The executable filename remains ScriptRunner.exe (no space) for practicality.
+# ProductName and the executable filename are both "Runner" / Runner.exe.
 
 VSVersionInfo(
   ffi=FixedFileInfo(
@@ -22,13 +21,13 @@ VSVersionInfo(
         StringTable(
           u'040904B0',
           [
-            StringStruct(u'CompanyName', u'Script Runner Contributors'),
-            StringStruct(u'FileDescription', u'Script Runner'),
+            StringStruct(u'CompanyName', u'Runner Contributors'),
+            StringStruct(u'FileDescription', u'Runner'),
             StringStruct(u'FileVersion', u'1.0.1.1'),
-            StringStruct(u'InternalName', u'ScriptRunner'),
-            StringStruct(u'LegalCopyright', u'Copyright (c) Script Runner Contributors'),
-            StringStruct(u'OriginalFilename', u'ScriptRunner.exe'),
-            StringStruct(u'ProductName', u'Script Runner'),
+            StringStruct(u'InternalName', u'Runner'),
+            StringStruct(u'LegalCopyright', u'Copyright (c) Runner Contributors'),
+            StringStruct(u'OriginalFilename', u'Runner.exe'),
+            StringStruct(u'ProductName', u'Runner'),
             StringStruct(u'ProductVersion', u'1.0.1.1'),
           ]
         )

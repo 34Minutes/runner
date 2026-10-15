@@ -1,12 +1,12 @@
 [project]
-name = "script-runner"
+name = "runner"
 version = "1.0.1b1"
 description = "A lightweight, always-on-top single launcher for scripts and applications (macOS + Windows)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-  {name = "Script Runner Contributors"}
+  {name = "Runner Contributors"}
 ]
 dependencies = [
     "PySide6>=6.6.0",
@@ -22,7 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-script-runner = "script_runner.main:main"
+runner = "runner.main:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -32,7 +32,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"script_runner" = ["assets/*"]
+"runner" = ["assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
