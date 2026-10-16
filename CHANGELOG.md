@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.0] - 2026-10-16
+
+First stable release.
+
+### Changed
+- Version set to 1.0.0. The alpha and beta tags remain the test builds that led here.
+- The project name is Runner. The package, spec, docs, and macOS app are no longer called script-runner.
+
 ## [BETA_1.0.1] - 2026-09-01
 
 Second beta release of Runner.

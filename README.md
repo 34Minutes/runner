@@ -2,7 +2,7 @@
 
 A lightweight floating launcher for any scripts or applications. Single point to launch everything you need.
 
-## Features (BETA)
+## Features
 - Tiny draggable + resizable trigger widget (downward arrow) that lives on your desktop
 - Hover the arrow → smoothly animated dropdown list of your configured launchers (with live filter/search box)
 - "Pin dropdown open" and "Show filter box in dropdown" quick toggles available directly in the arrow's right-click menu (also reflected in the Manage dialog for discoverability)
