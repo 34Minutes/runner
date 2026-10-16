@@ -41,8 +41,8 @@ echo "==> Making it a background/agent app (no Dock icon) and setting nice names
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :CFBundleName 'Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.0" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.0" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.1" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.1" "$APP/Contents/Info.plist"
 
 # Use a stable bundle identifier (change if you want)
 BUNDLE_ID="com.douglie.runner"

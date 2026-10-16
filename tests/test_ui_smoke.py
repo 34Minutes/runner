@@ -78,6 +78,17 @@ def test_add_dialog_advanced_fields_roundtrip(qapp, qtbot):
     assert orig.name == "AdminTask2"
 
 
+def test_add_and_manage_dialogs_stay_above_arrow(qapp, qtbot):
+    add = AddEditDialog(None)
+    qtbot.addWidget(add)
+    assert add.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+    cfg = ConfigManager()
+    manage = ManagerDialog(cfg)
+    qtbot.addWidget(manage)
+    assert manage.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+
 def test_add_dialog_create_new(qapp, qtbot):
     dlg = AddEditDialog(None)
     qtbot.addWidget(dlg)

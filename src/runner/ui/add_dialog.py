@@ -10,24 +10,22 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLineEdit,
     QPushButton,
-    QFileDialog,
     QHBoxLayout,
     QWidget,
 )
 
+from .stay_on_top import StayOnTopDialog, get_existing_directory, get_open_file_name, warning
 from .toggle_switch import ToggleSwitch
 
 from ..config import Launcher
 
 
-class AddEditDialog(QDialog):
+class AddEditDialog(StayOnTopDialog):
     """Modal dialog to create or edit a Launcher."""
 
     def __init__(self, launcher: Launcher | None = None, parent: QWidget | None = None) -> None:
@@ -116,14 +114,12 @@ class AddEditDialog(QDialog):
         else:
             filt = "Executables and Scripts (*.app *.py *.sh *.bin);;All Files (*.*)"
 
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select program or script", "", filt
-        )
+        path = get_open_file_name(self, "Select program or script", "", filt)
         if path:
             self._command_edit.setText(path)
 
     def _on_browse_dir(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Select working directory")
+        d = get_existing_directory(self, "Select working directory")
         if d:
             self._work_dir_edit.setText(d)
 
@@ -131,8 +127,7 @@ class AddEditDialog(QDialog):
         name = self._name_edit.text().strip()
         command = self._command_edit.text().strip()
         if not name or not command:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Missing info", "Name and Command are required.")
+            warning(self, "Missing info", "Name and Command are required.")
             return
 
         work_dir = self._work_dir_edit.text().strip() or None

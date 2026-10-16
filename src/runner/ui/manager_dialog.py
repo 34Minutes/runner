@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -20,9 +19,10 @@ from PySide6.QtWidgets import (
 
 from ..config import ConfigManager, Launcher
 from .add_dialog import AddEditDialog
+from .stay_on_top import StayOnTopDialog, question
 
 
-class ManagerDialog(QDialog):
+class ManagerDialog(StayOnTopDialog):
     """Dialog for managing the list of launchers (edit / delete / reorder)."""
 
     def __init__(self, cfg: ConfigManager, parent=None):
@@ -131,7 +131,7 @@ class ManagerDialog(QDialog):
         launcher = self._get_selected_launcher()
         if not launcher:
             return
-        reply = QMessageBox.question(
+        reply = question(
             self,
             "Delete Launcher",
             f"Delete '{launcher.name}'?",

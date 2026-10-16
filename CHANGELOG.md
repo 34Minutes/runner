@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.1] - 2026-10-16
+
+### Fixed
+- Windows: Add, Edit, and Manage opened behind the always-on-top arrow. Those dialogs, and the file and message windows they open, now stay above the arrow.
+
 ## [1.0.0] - 2026-10-16
 
 First stable release.

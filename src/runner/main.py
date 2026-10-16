@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QSystemTrayIcon,
     QMenu,
-    QMessageBox,
 )
 
 from .config import ConfigManager, Launcher, AppConfig
@@ -29,6 +28,7 @@ from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
 from .ui.manager_dialog import ManagerDialog
+from .ui.stay_on_top import warning as stay_on_top_warning
 
 if sys.platform == "win32":
     from .utils import windows as win_utils  # type: ignore
@@ -354,8 +354,8 @@ def main() -> int:
                     "Launched", launcher.name, QSystemTrayIcon.MessageIcon.Information, 1200
                 )
         except Exception as exc:
-            QMessageBox.warning(
-                None,
+            stay_on_top_warning(
+                trigger,
                 "Launch failed",
                 f"Could not launch '{launcher.name}':\n{exc}",
             )
