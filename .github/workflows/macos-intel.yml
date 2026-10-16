@@ -1,0 +1,31 @@
+name: Build Intel Mac
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Create the project virtualenv
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -e ".[dev]"
+
+      - name: Build
+        run: ./scripts/build-mac.sh
+
+      - name: Name the disk image
+        run: cp dist/Runner.dmg dist/Runner-intel.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Runner-macos-intel
+          path: dist/Runner-intel.dmg
