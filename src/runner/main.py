@@ -13,8 +13,10 @@ Wires together:
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, QTimer, QPoint, QSize, QRect
-from PySide6.QtGui import QIcon, QAction, QPainter, QPen, QColor, QPixmap
+from PySide6.QtGui import QCursor, QIcon, QAction, QPainter, QPen, QColor, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,13 +30,17 @@ from .config import (
     DEFAULT_TRIGGER_WIDTH,
     AppConfig,
     ConfigManager,
+    Group,
     Launcher,
 )
+from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .launcher import launch
 from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
+from .ui.group_dialog import GroupDialog
+from .ui.group_manager import GroupManagerDialog
 from .ui.manager_dialog import ManagerDialog
 from .ui.stay_on_top import question as stay_on_top_question
 from .ui.stay_on_top import warning as stay_on_top_warning
@@ -86,8 +92,15 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
         cfg.add_launcher(s)
 
 
-def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPanel,
-                cfg: ConfigManager) -> QSystemTrayIcon:
+def create_tray(
+    app: QApplication,
+    trigger: TriggerWidget,
+    dropdown: DropdownPanel,
+    cfg: ConfigManager,
+    *,
+    before_show: Callable[[], None] | None = None,
+    on_reloaded: Callable[[], None] | None = None,
+) -> QSystemTrayIcon:
     """Create and return a system tray icon with useful menu."""
     tray = QSystemTrayIcon()
 
@@ -123,9 +136,11 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     act_reload = QAction("Reload config", menu)
     def do_reload():
         cfg.reload()
-        dropdown.rebuild_buttons(cfg.get_enabled_launchers())
+        dropdown.rebuild_buttons(cfg.get_main_view_launchers())
         trigger.update_size_from_settings()
-        if cfg.config.settings.pinned_open:
+        if on_reloaded is not None:
+            on_reloaded()
+        elif cfg.config.settings.pinned_open:
             dropdown.position_adjacent(trigger)
             dropdown.ensure_visible_and_sized()
         # reposition if needed
@@ -149,8 +164,10 @@ def create_tray(app: QApplication, trigger: TriggerWidget, dropdown: DropdownPan
     def on_tray_activated(reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             # Force show the dropdown near trigger
+            if before_show is not None:
+                before_show()
             dropdown.position_adjacent(trigger)
-            dropdown.rebuild_buttons(cfg.get_enabled_launchers())
+            dropdown.rebuild_buttons(cfg.get_main_view_launchers())
             if cfg.config.settings.pinned_open:
                 dropdown.ensure_visible_and_sized()
             else:
@@ -258,9 +275,23 @@ def main() -> int:
     trigger = TriggerWidget(cfg_mgr.config)
     app._trigger_ref[0] = trigger  # for single-instance handler
     dropdown = DropdownPanel(cfg_mgr.config)
+    group_panel = DropdownPanel(cfg_mgr.config, honor_pin=False)
+    group_panel.set_list_copy(
+        placeholder="Filter groups...",
+        empty_hint="",
+    )
+    group_panel.set_order_ids(lambda: [group.id for group in cfg_mgr.config.groups])
+    group_panel.set_row_tooltip(
+        lambda row: (
+            f"Run group: {row.name}\n"
+            "Drag up or down to reorder\n"
+            "Right-click to edit or delete"
+        )
+    )
+    group_panel.set_heading("Groups")
 
-    # Initial button population
-    dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+    # Initial button population. Launchers marked only-in-groups stay off this list.
+    dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
 
     # Validate that saved position is still on screen (e.g. after monitor changes)
     # If not, reset to a safe default.
@@ -293,7 +324,7 @@ def main() -> int:
         cfg_mgr.update_settings(position_x=trigger.x(), position_y=trigger.y())
     dropdown.refresh_filter_visibility()
 
-    greeting = StartupGreeting(show_bubble=not cfg_mgr.had_saved_config)
+    greeting = StartupGreeting()
     app._startup_greeting = greeting
 
     # Hover coordination
@@ -304,6 +335,7 @@ def main() -> int:
     hide_timer = QTimer()
     hide_timer.setSingleShot(True)
     hide_timer.setInterval(cfg_mgr.config.settings.hover_delay_ms)
+    showing_groups = False
 
     def schedule_hide():
         hide_timer.start()
@@ -311,24 +343,119 @@ def main() -> int:
     def cancel_hide():
         hide_timer.stop()
         dropdown.cancel_hide()  # also cancel dropdown's internal timer to keep list open when mouse is over trigger
+        group_panel.cancel_hide()
+
+    def _show_groups_enabled() -> bool:
+        return bool(getattr(cfg_mgr.config.settings, "show_groups", False))
 
     def do_hide():
+        if showing_groups:
+            group_panel.start_hide_animation()
+            return
+        if group_panel.isVisible():
+            group_panel.start_hide_animation()
         if not cfg_mgr.config.settings.pinned_open:
             dropdown.start_hide_animation()
 
     hide_timer.timeout.connect(do_hide)
 
+    def _refresh_group_list() -> None:
+        rows = [
+            Launcher(id=group.id, name=group.name, command="")
+            for group in cfg_mgr.config.groups
+        ]
+        group_panel.rebuild_buttons(rows)
+        if group_panel.isVisible():
+            group_panel.update_height_for_content()
+
+    def _place_groups_beside() -> None:
+        group_panel.position_beside(dropdown, trigger)
+
+    def _show_groups_beside() -> None:
+        """Launcher list stays. Groups sit beside it, toward the middle of the screen.
+
+        An empty group list stays hidden, including the old empty-state message.
+        """
+        if showing_groups or not _show_groups_enabled():
+            return
+        if not cfg_mgr.config.groups:
+            _hide_groups_beside()
+            return
+        _refresh_group_list()
+        group_panel.use_position_hook(_place_groups_beside)
+        if group_panel.isVisible():
+            group_panel.ensure_visible_and_sized()
+        else:
+            group_panel.start_show_animation()
+        trigger.raise_()
+        dropdown.stackUnder(trigger)
+        group_panel.stackUnder(trigger)
+
+    def _hide_groups_beside() -> None:
+        if showing_groups:
+            return
+        group_panel.use_position_hook(None)
+        if group_panel.isVisible():
+            group_panel.force_hide()
+
+    def _show_group_panel() -> None:
+        nonlocal showing_groups
+        if not cfg_mgr.config.groups:
+            showing_groups = False
+            _hide_groups_beside()
+            return
+        showing_groups = True
+        cancel_hide()
+        group_panel.use_position_hook(None)
+        if dropdown.isVisible():
+            dropdown.force_hide()
+        _refresh_group_list()
+        group_panel.position_adjacent(trigger)
+        if group_panel.isVisible():
+            group_panel.ensure_visible_and_sized()
+        else:
+            group_panel.start_show_animation()
+        trigger.raise_()
+        group_panel.stackUnder(trigger)
+
+    def on_group_panel_closed() -> None:
+        nonlocal showing_groups
+        # A hide that was already running can finish after the list is shown again.
+        if group_panel.isVisible():
+            return
+        showing_groups = False
+        if cfg_mgr.config.settings.pinned_open:
+            apply_pinned_state()
+
     def on_trigger_enter():
         cancel_hide()  # cancels both main timer and dropdown's internal timer
+        if showing_groups:
+            group_panel.position_adjacent(trigger)
+            if group_panel.is_closing() or not group_panel.isVisible():
+                _show_group_panel()
+            trigger.raise_()
+            group_panel.stackUnder(trigger)
+            return
         dropdown.position_adjacent(trigger)
-        dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+        dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
         if not dropdown.isVisible():
             dropdown.start_show_animation()
         trigger.raise_()
         dropdown.stackUnder(trigger)
+        if _show_groups_enabled():
+            _show_groups_beside()
+        else:
+            _hide_groups_beside()
+
+    def _pointer_over(widget) -> bool:
+        return widget.isVisible() and widget.frameGeometry().contains(QCursor.pos())
 
     def on_trigger_leave():
-        if not cfg_mgr.config.settings.pinned_open:
+        # Moving from the arrow menu onto a list must not start a hide.
+        # The list's own leave collapses it.
+        if _pointer_over(dropdown) or _pointer_over(group_panel):
+            return
+        if showing_groups or not cfg_mgr.config.settings.pinned_open:
             schedule_hide()
 
     def on_dropdown_enter():
@@ -336,6 +463,17 @@ def main() -> int:
 
     def on_dropdown_leave():
         if not cfg_mgr.config.settings.pinned_open:
+            schedule_hide()
+
+    def on_group_enter():
+        cancel_hide()
+        if showing_groups and group_panel.is_closing():
+            group_panel.start_show_animation()
+        elif not showing_groups and _show_groups_enabled() and group_panel.is_closing():
+            _show_groups_beside()
+
+    def on_group_leave():
+        if showing_groups or (_show_groups_enabled() and not cfg_mgr.config.settings.pinned_open):
             schedule_hide()
 
     def reset_position_and_size():
@@ -351,14 +489,15 @@ def main() -> int:
         trigger.resize(default_w, default_h)
         trigger.move(default_x, default_y)
         trigger.raise_()
-        if cfg_mgr.config.settings.pinned_open:
-            dropdown.position_adjacent(trigger)
-            dropdown.ensure_visible_and_sized()
+        _follow_trigger()
 
     trigger.hover_enter.connect(on_trigger_enter)
     trigger.hover_leave.connect(on_trigger_leave)
     dropdown.hover_enter.connect(on_dropdown_enter)
     dropdown.hover_leave.connect(on_dropdown_leave)
+    group_panel.hover_enter.connect(on_group_enter)
+    group_panel.hover_leave.connect(on_group_leave)
+    group_panel.closed.connect(on_group_panel_closed)
 
     trigger.request_reset.connect(reset_position_and_size)
 
@@ -395,9 +534,15 @@ def main() -> int:
     dropdown.reordered.connect(on_reordered)
 
     def _refresh_open_list() -> None:
-        dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+        dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
         if cfg_mgr.config.settings.pinned_open:
             apply_pinned_state()
+
+    def _group_by_id(group_id: str) -> Group | None:
+        for group in cfg_mgr.config.groups:
+            if group.id == group_id:
+                return group
+        return None
 
     def on_edit_requested(launcher: Launcher) -> None:
         show_add_dialog(launcher)
@@ -426,11 +571,7 @@ def main() -> int:
             greeting.show_again(trigger)
         else:
             greeting.dismiss_for_session()
-        if cfg_mgr.config.settings.pinned_open:
-            dropdown.position_adjacent(trigger)
-            dropdown.ensure_visible_and_sized()
-            trigger.raise_()
-            dropdown.stackUnder(trigger)
+        _follow_trigger()
 
     def show_add_dialog(existing: Launcher | None = None):
         dlg = AddEditDialog(existing, trigger)
@@ -441,9 +582,30 @@ def main() -> int:
                     cfg_mgr.update_launcher(new_or_updated)
                 else:
                     cfg_mgr.add_launcher(new_or_updated)
-                dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+                dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
+
+    def _follow_trigger() -> None:
+        """Keep whichever list is open beside the arrow."""
+        if showing_groups and group_panel.isVisible():
+            group_panel.use_position_hook(None)
+            group_panel.position_adjacent(trigger)
+            group_panel.ensure_visible_and_sized()
+            trigger.raise_()
+            group_panel.stackUnder(trigger)
+            return
+        if not dropdown.isVisible() and not cfg_mgr.config.settings.pinned_open:
+            return
+        dropdown.position_adjacent(trigger)
+        if cfg_mgr.config.settings.pinned_open:
+            dropdown.ensure_visible_and_sized()
+        trigger.raise_()
+        dropdown.stackUnder(trigger)
+        if _show_groups_enabled() and (group_panel.isVisible() or cfg_mgr.config.settings.pinned_open):
+            _show_groups_beside()
 
     def apply_pinned_state():
+        if showing_groups:
+            return
         pinned = cfg_mgr.config.settings.pinned_open
         if pinned:
             dropdown.position_adjacent(trigger)
@@ -455,18 +617,114 @@ def main() -> int:
                 dropdown.update_height_for_content()
             trigger.raise_()
             dropdown.stackUnder(trigger)
+            if _show_groups_enabled():
+                _show_groups_beside()
         else:
             dropdown.force_hide()
+            _hide_groups_beside()
 
     def show_manager_dialog():
         dlg = ManagerDialog(cfg_mgr, trigger)
         dlg.exec()
         # always rebuild after manager (launchers may have changed) and apply pin state
-        dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+        dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
         apply_pinned_state()
+
+    def show_group_dialog(existing: Group | None = None) -> None:
+        dialog = GroupDialog(cfg_mgr, existing, trigger)
+        dialog.launchers_changed.connect(_refresh_open_list)
+        accepted = bool(dialog.exec())
+        result = dialog.result_group
+        if accepted and result is not None:
+            if existing is None:
+                cfg_mgr.add_group(result)
+            else:
+                cfg_mgr.update_group(result)
+        _refresh_open_list()
+        _sync_groups_after_change()
+
+    def show_group_manager() -> None:
+        dialog = GroupManagerDialog(cfg_mgr, trigger)
+        dialog.exec()
+        _refresh_open_list()
+        _sync_groups_after_change()
+
+    def on_group_launch(row: Launcher) -> None:
+        group = _group_by_id(row.id)
+        if group is None:
+            return
+        steps = execution_steps(group, cfg_mgr.config.launchers)
+        group_panel.force_hide()
+        if not cfg_mgr.config.settings.pinned_open:
+            dropdown.start_hide_animation()
+        if not steps:
+            stay_on_top_warning(
+                trigger,
+                "Nothing to launch",
+                f"'{group.name}' has no enabled launchers.",
+            )
+            return
+        errors: list[str] = []
+
+        def launch_one(item: Launcher) -> None:
+            launch(item)
+
+        def on_error(item: Launcher, exc: Exception) -> None:
+            errors.append(f"{item.name}: {exc}")
+
+        def on_finished() -> None:
+            if errors:
+                stay_on_top_warning(trigger, "Launch failed", "\n".join(errors))
+
+        if tray.isVisible():
+            tray.showMessage(
+                "Started",
+                group.name,
+                QSystemTrayIcon.MessageIcon.Information,
+                1200,
+            )
+        run_group_steps(
+            steps,
+            launch_one,
+            lambda delay, callback: QTimer.singleShot(delay, trigger, callback),
+            gap_ms=GROUP_STEP_GAP_MS,
+            on_error=on_error,
+            on_finished=on_finished,
+        )
+
+    def on_group_edit(row: Launcher) -> None:
+        group = _group_by_id(row.id)
+        if group is not None:
+            show_group_dialog(group)
+
+    def on_group_delete(row: Launcher) -> None:
+        group = _group_by_id(row.id)
+        if group is None:
+            return
+        reply = stay_on_top_question(
+            trigger,
+            "Delete Group",
+            f"Delete '{group.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        cfg_mgr.remove_group(group.id)
+        _sync_groups_after_change()
+
+    def on_group_reordered(ordered_ids: list[str]) -> None:
+        cfg_mgr.reorder_groups(ordered_ids)
+
+    group_panel.launch_requested.connect(on_group_launch)
+    group_panel.edit_requested.connect(on_group_edit)
+    group_panel.delete_requested.connect(on_group_delete)
+    group_panel.reordered.connect(on_group_reordered)
 
     trigger.request_add.connect(lambda: show_add_dialog())
     trigger.request_manage.connect(lambda: show_manager_dialog())
+    trigger.request_add_group.connect(lambda: show_group_dialog())
+    trigger.request_manage_groups.connect(show_group_manager)
+    trigger.request_groups.connect(_show_group_panel)
 
     # Connect the quick toggles from the arrow's right-click menu
     def on_pin_toggled(checked):
@@ -478,13 +736,33 @@ def main() -> int:
     def on_filter_toggled(checked):
         cfg_mgr.update_settings(show_filter_box=checked)
         dropdown.refresh_filter_visibility()
-        if dropdown.isVisible():
+        group_panel.refresh_filter_visibility()
+        if showing_groups and group_panel.isVisible():
+            group_panel.update_height_for_content()
+            group_panel.position_adjacent(trigger)
+        elif _show_groups_enabled() and group_panel.isVisible():
+            group_panel.update_height_for_content()
+            _place_groups_beside()
+            if dropdown.isVisible():
+                dropdown.update_height_for_content()
+        elif dropdown.isVisible():
             dropdown.update_height_for_content()
             if cfg_mgr.config.settings.pinned_open:
                 dropdown.position_adjacent(trigger)
 
     trigger.filter_toggled.connect(on_filter_toggled)
     trigger.greeting_toggled.connect(_on_greeting_toggled)
+
+    def on_show_groups_toggled(checked: bool) -> None:
+        cfg_mgr.update_settings(show_groups=checked)
+        if showing_groups:
+            return
+        if checked and (dropdown.isVisible() or cfg_mgr.config.settings.pinned_open):
+            _show_groups_beside()
+        elif not checked:
+            _hide_groups_beside()
+
+    trigger.groups_toggled.connect(on_show_groups_toggled)
 
     # Windows startup integration
     if sys.platform == "win32" and win_utils is not None:
@@ -502,11 +780,7 @@ def main() -> int:
     # Persist position when user drags the trigger
     def save_position(x: int, y: int):
         cfg_mgr.update_settings(position_x=x, position_y=y)
-        if cfg_mgr.config.settings.pinned_open:
-            dropdown.position_adjacent(trigger)
-            dropdown.ensure_visible_and_sized()
-            trigger.raise_()
-            dropdown.stackUnder(trigger)
+        _follow_trigger()
 
     trigger.position_changed.connect(save_position)
 
@@ -519,11 +793,7 @@ def main() -> int:
         )
         # The hint asked them to resize. Hide it for this launch; the switch brings it back next start.
         greeting.dismiss_for_session()
-        if cfg_mgr.config.settings.pinned_open:
-            dropdown.position_adjacent(trigger)
-            dropdown.ensure_visible_and_sized()
-            trigger.raise_()
-            dropdown.stackUnder(trigger)
+        _follow_trigger()
 
     trigger.size_changed.connect(save_size)
 
@@ -545,7 +815,51 @@ def main() -> int:
     app.aboutToQuit.connect(_save_trigger_geometry)
 
     # System tray
-    tray = create_tray(app, trigger, dropdown, cfg_mgr)
+    def _sync_groups_after_change() -> None:
+        """Keep an open groups list in step with add, edit, and delete.
+
+        Hover builds the list from current groups. Saving a group while that
+        list is already open, or while the launcher list is pinned open, updates
+        it immediately. With no groups left, the list hides.
+        """
+        if showing_groups:
+            if not cfg_mgr.config.groups:
+                group_panel.force_hide()
+                return
+            _refresh_group_list()
+            if group_panel.isVisible():
+                group_panel.position_adjacent(trigger)
+                group_panel.ensure_visible_and_sized()
+            return
+        if _show_groups_enabled() and (
+            group_panel.isVisible()
+            or dropdown.isVisible()
+            or cfg_mgr.config.settings.pinned_open
+        ):
+            _show_groups_beside()
+
+    def _before_tray_show() -> None:
+        if showing_groups:
+            group_panel.force_hide()
+
+    def _after_reload() -> None:
+        if showing_groups:
+            _sync_groups_after_change()
+            return
+        if cfg_mgr.config.settings.pinned_open:
+            dropdown.position_adjacent(trigger)
+            dropdown.ensure_visible_and_sized()
+            if _show_groups_enabled():
+                _show_groups_beside()
+
+    tray = create_tray(
+        app,
+        trigger,
+        dropdown,
+        cfg_mgr,
+        before_show=_before_tray_show,
+        on_reloaded=_after_reload,
+    )
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()
@@ -556,7 +870,7 @@ def main() -> int:
     # calculates its position relative to it (important for custom sizes + pinned mode).
     def _after_show() -> None:
         if cfg_mgr.config.settings.show_startup_greeting:
-            greeting.present(trigger, show_bubble=not cfg_mgr.had_saved_config)
+            greeting.present(trigger)
         apply_pinned_state()
 
     QTimer.singleShot(0, _after_show)

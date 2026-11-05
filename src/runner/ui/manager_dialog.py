@@ -95,6 +95,8 @@ class ManagerDialog(StayOnTopDialog):
                 flags.append("admin")
             if launcher.show_console:
                 flags.append("console")
+            if launcher.only_in_groups:
+                flags.append("only in groups")
             if flags:
                 text += "  (" + ", ".join(flags) + ")"
             if launcher.working_dir:

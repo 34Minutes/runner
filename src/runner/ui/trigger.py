@@ -2,20 +2,147 @@
 
 - Frameless Tool window
 - Draggable by the user
-- Right-click context menu (Add..., Manage..., Exit)
+- Right-click context menu (Add..., Manage..., groups, Exit)
 - Emits hover enter/leave for the dropdown controller
 - Respects size from settings
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QPointF, QTimer, QObject
-from PySide6.QtGui import QAction, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
+from PySide6.QtCore import Qt, QEvent, QPoint, QRect, Signal, QPointF, QTimer, QObject
+from PySide6.QtGui import QAction, QCursor, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtWidgets import QWidget, QMenu, QApplication, QWidgetAction
 import sys
 
 from ..config import AppConfig, Launcher
 from .toggle_switch import ToggleSwitch
+
+
+class ArrowContextMenu(QMenu):
+    """Arrow menu that stays open while a toggle is clicked.
+
+    Qt hides a popup when a widget action is activated, and a focus change
+    from the lists does the same. If the pointer is still inside, pop it
+    back open. A normal action, or the pointer leaving, dismisses it.
+    """
+
+    dismissed = Signal()
+    _REOPEN_LIMIT = 4
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._popup_pos = QPoint()
+        self._inside_rect = QRect()
+        self._chose_action = False
+        self._reopen_tries = 0
+        self._reopening = False
+        self._settled = False
+        self.triggered.connect(self._on_triggered)
+
+    def _on_triggered(self, action: QAction) -> None:
+        # Widget actions are the toggles. Those must not count as a choice
+        # that dismisses the menu. Qt emits this only after it has already hidden.
+        if isinstance(action, QWidgetAction):
+            return
+        self._chose_action = True
+
+    def open_at(self, pos: QPoint) -> None:
+        self._popup_pos = QPoint(pos)
+        if not self._reopening:
+            self._reopen_tries = 0
+            self._chose_action = False
+            self._settled = False
+        self._reopening = False
+        self.popup(self._popup_pos)
+
+    def pointer_inside(self, rect: QRect | None = None) -> bool:
+        bounds = self.frameGeometry() if rect is None else rect
+        if bounds.isNull() or bounds.isEmpty():
+            return False
+        return bounds.contains(QCursor.pos())
+
+    def close_if_pointer_left(self) -> None:
+        """Leave-timer callback. A stale leave must not win while the pointer is still here."""
+        try:
+            if self.isVisible() and self.pointer_inside():
+                return
+        except RuntimeError:
+            return
+        self.close()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if self._press_is_on_toggle(event):
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        # Activating the widget action is what hides the menu. The switch
+        # already got this click as a child, so do not send it again.
+        if self._press_is_on_toggle(event):
+            event.accept()
+            return
+        # Mark a real row before Qt hides the menu. The action's triggered
+        # signal runs after that hide, and a dialog it opens would otherwise
+        # pop the menu open again on the nested event loop.
+        self._mark_chosen_row(event.position().toPoint())
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._mark_chosen_row(None)
+        super().keyPressEvent(event)
+
+    def _mark_chosen_row(self, pos: QPoint | None) -> None:
+        action = self.activeAction() if pos is None else self.actionAt(pos)
+        if action is None or not action.isEnabled() or action.isSeparator():
+            return
+        if isinstance(action, QWidgetAction):
+            return
+        self._chose_action = True
+
+    def _press_is_on_toggle(self, event: QMouseEvent) -> bool:
+        try:
+            action = self.actionAt(event.position().toPoint())
+        except RuntimeError:
+            return False
+        return isinstance(action, QWidgetAction)
+
+    def hideEvent(self, event) -> None:  # type: ignore[override]
+        rect = QRect(self.frameGeometry())
+        stay = (
+            not self._chose_action
+            and not self._settled
+            and self._reopen_tries < self._REOPEN_LIMIT
+            and self.pointer_inside(rect)
+        )
+        super().hideEvent(event)
+        if stay:
+            self._reopen_tries += 1
+            self._inside_rect = rect
+            QTimer.singleShot(0, self._reopen)
+            return
+        self._notify_dismissed()
+
+    def _reopen(self) -> None:
+        if self.isVisible():
+            return
+        if (
+            self._chose_action
+            or self._settled
+            or self._reopen_tries > self._REOPEN_LIMIT
+            or not self.pointer_inside(self._inside_rect)
+        ):
+            self._notify_dismissed()
+            return
+        self._reopening = True
+        self.open_at(self._popup_pos)
+
+    def _notify_dismissed(self) -> None:
+        if self._settled:
+            return
+        self._settled = True
+        self.dismissed.emit()
 
 
 class TriggerWidget(QWidget):
@@ -27,11 +154,15 @@ class TriggerWidget(QWidget):
     size_changed = Signal(int, int)  # w, h
     request_add = Signal()
     request_manage = Signal()
+    request_add_group = Signal()
+    request_manage_groups = Signal()
+    request_groups = Signal()
     request_reset = Signal()
     request_exit = Signal()
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
     greeting_toggled = Signal(bool)
+    groups_toggled = Signal(bool)
     startup_toggled = Signal(bool)  # Windows only
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
@@ -79,7 +210,11 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter, Greeting — menu auto-closes on mouse leave), Add, Manage, Reset position & size, Exit")
+        self.setToolTip(
+            "Runner — hover the arrow to open launcher list\n"
+            "Right-click for quick toggles (Pin, Filter, Greeting, Show groups — menu auto-closes on mouse leave), "
+            "Add, Manage, Groups, Reset position & size, Exit"
+        )
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)
@@ -91,6 +226,15 @@ class TriggerWidget(QWidget):
         self._action_reset = QAction("Reset position & size", self)
         self._action_reset.triggered.connect(self.request_reset.emit)
 
+        self._action_add_group = QAction("Add group", self)
+        self._action_add_group.triggered.connect(self.request_add_group.emit)
+
+        self._action_manage_groups = QAction("Manage groups", self)
+        self._action_manage_groups.triggered.connect(self.request_manage_groups.emit)
+
+        self._action_groups = QAction("Groups", self)
+        self._action_groups.triggered.connect(self.request_groups.emit)
+
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
 
@@ -99,7 +243,7 @@ class TriggerWidget(QWidget):
         Using customContextMenuPolicy + this slot is more reliable on macOS
         (and with frameless/Tool windows) than overriding contextMenuEvent.
         """
-        menu = QMenu(self)
+        menu = ArrowContextMenu(self)
         menu.addAction(self._action_add)
         menu.addAction(self._action_manage)
         menu.addAction(self._action_reset)
@@ -134,6 +278,16 @@ class TriggerWidget(QWidget):
         greeting_switch.toggled.connect(lambda checked: self.greeting_toggled.emit(checked))
         menu.addAction(greeting_action)
 
+        groups_switch = ToggleSwitch("Show groups")
+        groups_switch.blockSignals(True)
+        groups_switch.setChecked(getattr(self._config.settings, "show_groups", False))
+        groups_switch.blockSignals(False)
+        groups_switch.setPalette(menu.palette())
+        groups_action = QWidgetAction(menu)
+        groups_action.setDefaultWidget(groups_switch)
+        groups_switch.toggled.connect(lambda checked: self.groups_toggled.emit(checked))
+        menu.addAction(groups_action)
+
         # Windows startup toggle (only really useful on Windows)
         if sys.platform == "win32":
             startup_switch = ToggleSwitch("Launch at Windows startup")
@@ -145,6 +299,10 @@ class TriggerWidget(QWidget):
             menu.addAction(startup_action)
 
         menu.addSeparator()
+        menu.addAction(self._action_add_group)
+        menu.addAction(self._action_manage_groups)
+        menu.addAction(self._action_groups)
+        menu.addSeparator()
         menu.addAction(self._action_exit)
 
         # Auto-hide the entire menu when the mouse moves away from it (no click required to dismiss).
@@ -153,7 +311,7 @@ class TriggerWidget(QWidget):
         hide_timer = QTimer(menu)
         hide_timer.setSingleShot(True)
         hide_timer.setInterval(250)
-        hide_timer.timeout.connect(menu.close)
+        hide_timer.timeout.connect(menu.close_if_pointer_left)
 
         class MenuMouseFilter(QObject):
             def __init__(self, menu, timer):
@@ -162,33 +320,70 @@ class TriggerWidget(QWidget):
                 self.timer = timer
 
             def eventFilter(self, obj, event):
-                if obj == self.menu:
-                    if event.type() == QEvent.Leave:
-                        self.timer.start()
-                    elif event.type() == QEvent.Enter:
-                        self.timer.stop()
+                try:
+                    if not self.menu.isVisible():
+                        return False
+                    menu_rect = self.menu.frameGeometry()
+                except RuntimeError:
+                    return False
+                kind = event.type()
+                if kind not in (QEvent.Type.Leave, QEvent.Type.Enter):
+                    return False
+                # A toggle is a child of the menu. Leave on that child still
+                # counts once the pointer has left the menu window itself.
+                over_menu = menu_rect.contains(QCursor.pos())
+                if kind == QEvent.Type.Leave and not over_menu:
+                    self.timer.start()
+                elif kind == QEvent.Type.Enter or over_menu:
+                    self.timer.stop()
                 return False
 
         mouse_filter = MenuMouseFilter(menu, hide_timer)
-        menu.installEventFilter(mouse_filter)
+        watched = [menu, pin_switch, filter_switch, greeting_switch, groups_switch]
+        if sys.platform == "win32":
+            watched.append(startup_switch)
+        for widget in watched:
+            # A focused child inside a popup dismisses the menu on click.
+            if widget is not menu:
+                widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            widget.installEventFilter(mouse_filter)
+
+        def _detach_menu_filter() -> None:
+            for widget in watched:
+                try:
+                    widget.removeEventFilter(mouse_filter)
+                except RuntimeError:
+                    pass
+
         # Keep strong refs on the menu so the filter/timer aren't GC'd prematurely
         menu._mouse_filter = mouse_filter
         menu._hide_timer = hide_timer
 
-        # Clean up timer if menu hides for any other reason (e.g. item selection)
+        # Stop the leave timer on any hide. Detach and collapse only when the
+        # menu is actually done, so a toggle click can pop it open again.
         menu.aboutToHide.connect(hide_timer.stop)
+        menu.dismissed.connect(_detach_menu_filter)
+        menu.dismissed.connect(self._finish_context_menu)
 
         # Suppress hover enter/leave while the menu is open. This prevents
         # the dropdown from hiding/showing and interfering with menu selection,
         # which was causing menus to immediately close on macOS.
+        # The flag is cleared when the menu is dismissed. If the pointer is
+        # already outside the arrow, that close is the leave the lists were waiting for.
         self._in_context_menu = True
-        menu.aboutToHide.connect(lambda: setattr(self, '_in_context_menu', False))
 
         # Use a zero-delay timer + popup(). This is a well-known workaround on
         # macOS for frameless/Tool windows where the context menu would otherwise
         # close immediately as soon as the user moves the mouse or releases the
         # right-click button.
-        QTimer.singleShot(0, lambda: menu.popup(global_pos))
+        QTimer.singleShot(0, lambda: menu.open_at(global_pos))
+
+    def _finish_context_menu(self) -> None:
+        """The menu ate the arrow's leave event. Collapse once it is gone."""
+        self._in_context_menu = False
+        if self.frameGeometry().contains(QCursor.pos()):
+            return
+        self.hover_leave.emit()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:

@@ -1,11 +1,11 @@
 """Drag rows in the dropdown to reorder launchers."""
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from runner.config import AppConfig, Launcher
-from runner.ui.dropdown import DropdownPanel, merge_visible_order
+from runner.ui.dropdown import DropdownPanel, _DRAG_LIFT_X, merge_visible_order
 from runner.ui.launch_button import LaunchButton
 
 
@@ -94,6 +94,11 @@ def test_drag_reorders_without_launching(qapp, qtbot):
         assert panel._drag_active is True
         assert gamma_button.property("dragging") == "true"
         assert "border: 4px solid rgba(255, 220, 70, 240)" in gamma_button.styleSheet()
+        assert [b.launcher.name for b in panel._drag_order] == ["Gamma", "Alpha", "Beta"]
+        assert gamma_button.x() == buttons[0].x() + _DRAG_LIFT_X
+        alpha_shift = panel._row_anims.get(buttons[0])
+        assert alpha_shift is not None
+        assert alpha_shift.endValue().y() > alpha_shift.startValue().y()
         _send_mouse(
             gamma_button,
             QEvent.Type.MouseButtonRelease,
@@ -128,3 +133,48 @@ def test_drag_reorders_without_launching(qapp, qtbot):
     assert names == ["Alpha", "Beta", "Gamma"]
     assert launched == []
     assert reordered[-1] == [alpha.id, hidden.id, beta.id, gamma.id]
+
+
+def test_highlighted_row_lifts_with_a_yellow_border(qapp, qtbot):
+    cfg = AppConfig()
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+    alpha = Launcher.new("Alpha", "a")
+    beta = Launcher.new("Beta", "b")
+    cfg.launchers = [alpha, beta]
+    panel.rebuild_buttons([alpha, beta])
+    panel.resize(220, 200)
+    panel.show()
+    qtbot.waitExposed(panel)
+    QApplication.processEvents()
+
+    buttons = [b for b in panel._buttons if isinstance(b, LaunchButton)]
+    panel._set_keyboard_current(buttons[0])
+    highlighted = buttons[0]
+    neighbour = buttons[1]
+    assert highlighted.property("kbSelected") == "true"
+    start = highlighted.mapToGlobal(highlighted.rect().center())
+    nudged = QPoint(start.x(), start.y() + 16)
+    try:
+        _send_mouse(
+            highlighted,
+            QEvent.Type.MouseButtonPress,
+            start,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+        _send_mouse(
+            highlighted,
+            QEvent.Type.MouseMove,
+            nudged,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+        )
+        assert panel._drag_active is True
+        assert highlighted.property("dragging") == "true"
+        assert highlighted.x() == neighbour.x() + _DRAG_LIFT_X
+        image = highlighted.grab().toImage()
+        color = image.pixelColor(2, image.height() // 2)
+        assert color.red() > 200 and color.green() > 150 and color.blue() < 140, color.name()
+    finally:
+        panel._cancel_drag()

@@ -4,7 +4,7 @@ import pytest
 import sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QPoint, QRect, QEvent
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QMenu, QPushButton
 from PySide6.QtGui import QMouseEvent
 from unittest.mock import patch, MagicMock
 
@@ -87,6 +87,176 @@ def test_add_and_manage_dialogs_stay_above_arrow(qapp, qtbot):
     manage = ManagerDialog(cfg)
     qtbot.addWidget(manage)
     assert manage.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+
+def test_editing_dialog_is_lifted_when_a_runner_surface_rises(qapp, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QWidget
+
+    from runner.ui.group_dialog import GroupDialog
+    from runner.ui.stay_on_top import open_editing_dialogs
+
+    lifted = []
+    monkeypatch.setattr("runner.ui.stay_on_top._lift_native", lambda widget: lifted.append(widget))
+
+    surface = QWidget()
+    surface.setWindowFlags(
+        Qt.WindowType.Tool
+        | Qt.WindowType.FramelessWindowHint
+        | Qt.WindowType.WindowStaysOnTopHint
+    )
+    qtbot.addWidget(surface)
+    surface.resize(80, 40)
+    surface.show()
+
+    dialog = AddEditDialog(None)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qapp.processEvents()
+    assert dialog in open_editing_dialogs()
+    assert dialog in lifted
+
+    lifted.clear()
+    surface.raise_()
+    qapp.processEvents()
+    assert dialog in lifted
+
+    dialog.close()
+    qapp.processEvents()
+    assert dialog not in open_editing_dialogs()
+
+    group = GroupDialog(ConfigManager())
+    qtbot.addWidget(group)
+    assert group.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+
+def test_arrow_menu_close_collapses_hover_after_a_toggle(qapp, qtbot, monkeypatch):
+    trigger = TriggerWidget(AppConfig())
+    qtbot.addWidget(trigger)
+    trigger.resize(80, 48)
+    trigger.move(200, 200)
+    trigger.show()
+    qtbot.waitExposed(trigger)
+
+    left = []
+    trigger.hover_leave.connect(lambda: left.append("leave"))
+    trigger._show_context_menu(QPoint(12, 12))
+    assert trigger._in_context_menu is True
+
+    with patch("PySide6.QtWidgets.QWidget.leaveEvent"):
+        trigger.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert left == []
+
+    monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: QPoint(-50, -50))
+    trigger._finish_context_menu()
+    assert trigger._in_context_menu is False
+    assert left == ["leave"]
+
+    left.clear()
+    trigger._in_context_menu = True
+    monkeypatch.setattr(
+        "runner.ui.trigger.QCursor.pos",
+        lambda: trigger.mapToGlobal(trigger.rect().center()),
+    )
+    trigger._finish_context_menu()
+    assert left == []
+
+
+def _open_arrow_menu(trigger, qapp):
+    trigger._show_context_menu(QPoint(12, 12))
+    qapp.processEvents()
+    menu = trigger.findChildren(QMenu)[-1]
+    assert menu.isVisible()
+    return menu
+
+
+def test_arrow_menu_reopens_while_the_pointer_stays_on_it(qapp, qtbot, monkeypatch):
+    trigger = TriggerWidget(AppConfig())
+    qtbot.addWidget(trigger)
+    trigger.resize(80, 48)
+    trigger.move(200, 200)
+    trigger.show()
+    left = []
+    trigger.hover_leave.connect(lambda: left.append("leave"))
+    menu = _open_arrow_menu(trigger, qapp)
+    qtbot.addWidget(menu)
+    switches = menu.findChildren(ToggleSwitch)
+    assert switches
+    assert all(switch.focusPolicy() == Qt.FocusPolicy.NoFocus for switch in switches)
+
+    inside = menu.frameGeometry().center()
+    monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: inside)
+    menu.close()
+    assert menu.isVisible() is False
+    qapp.processEvents()
+    assert menu.isVisible() is True
+    assert trigger._in_context_menu is True
+    assert left == []
+
+    switches[0].click()
+    qapp.processEvents()
+    assert menu.isVisible() is True
+    assert switches[0].isChecked() is True
+
+
+def test_arrow_menu_closes_once_the_pointer_leaves(qapp, qtbot, monkeypatch):
+    trigger = TriggerWidget(AppConfig())
+    qtbot.addWidget(trigger)
+    trigger.resize(80, 48)
+    trigger.move(200, 200)
+    trigger.show()
+    left = []
+    trigger.hover_leave.connect(lambda: left.append("leave"))
+    menu = _open_arrow_menu(trigger, qapp)
+    qtbot.addWidget(menu)
+
+    monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: QPoint(-80, -80))
+    menu.close_if_pointer_left()
+    qapp.processEvents()
+    assert menu.isVisible() is False
+    assert trigger._in_context_menu is False
+    assert left == ["leave"]
+
+
+def test_arrow_menu_stays_closed_after_a_normal_action(qapp, qtbot, monkeypatch):
+    trigger = TriggerWidget(AppConfig())
+    qtbot.addWidget(trigger)
+    trigger.resize(80, 48)
+    trigger.move(200, 200)
+    trigger.show()
+    menu = _open_arrow_menu(trigger, qapp)
+    qtbot.addWidget(menu)
+    inside = menu.frameGeometry().center()
+    monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: inside)
+
+    trigger._action_add.trigger()
+    menu.close()
+    qapp.processEvents()
+    assert menu.isVisible() is False
+    assert trigger._in_context_menu is False
+
+
+def test_dropdown_show_leaves_an_open_menu_focused(qapp, qtbot, monkeypatch):
+    menu = QMenu()
+    qtbot.addWidget(menu)
+    monkeypatch.setattr(
+        "runner.ui.dropdown.QApplication.activePopupWidget",
+        staticmethod(lambda: menu),
+    )
+    panel = DropdownPanel(AppConfig())
+    qtbot.addWidget(panel)
+    focused = []
+    panel.setFocus = lambda *args, **kwargs: focused.append(args)
+    panel.start_show_animation()
+    assert panel.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+    assert focused == []
+
+    monkeypatch.setattr(
+        "runner.ui.dropdown.QApplication.activePopupWidget",
+        staticmethod(lambda: None),
+    )
+    panel.start_show_animation()
+    assert panel.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating) is False
+    assert len(focused) == 1
 
 
 def test_add_dialog_create_new(qapp, qtbot):

@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.3] - 2026-11-05
+
+### Added
+- Groups. The arrow menu has **Add group**, **Manage groups**, and **Groups**. A group runs its launchers in list order. Neighbouring rows marked **Concurrent** start together. Every other row starts on its own, after a short pause. Runner then moves on.
+- **Show groups**, under **Show greeting message**. When it is on, hover shows the groups list beside the launchers, toward the middle of the screen, with a **Groups** heading. With no groups, nothing is shown for groups. The **Groups** menu item still opens that list on its own. A new group appears on the next hover and on a list that is already open.
+- **Only In Groups** on Add/Edit Launcher and on the group page. That launcher stays off the hover list and still runs inside a group. On the group page the switch is saved immediately.
+- Drag on the launcher list and the groups list lifts the pressed row, yellow border included when that row is already highlighted, and slides the other rows apart. A short click still launches. Dragging a group reorders groups only.
+- On Add Group and Edit Group, selected rows are dark grey and move to the top in click order. Dragging one lifts it with a yellow border. The new order is applied on release. Clearing a row also clears **Concurrent**. Deleting a group leaves its launchers in place.
+
+### Changed
+- While **Show greeting message** is on, every launch shows the flashing border and a bubble with two lines: "Resize arrow to preferred size" and "Drag arrow to preferred location". Dismissing it lasts for that launch. The next launch shows it again. A saved arrow size is left alone. The large default size is only for a brand-new config and for **Reset position & size**.
+- The arrow menu stays open while its switches are clicked. It closes when the pointer leaves the menu, or when a normal action is chosen. After it closes, the lists hide when the pointer is outside the arrow and the lists. A pinned dropdown stays open.
+
+### Fixed
+- Add, Edit, Manage, the group dialogs, and the file and message windows they open stay above the arrow and the lists on macOS and Windows.
+
+## [1.0.2] - 2026-11-05
+
+### Added
+- A startup hint. The first launch uses a large arrow, a flashing border, and a resize bubble. Later launches keep the saved size and position and show the border only, until **Show greeting message** is turned off. Hover, click, or resize fades the hint for that launch.
+- **Reset position & size** on the arrow menu and the tray menu.
+- Drag a dropdown row to reorder the launchers. Right-click a row for **Edit** and **Delete**.
+
+### Fixed
+- On macOS, Browse in Add/Edit Launcher can select an `.app` bundle instead of opening it as a folder.
+
 ## [1.0.1] - 2026-10-16
 
 ### Fixed

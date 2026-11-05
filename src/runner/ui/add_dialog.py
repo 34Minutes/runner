@@ -53,6 +53,8 @@ class AddEditDialog(StayOnTopDialog):
         self._args_edit.setPlaceholderText('e.g. https://x.com  or  --new-window')
         self._enabled_cb = ToggleSwitch("Include in dropdown list")
         self._enabled_cb.setChecked(True)
+        self._only_in_groups_cb = ToggleSwitch("Only In Groups")
+        self._only_in_groups_cb.setChecked(False)
 
         # Browse button for command
         self._browse_btn = QPushButton("Browse...")
@@ -92,6 +94,7 @@ class AddEditDialog(StayOnTopDialog):
         main_layout.addRow("Command / Path:", cmd_row)
         main_layout.addRow("Parameters / Args:", self._args_edit)
         main_layout.addRow("", self._enabled_cb)
+        main_layout.addRow("", self._only_in_groups_cb)
         main_layout.addRow("Working directory:", work_row)
         main_layout.addRow("", self._run_as_admin_cb)
         main_layout.addRow("", self._show_console_cb)
@@ -106,6 +109,7 @@ class AddEditDialog(StayOnTopDialog):
             self._command_edit.setText(launcher.command)
             self._args_edit.setText(launcher.args)
             self._enabled_cb.setChecked(launcher.enabled)
+            self._only_in_groups_cb.setChecked(launcher.only_in_groups)
             self._work_dir_edit.setText(launcher.working_dir or "")
             self._run_as_admin_cb.setChecked(launcher.run_as_admin)
             self._show_console_cb.setChecked(launcher.show_console)
@@ -145,6 +149,7 @@ class AddEditDialog(StayOnTopDialog):
             self._original.command = command
             self._original.args = self._args_edit.text().strip()
             self._original.enabled = self._enabled_cb.isChecked()
+            self._original.only_in_groups = self._only_in_groups_cb.isChecked()
             self._original.working_dir = work_dir
             self._original.run_as_admin = run_admin
             self._original.show_console = show_console
@@ -155,6 +160,7 @@ class AddEditDialog(StayOnTopDialog):
                 command=command,
                 args=self._args_edit.text().strip(),
                 enabled=self._enabled_cb.isChecked(),
+                only_in_groups=self._only_in_groups_cb.isChecked(),
                 working_dir=work_dir,
                 run_as_admin=run_admin,
                 show_console=show_console,

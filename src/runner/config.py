@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -35,10 +35,39 @@ class Launcher:
     working_dir: str | None = None
     run_as_admin: bool = False
     show_console: bool = False
+    # Hidden from the hover list. It still runs inside any group it belongs to.
+    only_in_groups: bool = False
 
     @classmethod
     def new(cls, name: str, command: str, **kwargs: Any) -> Launcher:
         return cls(id=str(uuid4()), name=name, command=command, **kwargs)
+
+
+@dataclass
+class GroupMember:
+    """One launcher inside a group, in execution order."""
+
+    launcher_id: str
+    concurrent: bool = False
+
+
+@dataclass
+class Group:
+    """An ordered set of launchers the user can start together."""
+
+    id: str
+    name: str
+    members: list[GroupMember] = field(default_factory=list)
+
+    @classmethod
+    def new(cls, name: str, members: list[GroupMember] | None = None) -> Group:
+        return cls(id=str(uuid4()), name=name, members=list(members or []))
+
+
+def _from_fields(cls, data: dict[str, Any]):
+    """Build a dataclass from JSON, ignoring keys this version does not know."""
+    known = {item.name for item in fields(cls)}
+    return cls(**{key: value for key, value in data.items() if key in known})
 
 
 @dataclass
@@ -57,6 +86,8 @@ class Settings:
     launch_at_startup: bool = False  # Windows only; managed via registry Run key
     # Flashing border on each launch. The resize bubble is first-run only.
     show_startup_greeting: bool = True
+    # When true, hovering the arrow shows the groups list beside the launchers.
+    show_groups: bool = False
     # False until the one-time enlarge below has been saved. Old config files
     # omit this, so they pick up the larger arrow once and then keep any resize.
     applied_visible_trigger_size: bool = False
@@ -67,6 +98,7 @@ class AppConfig:
     """Root configuration object."""
 
     launchers: list[Launcher] = field(default_factory=list)
+    groups: list[Group] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
     version: int = 1
 
@@ -75,14 +107,19 @@ class AppConfig:
             "version": self.version,
             "settings": asdict(self.settings),
             "launchers": [asdict(l) for l in self.launchers],
+            "groups": [asdict(group) for group in self.groups],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
         version = data.get("version", 1)
-        settings = Settings(**data.get("settings", {}))
-        launchers = [Launcher(**item) for item in data.get("launchers", [])]
-        return cls(launchers=launchers, settings=settings, version=version)
+        settings = _from_fields(Settings, data.get("settings", {}))
+        launchers = [_from_fields(Launcher, item) for item in data.get("launchers", [])]
+        groups = []
+        for item in data.get("groups", []):
+            members = [_from_fields(GroupMember, member) for member in item.get("members", [])]
+            groups.append(Group(id=item["id"], name=item.get("name", ""), members=members))
+        return cls(launchers=launchers, settings=settings, groups=groups, version=version)
 
 
 class ConfigManager:
@@ -148,6 +185,14 @@ class ConfigManager:
     def get_enabled_launchers(self) -> list[Launcher]:
         return [l for l in self.config.launchers if l.enabled]
 
+    def get_main_view_launchers(self) -> list[Launcher]:
+        """Enabled launchers that are not reserved for groups."""
+        return [
+            launcher
+            for launcher in self.config.launchers
+            if launcher.enabled and not launcher.only_in_groups
+        ]
+
     def reload(self) -> AppConfig:
         """Force re-read from disk (useful after external edit)."""
         self._config = None
@@ -170,6 +215,36 @@ class ConfigManager:
         self.config.launchers = [
             l for l in self.config.launchers if l.id != launcher_id
         ]
+        for group in self.config.groups:
+            group.members = [
+                member for member in group.members if member.launcher_id != launcher_id
+            ]
+        self.save()
+
+    def add_group(self, group: Group) -> None:
+        self.config.groups.append(group)
+        self.save()
+
+    def update_group(self, group: Group) -> None:
+        for index, existing in enumerate(self.config.groups):
+            if existing.id == group.id:
+                self.config.groups[index] = group
+                self.save()
+                return
+        self.add_group(group)
+
+    def remove_group(self, group_id: str) -> None:
+        self.config.groups = [group for group in self.config.groups if group.id != group_id]
+        self.save()
+
+    def reorder_groups(self, ordered_ids: list[str]) -> None:
+        by_id = {group.id: group for group in self.config.groups}
+        new_order = []
+        for group_id in ordered_ids:
+            if group_id in by_id:
+                new_order.append(by_id.pop(group_id))
+        new_order.extend(by_id.values())
+        self.config.groups = new_order
         self.save()
 
     def reorder_launchers(self, ordered_ids: list[str]) -> None:

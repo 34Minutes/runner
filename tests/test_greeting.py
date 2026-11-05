@@ -1,7 +1,7 @@
 """Startup arrow size and the resize greeting."""
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QFont, QFontMetrics
 from PySide6.QtWidgets import QApplication, QMenu
 
 from runner.config import (
@@ -15,6 +15,7 @@ from runner.config import (
 from runner.ui.add_dialog import AddEditDialog
 from runner.ui.toggle_switch import ToggleSwitch
 from runner.ui.greeting import (
+    GREETING_LINES,
     StartupGreeting,
     bubble_box_size,
     ensure_visible_trigger_size,
@@ -84,15 +85,16 @@ def test_missing_config_is_a_first_run(tmp_path, monkeypatch):
     assert (tmp_path / "config.json").exists()
 
 
-def test_returning_launch_shows_border_without_bubble(qapp, qtbot):
+def test_each_launch_shows_the_greeting_bubble(qapp, qtbot):
     trigger = _shown_trigger(qtbot, 420, 280)
-    greeting = StartupGreeting(show_bubble=False)
+    greeting = StartupGreeting()
     try:
         greeting.present(trigger)
         QApplication.processEvents()
         assert trigger.width() == 120 and trigger.height() == 96
         assert trigger._greeting_highlight is True
-        assert greeting.bubble.isVisible() is False
+        assert greeting.bubble.isVisible() is True
+        _assert_greeting_text(greeting.bubble)
         assert greeting.border.isVisible() is True
         assert greeting.border.width() == trigger.width() + 16
 
@@ -103,14 +105,22 @@ def test_returning_launch_shows_border_without_bubble(qapp, qtbot):
         greeting.show_again(trigger)
         QApplication.processEvents()
         assert trigger._greeting_highlight is True
-        assert greeting.bubble.isVisible() is False
+        assert greeting.bubble.isVisible() is True
+        _assert_greeting_text(greeting.bubble)
     finally:
         greeting.shutdown()
 
 
-def test_greeting_message_and_bubble_placement():
-    icon = bubble_box_size()
-    assert icon.width() == icon.height() >= 64
+def test_greeting_message_and_bubble_placement(qapp):
+    assert GREETING_LINES == (
+        "Resize arrow to preferred size",
+        "Drag arrow to preferred location",
+    )
+    box_size = bubble_box_size()
+    metrics = QFontMetrics(QFont())
+    longest = max(metrics.horizontalAdvance(line) for line in GREETING_LINES)
+    assert box_size.width() >= longest
+    assert box_size.width() > box_size.height()
     box = QSize(260, 72)
     avail = QRect(0, 0, 1920, 1080)
 
@@ -144,8 +154,8 @@ def test_greeting_shows_border_and_bubble_until_resize_or_click(qapp, qtbot):
         greeting.present(trigger)
         QApplication.processEvents()
         assert greeting.bubble.isVisible()
-        assert greeting.bubble.width() < 160
-        _assert_resize_icon(greeting.bubble)
+        assert greeting.bubble.width() > 160
+        _assert_greeting_text(greeting.bubble)
         assert trigger._greeting_highlight is True
         assert trigger._resize_margin == 14
 
@@ -285,15 +295,28 @@ def test_arrow_already_under_the_pointer_skips_the_border(qapp, qtbot):
         greeting.shutdown()
 
 
-def _assert_resize_icon(bubble: GreetingBubble) -> None:
-    """The diagonal glyph is dark, and the bubble fill around it stays yellow."""
+def _assert_greeting_text(bubble: GreetingBubble) -> None:
+    """The two instruction lines are dark, and the bubble fill stays yellow."""
+    assert GREETING_LINES == (
+        "Resize arrow to preferred size",
+        "Drag arrow to preferred location",
+    )
     bubble.repaint()
     image = bubble.grab().toImage()
-    box_left = 16  # tail sits on the left until the bubble is placed
-    center = image.pixelColor(box_left + (image.width() - box_left) // 2, image.height() // 2)
-    assert center.red() < 90 and center.green() < 90 and center.blue() < 90, center.name()
-    yellow = image.pixelColor(image.width() - 18, 22)
-    assert yellow.red() > 180 and yellow.green() > 140, yellow.name()
+    dark = False
+    yellow = False
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            color = image.pixelColor(x, y)
+            if color.alpha() < 200:
+                continue
+            if color.red() < 80 and color.green() < 80 and color.blue() < 80:
+                dark = True
+            if color.red() > 200 and color.green() > 160 and color.blue() < 180:
+                yellow = True
+            if dark and yellow:
+                return
+    assert dark and yellow, (dark, yellow, image.width(), image.height())
 
 
 def test_bubble_click_dismisses_for_this_launch(qapp, qtbot):

@@ -47,14 +47,6 @@ class LaunchButton(QPushButton):
             QPushButton:pressed {
                 background-color: rgba(50, 85, 140, 230);
             }
-            QPushButton[dragging="true"],
-            QPushButton[dragging="true"]:hover,
-            QPushButton[dragging="true"]:pressed {
-                background-color: rgba(80, 120, 180, 235);
-                border: 4px solid rgba(255, 220, 70, 240);
-                border-radius: 6px;
-                padding: 1px 7px;
-            }
             QPushButton[kbSelected="true"] {
                 background-color: rgba(65, 95, 145, 225);
                 border: 1px solid rgba(120, 160, 220, 240);
@@ -62,6 +54,17 @@ class LaunchButton(QPushButton):
             QPushButton[kbSelected="true"]:hover {
                 background-color: rgba(75, 115, 175, 230);
                 border: 1px solid rgba(130, 170, 230, 250);
+            }
+            QPushButton[dragging="true"],
+            QPushButton[dragging="true"]:hover,
+            QPushButton[dragging="true"]:pressed,
+            QPushButton[kbSelected="true"][dragging="true"],
+            QPushButton[kbSelected="true"][dragging="true"]:hover,
+            QPushButton[kbSelected="true"][dragging="true"]:pressed {
+                background-color: rgba(80, 120, 180, 235);
+                border: 4px solid rgba(255, 220, 70, 240);
+                border-radius: 6px;
+                padding: 1px 7px;
             }
             """
         )

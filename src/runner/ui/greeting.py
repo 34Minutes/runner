@@ -1,10 +1,10 @@
 """Startup hint around the arrow.
 
-The first launch on a machine uses the large default arrow and shows a flashing
-yellow border plus a bubble with the diagonal resize arrow. Later launches
-reuse the saved size and position and show only the flashing border. Hovering
-or clicking the arrow, resizing it, or clicking the bubble fades that hint out
-over about a second. It stays gone until Runner is started again.
+The first launch on a machine uses the large default arrow. Every launch shows
+a flashing yellow border plus a bubble with two lines: resize the arrow, then
+drag it. Later launches reuse the saved size and position. Hovering or clicking
+the arrow, resizing it, or clicking the bubble fades that hint out over about
+a second. It stays gone until Runner is started again.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from PySide6.QtCore import (
     QTimer,
     QVariantAnimation,
 )
-from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication, QWidget
 
 from ..config import (
@@ -34,7 +34,13 @@ _FLASH_INTERVAL_MS = 450
 _FADE_MS = 1000
 _TAIL = 16
 _GAP = 10
-_ICON_BOX = 88
+_PAD_X = 18
+_PAD_Y = 12
+_LINE_GAP = 4
+GREETING_LINES = (
+    "Resize arrow to preferred size",
+    "Drag arrow to preferred location",
+)
 # Space outside the arrow for the greeting stroke. The arrow widget itself
 # stays at the saved size; this frame is a separate window around it.
 _BORDER_PAD = 8
@@ -117,60 +123,30 @@ def greeting_bubble_rect(
 
 
 def bubble_box_size(font: QFont | None = None) -> QSize:
-    """Square bubble body for the resize icon, without the tail."""
-    return QSize(_ICON_BOX, _ICON_BOX)
+    """Bubble body for the two greeting lines, without the tail."""
+    metrics = QFontMetrics(font or QFont())
+    text_w = max(metrics.horizontalAdvance(line) for line in GREETING_LINES)
+    line_h = metrics.height()
+    text_h = line_h * len(GREETING_LINES) + _LINE_GAP * (len(GREETING_LINES) - 1)
+    return QSize(text_w + _PAD_X * 2, text_h + _PAD_Y * 2)
 
 
-def _arrow_head(tip: QPointF, other: QPointF, length: float, half_width: float) -> QPolygonF:
-    """Triangle at tip, pointing away from other."""
-    dx = tip.x() - other.x()
-    dy = tip.y() - other.y()
-    dist = (dx * dx + dy * dy) ** 0.5 or 1.0
-    ux, uy = dx / dist, dy / dist
-    px, py = -uy, ux
-    base_x = tip.x() - ux * length
-    base_y = tip.y() - uy * length
-    return QPolygonF(
-        [
-            tip,
-            QPointF(base_x + px * half_width, base_y + py * half_width),
-            QPointF(base_x - px * half_width, base_y - py * half_width),
-        ]
-    )
-
-
-def _paint_resize_icon(painter: QPainter, box: QRect) -> None:
-    """Two-headed arrow from the top-left of the box to the bottom-right.
-
-    This is the same diagonal as the window-corner resize cursor.
-    """
-    inset = max(16, min(box.width(), box.height()) // 5)
-    area = box.adjusted(inset, inset, -inset, -inset)
-    if area.width() < 8 or area.height() < 8:
-        return
-    nw = QPointF(area.left(), area.top())
-    se = QPointF(area.right(), area.bottom())
-    dx = se.x() - nw.x()
-    dy = se.y() - nw.y()
-    dist = (dx * dx + dy * dy) ** 0.5 or 1.0
-    ux, uy = dx / dist, dy / dist
-    head = max(12.0, dist * 0.28)
-    half = head * 0.55
-    tuck = head * 0.62
-    shaft_a = QPointF(nw.x() + ux * tuck, nw.y() + uy * tuck)
-    shaft_b = QPointF(se.x() - ux * tuck, se.y() - uy * tuck)
-
-    def draw(color: QColor, shaft: float, head_len: float, head_half: float) -> None:
-        painter.setPen(QPen(color, shaft, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawLine(shaft_a, shaft_b)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        painter.drawPolygon(_arrow_head(nw, se, head_len, head_half))
-        painter.drawPolygon(_arrow_head(se, nw, head_len, head_half))
-
-    draw(QColor(255, 255, 255), 10, head + 3, half + 2)
-    draw(QColor(20, 20, 20), 5, head, half)
+def _paint_greeting_lines(painter: QPainter, box: QRect, font: QFont) -> None:
+    """Draw the two first-run lines, dark on the yellow fill."""
+    painter.setFont(font)
+    painter.setPen(QColor(20, 20, 20))
+    metrics = QFontMetrics(font)
+    line_h = metrics.height()
+    total = line_h * len(GREETING_LINES) + _LINE_GAP * (len(GREETING_LINES) - 1)
+    y = box.top() + max(0, (box.height() - total) // 2)
+    for line in GREETING_LINES:
+        text_rect = QRect(box.left() + _PAD_X, y, box.width() - _PAD_X * 2, line_h)
+        painter.drawText(
+            text_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            line,
+        )
+        y += line_h + _LINE_GAP
 
 
 def _fits(rect: QRect, anchor: QRect, avail: QRect) -> bool:
@@ -202,7 +178,7 @@ class GreetingBubble(QWidget):
         self._flash_on = True
         self._opacity = 1.0
         self._on_dismiss = None
-        self._box = bubble_box_size()
+        self._box = bubble_box_size(self.font())
         self.setFixedSize(self._box.width() + _TAIL, self._box.height())
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -223,13 +199,14 @@ class GreetingBubble(QWidget):
         self.update()
 
     def set_opacity(self, opacity: float) -> None:
-        """Fade the whole bubble, including the resize icon. 1 is solid, 0 is gone."""
+        """Fade the whole bubble, including the text. 1 is solid, 0 is gone."""
         self._opacity = max(0.0, min(1.0, float(opacity)))
         self.update()
 
     def place_near(self, trigger: QWidget) -> None:
         screen = trigger.screen() or QApplication.primaryScreen()
         avail = screen.availableGeometry() if screen is not None else QRect(0, 0, 1440, 900)
+        self._box = bubble_box_size(self.font())
         rect, tail_side = greeting_bubble_rect(trigger.frameGeometry(), self._box, avail)
         self._tail_side = tail_side
         self.setFixedSize(rect.size())
@@ -263,7 +240,7 @@ class GreetingBubble(QWidget):
             painter.setBrush(fill)
             painter.drawPolygon(QPolygonF([tip, base_a, base_b]))
 
-            _paint_resize_icon(painter, box)
+            _paint_greeting_lines(painter, box, self.font())
         finally:
             painter.end()
 
@@ -381,8 +358,8 @@ class StartupGreeting(QObject):
     def present(self, trigger: QWidget, *, show_bubble: bool | None = None) -> None:
         """Show the hint around trigger. Does nothing after it was dismissed this launch.
 
-        show_bubble False keeps the flashing border and leaves the bubble hidden.
-        Omit it to keep the choice from the previous present() in this process.
+        The bubble is shown on every launch. show_bubble False keeps the flashing
+        border and leaves the bubble hidden.
         """
         if show_bubble is not None:
             self._show_bubble = show_bubble
