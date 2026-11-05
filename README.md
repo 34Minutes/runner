@@ -90,6 +90,15 @@ That writes a portable `dist\Runner.exe` for 64-bit Windows 10 or 11 on Intel or
 
 Build the Windows executable on Windows, or with the Windows workflow below.
 
+**Linux**
+
+```bash
+pip install -e ".[dev]"
+./scripts/build-linux.sh
+```
+
+That writes one file, `dist/Runner`, for x86_64. It includes Python. It runs on glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, and later releases of those families. A normal desktop already has the graphics libraries it uses. Copy the file to the machine and run it.
+
 Nuitka is an optional smaller Windows build. The workflows use the PyInstaller scripts:
 
 ```powershell
@@ -98,15 +107,16 @@ python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-
 
 ### GitHub Actions
 
-Three workflows run when someone starts them from the Actions tab (`workflow_dispatch`). Each one uploads a build artifact. Publishing a GitHub Release is a separate step.
+Four workflows run when someone starts them from the Actions tab (`workflow_dispatch`). Each one uploads a build artifact. Publishing a GitHub Release is a separate step.
 
 - **Build Windows** (`.github/workflows/windows.yml`) uploads `dist/Runner.exe` as the artifact `Runner-windows-x64`.
+- **Build Linux x64** (`.github/workflows/linux-x64.yml`) uploads `dist/Runner` as the artifact `Runner-linux-x64`.
 - **Build Intel Mac** (`.github/workflows/macos-intel.yml`) uploads `Runner-intel.dmg`.
 - **Build Apple silicon Mac** (`.github/workflows/macos-arm64.yml`) uploads `Runner-arm64.dmg`.
 
 ### Downloads
 
-The download on a public GitHub Release is the Windows executable. Build a Mac disk image locally with the script above.
+The download on a public GitHub Release is the Windows executable. The Linux workflow produces an Actions artifact for the same kind of one-file download. There is no published Mac build. Mac users clone the repo and run `./scripts/build-mac.sh`. An Apple Developer ID signature is required before a Mac download can open without an extra approval, and this project does not have one.
 
 The bundled app still stores config in the user config directory above.
 

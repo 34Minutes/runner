@@ -1,0 +1,54 @@
+name: Build Linux x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Ubuntu 22.04 has glibc 2.35. A binary built here runs on that release
+    # and on newer glibc distros. ubuntu-latest is newer and would shut out
+    # Ubuntu 22.04 and other current desktops.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install desktop libraries Qt needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libdbus-1-3 \
+            libegl1 \
+            libfontconfig1 \
+            libgl1 \
+            libglib2.0-0 \
+            libice6 \
+            libsm6 \
+            libx11-xcb1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxcb-xkb1 \
+            libxi6 \
+            libxkbcommon-x11-0 \
+            libxkbcommon0
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Build
+        run: ./scripts/build-linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Runner-linux-x64
+          path: dist/Runner

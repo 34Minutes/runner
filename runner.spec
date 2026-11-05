@@ -8,6 +8,7 @@
 # Usage:
 #   pyinstaller --clean --noconfirm runner.spec
 #   ./scripts/build-mac.sh
+#   ./scripts/build-linux.sh
 #   .\scripts\build-windows.ps1
 #
 # Windows onedir instead of onefile:

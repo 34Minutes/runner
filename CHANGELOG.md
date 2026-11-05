@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Linux x86_64 build. `.github/workflows/linux-x64.yml` builds one `dist/Runner` file on Ubuntu 22.04 (glibc 2.35) for current desktop distros. `scripts/build-linux.sh` is the same build locally.
 - (planning) Per-launcher icons (auto + custom).
 
 ## [1.0.3] - 2026-11-05
