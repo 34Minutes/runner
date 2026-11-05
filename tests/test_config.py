@@ -94,6 +94,7 @@ def test_settings_defaults_include_filter_box_and_pinned():
     s = Settings()
     assert s.show_filter_box is True  # default so existing users see the box
     assert s.pinned_open is False
+    assert s.show_startup_greeting is True
 
 
 def test_appconfig_show_filter_box_roundtrip():

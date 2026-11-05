@@ -17,6 +17,11 @@ import platformdirs
 APP_NAME = "Runner"
 CONFIG_FILENAME = "config.json"
 
+# Large enough to see on a big display. The old 36×28 arrow was easy to miss.
+# A saved arrow smaller than this is raised to it once, then the user's resize sticks.
+DEFAULT_TRIGGER_WIDTH = 120
+DEFAULT_TRIGGER_HEIGHT = 96
+
 
 @dataclass
 class Launcher:
@@ -40,8 +45,8 @@ class Launcher:
 class Settings:
     """UI and behavior settings."""
 
-    trigger_width: int = 36
-    trigger_height: int = 28
+    trigger_width: int = DEFAULT_TRIGGER_WIDTH
+    trigger_height: int = DEFAULT_TRIGGER_HEIGHT
     dropdown_width: int = 220
     hover_delay_ms: int = 120
     animation_duration_ms: int = 180
@@ -50,6 +55,11 @@ class Settings:
     pinned_open: bool = False
     show_filter_box: bool = True
     launch_at_startup: bool = False  # Windows only; managed via registry Run key
+    # Flashing border on each launch. The resize bubble is first-run only.
+    show_startup_greeting: bool = True
+    # False until the one-time enlarge below has been saved. Old config files
+    # omit this, so they pick up the larger arrow once and then keep any resize.
+    applied_visible_trigger_size: bool = False
 
 
 @dataclass
@@ -84,6 +94,8 @@ class ConfigManager:
         )
         self.config_path: Path = self.config_dir / CONFIG_FILENAME
         self._config: AppConfig | None = None
+        # True when this process loaded a config file that was already on disk.
+        self.had_saved_config = False
 
     @property
     def config(self) -> AppConfig:
@@ -93,6 +105,7 @@ class ConfigManager:
 
     def load(self) -> AppConfig:
         if not self.config_path.exists():
+            self.had_saved_config = False
             cfg = self._create_default()
             self.save(cfg)
             return cfg
@@ -100,10 +113,12 @@ class ConfigManager:
         try:
             with self.config_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
+            self.had_saved_config = True
             return AppConfig.from_dict(data)
         except Exception:
             # Corrupt or unreadable -> backup and recreate
             self._backup_corrupt()
+            self.had_saved_config = False
             cfg = self._create_default()
             self.save(cfg)
             return cfg

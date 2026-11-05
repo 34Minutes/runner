@@ -31,6 +31,7 @@ class TriggerWidget(QWidget):
     request_exit = Signal()
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
+    greeting_toggled = Signal(bool)
     startup_toggled = Signal(bool)  # Windows only
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
@@ -52,6 +53,9 @@ class TriggerWidget(QWidget):
         self._resize_margin = 8
         self._resizing = False
         self._resize_edge = None
+        self._greeting_highlight = False
+        self._greeting_flash_on = True
+        self._greeting_opacity = 1.0
         self.setMinimumSize(20, 20)
         self.resize(
             config.settings.trigger_width,
@@ -75,7 +79,7 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
 
         # Optional: slight tooltip
-        self.setToolTip("Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter — menu auto-closes on mouse leave), Add, Manage, Reset position & size, Exit")
+        self.setToolTip("Runner — hover the arrow to open launcher list\nRight-click for quick toggles (Pin, Filter, Greeting — menu auto-closes on mouse leave), Add, Manage, Reset position & size, Exit")
 
     def _create_actions(self) -> None:
         self._action_add = QAction("Add new launcher...", self)
@@ -101,8 +105,7 @@ class TriggerWidget(QWidget):
         menu.addAction(self._action_reset)
         menu.addSeparator()
 
-        # Add the two toggles as actual sliding ToggleSwitch widgets inside the menu
-        # using QWidgetAction so the user sees the slide toggles directly in the right-click menu.
+        # Sliding toggles inside the menu via QWidgetAction.
         global_pos = self.mapToGlobal(pos)
 
         pin_switch = ToggleSwitch("Pin dropdown open (fully expanded)")
@@ -120,6 +123,16 @@ class TriggerWidget(QWidget):
         filter_action.setDefaultWidget(filter_switch)
         filter_switch.toggled.connect(lambda checked: self.filter_toggled.emit(checked))
         menu.addAction(filter_action)
+
+        greeting_switch = ToggleSwitch("Show greeting message")
+        greeting_switch.blockSignals(True)
+        greeting_switch.setChecked(getattr(self._config.settings, "show_startup_greeting", True))
+        greeting_switch.blockSignals(False)
+        greeting_switch.setPalette(menu.palette())
+        greeting_action = QWidgetAction(menu)
+        greeting_action.setDefaultWidget(greeting_switch)
+        greeting_switch.toggled.connect(lambda checked: self.greeting_toggled.emit(checked))
+        menu.addAction(greeting_action)
 
         # Windows startup toggle (only really useful on Windows)
         if sys.platform == "win32":
@@ -329,6 +342,18 @@ class TriggerWidget(QWidget):
         ]
         poly = QPolygonF([QPointF(x, y) for x, y in path_points])
         painter.drawPolygon(poly)
+
+    def set_greeting_highlight(self, active: bool, flash_on: bool, opacity: float = 1.0) -> None:
+        """The greeting rim is drawn outside this widget. While it is up, the resize grab is wider.
+
+        opacity is kept so the rim can fade without resizing the arrow.
+        """
+        if active != self._greeting_highlight:
+            self._resize_margin = 14 if active else 8
+        self._greeting_highlight = active
+        self._greeting_flash_on = flash_on
+        self._greeting_opacity = 1.0 if not active else max(0.0, min(1.0, float(opacity)))
+        self.update()
 
     def update_size_from_settings(self) -> None:
         self.resize(

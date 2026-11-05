@@ -20,14 +20,23 @@ from PySide6.QtWidgets import (
     QApplication,
     QSystemTrayIcon,
     QMenu,
+    QMessageBox,
 )
 
-from .config import ConfigManager, Launcher, AppConfig
+from .config import (
+    DEFAULT_TRIGGER_HEIGHT,
+    DEFAULT_TRIGGER_WIDTH,
+    AppConfig,
+    ConfigManager,
+    Launcher,
+)
+from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .launcher import launch
 from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
 from .ui.manager_dialog import ManagerDialog
+from .ui.stay_on_top import question as stay_on_top_question
 from .ui.stay_on_top import warning as stay_on_top_warning
 
 if sys.platform == "win32":
@@ -264,7 +273,7 @@ def main() -> int:
                 on_screen = True
                 break
         if not on_screen:
-            default_w, default_h = 36, 36
+            default_w, default_h = DEFAULT_TRIGGER_WIDTH, DEFAULT_TRIGGER_HEIGHT
             default_x, default_y = 100, 100
             trigger.resize(default_w, default_h)
             trigger.move(default_x, default_y)
@@ -275,8 +284,17 @@ def main() -> int:
                 position_y=default_y,
             )
 
+    # First launch on this machine uses the large default arrow. Later launches
+    # keep the size and position already stored in the config file.
+    if not cfg_mgr.had_saved_config:
+        ensure_visible_trigger_size(cfg_mgr, trigger)
     _validate_trigger_position()
+    if clamp_trigger_to_screen(trigger):
+        cfg_mgr.update_settings(position_x=trigger.x(), position_y=trigger.y())
     dropdown.refresh_filter_visibility()
+
+    greeting = StartupGreeting(show_bubble=not cfg_mgr.had_saved_config)
+    app._startup_greeting = greeting
 
     # Hover coordination
     # We need to keep the dropdown visible while mouse is in *either* trigger or dropdown.
@@ -322,7 +340,7 @@ def main() -> int:
 
     def reset_position_and_size():
         """Reset the trigger to a sensible default location and size."""
-        default_w, default_h = 36, 36
+        default_w, default_h = DEFAULT_TRIGGER_WIDTH, DEFAULT_TRIGGER_HEIGHT
         default_x, default_y = 100, 100
         cfg_mgr.update_settings(
             trigger_width=default_w,
@@ -371,7 +389,49 @@ def main() -> int:
 
     dropdown.launch_requested.connect(on_launch)
 
+    def on_reordered(ordered_ids: list[str]) -> None:
+        cfg_mgr.reorder_launchers(ordered_ids)
+
+    dropdown.reordered.connect(on_reordered)
+
+    def _refresh_open_list() -> None:
+        dropdown.rebuild_buttons(cfg_mgr.get_enabled_launchers())
+        if cfg_mgr.config.settings.pinned_open:
+            apply_pinned_state()
+
+    def on_edit_requested(launcher: Launcher) -> None:
+        show_add_dialog(launcher)
+        if cfg_mgr.config.settings.pinned_open:
+            apply_pinned_state()
+
+    def on_delete_requested(launcher: Launcher) -> None:
+        reply = stay_on_top_question(
+            trigger,
+            "Delete Launcher",
+            f"Delete '{launcher.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        cfg_mgr.remove_launcher(launcher.id)
+        _refresh_open_list()
+
+    dropdown.edit_requested.connect(on_edit_requested)
+    dropdown.delete_requested.connect(on_delete_requested)
+
     # Add dialog wiring
+    def _on_greeting_toggled(checked: bool) -> None:
+        cfg_mgr.update_settings(show_startup_greeting=checked)
+        if checked:
+            greeting.show_again(trigger)
+        else:
+            greeting.dismiss_for_session()
+        if cfg_mgr.config.settings.pinned_open:
+            dropdown.position_adjacent(trigger)
+            dropdown.ensure_visible_and_sized()
+            trigger.raise_()
+            dropdown.stackUnder(trigger)
+
     def show_add_dialog(existing: Launcher | None = None):
         dlg = AddEditDialog(existing, trigger)
         if dlg.exec():
@@ -424,6 +484,7 @@ def main() -> int:
                 dropdown.position_adjacent(trigger)
 
     trigger.filter_toggled.connect(on_filter_toggled)
+    trigger.greeting_toggled.connect(_on_greeting_toggled)
 
     # Windows startup integration
     if sys.platform == "win32" and win_utils is not None:
@@ -450,7 +511,14 @@ def main() -> int:
     trigger.position_changed.connect(save_position)
 
     def save_size(w: int, h: int):
-        cfg_mgr.update_settings(trigger_width=w, trigger_height=h)
+        cfg_mgr.update_settings(
+            trigger_width=w,
+            trigger_height=h,
+            position_x=trigger.x(),
+            position_y=trigger.y(),
+        )
+        # The hint asked them to resize. Hide it for this launch; the switch brings it back next start.
+        greeting.dismiss_for_session()
         if cfg_mgr.config.settings.pinned_open:
             dropdown.position_adjacent(trigger)
             dropdown.ensure_visible_and_sized()
@@ -462,6 +530,20 @@ def main() -> int:
     # Exit request from trigger context menu
     trigger.request_exit.connect(app.quit)
 
+    def _save_trigger_geometry() -> None:
+        """Keep the arrow's size and position across a restart, without the greeting rim."""
+        width, height = trigger.width(), trigger.height()
+        if width < 20 or height < 20:
+            return
+        cfg_mgr.update_settings(
+            trigger_width=width,
+            trigger_height=height,
+            position_x=trigger.x(),
+            position_y=trigger.y(),
+        )
+
+    app.aboutToQuit.connect(_save_trigger_geometry)
+
     # System tray
     tray = create_tray(app, trigger, dropdown, cfg_mgr)
 
@@ -472,7 +554,12 @@ def main() -> int:
     # Defer initial positioning until after the event loop processes show().
     # Ensures trigger geometry (from persisted size) is realized before dropdown
     # calculates its position relative to it (important for custom sizes + pinned mode).
-    QTimer.singleShot(0, apply_pinned_state)
+    def _after_show() -> None:
+        if cfg_mgr.config.settings.show_startup_greeting:
+            greeting.present(trigger, show_bubble=not cfg_mgr.had_saved_config)
+        apply_pinned_state()
+
+    QTimer.singleShot(0, _after_show)
 
     # On Windows we may want to hide from taskbar / Alt+Tab more aggressively.
     # Qt.Tool + frameless already helps a lot.

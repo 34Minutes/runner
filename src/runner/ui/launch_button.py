@@ -20,7 +20,11 @@ class LaunchButton(QPushButton):
         self._kb_selected = False
         self._apply_style()
         # Future: add icon on left
-        self.setToolTip(f"Launch: {launcher.command} {launcher.args}".strip())
+        self.setToolTip(
+            f"Launch: {launcher.command} {launcher.args}".strip()
+            + "\nDrag up or down to reorder"
+            + "\nRight-click to edit or delete"
+        )
 
     def _apply_style(self) -> None:
         # Base + hover + pressed + keyboard-selected (for arrow nav highlight)
@@ -42,6 +46,14 @@ class LaunchButton(QPushButton):
             }
             QPushButton:pressed {
                 background-color: rgba(50, 85, 140, 230);
+            }
+            QPushButton[dragging="true"],
+            QPushButton[dragging="true"]:hover,
+            QPushButton[dragging="true"]:pressed {
+                background-color: rgba(80, 120, 180, 235);
+                border: 4px solid rgba(255, 220, 70, 240);
+                border-radius: 6px;
+                padding: 1px 7px;
             }
             QPushButton[kbSelected="true"] {
                 background-color: rgba(65, 95, 145, 225);

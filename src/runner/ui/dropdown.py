@@ -16,17 +16,44 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QLineEdit,
+    QMenu,
     QApplication,
 )
 
 from ..config import AppConfig, Launcher
 from .launch_button import LaunchButton
+from .stay_on_top import mark_stay_on_top
+
+# Vertical pixels before a press becomes a reorder drag, so a click still launches.
+_DRAG_THRESHOLD_PX = 10
+
+
+def merge_visible_order(entries: list[tuple[str, bool]], visible_ids: list[str]) -> list[str]:
+    """Reorder the flagged rows and leave every other row where it is.
+
+    entries is (id, in_play) in the current order. visible_ids is the new
+    top-to-bottom order of the in-play rows. Disabled launchers, and enabled
+    ones hidden by the filter, stay in their slots.
+    """
+    in_play = {eid for eid, flagged in entries if flagged}
+    queue = [vid for vid in visible_ids if vid in in_play]
+    pending = iter(queue)
+    merged: list[str] = []
+    for eid, flagged in entries:
+        if flagged and eid in in_play:
+            merged.append(next(pending))
+        else:
+            merged.append(eid)
+    return merged
 
 
 class DropdownPanel(QWidget):
     """The expanding list of launch buttons. Animated show/hide."""
 
     launch_requested = Signal(Launcher)  # emitted when a button is clicked
+    reordered = Signal(list)  # full launcher id order after a drag
+    edit_requested = Signal(Launcher)
+    delete_requested = Signal(Launcher)
     hover_enter = Signal()
     hover_leave = Signal()
 
@@ -46,6 +73,18 @@ class DropdownPanel(QWidget):
         # Keyboard navigation state
         self._current_button: LaunchButton | None = None
         self._visible_buttons: list[LaunchButton] = []  # subset of _buttons that are currently visible (post-filter)
+
+        # Click-drag reorder. A short press still launches; a vertical drag moves the row.
+        self._drag_button: LaunchButton | None = None
+        self._drag_press_y = 0
+        self._drag_last_global = QPoint()
+        self._drag_active = False
+        self._suppress_click = False
+        self._in_context_menu = False
+        self._item_menu: QMenu | None = None
+        self._drag_scroll_timer = QTimer(self)
+        self._drag_scroll_timer.setInterval(40)
+        self._drag_scroll_timer.timeout.connect(self._drag_autoscroll)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -141,6 +180,7 @@ class DropdownPanel(QWidget):
 
     def rebuild_buttons(self, launchers: list[Launcher]) -> None:
         """Replace all buttons with current enabled launchers."""
+        self._cancel_drag()
         # Clear previous selection styling
         self._clear_keyboard_selection()
 
@@ -153,6 +193,11 @@ class DropdownPanel(QWidget):
         for launcher in launchers:
             btn = LaunchButton(launcher, self._button_container)
             btn.clicked.connect(lambda checked=False, l=launcher: self._on_button_clicked(l))
+            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            btn.customContextMenuRequested.connect(
+                lambda pos, b=btn: self._show_item_menu(b, pos)
+            )
+            btn.installEventFilter(self)
             self._button_layout.addWidget(btn)
             self._buttons.append(btn)
 
@@ -275,8 +320,195 @@ class DropdownPanel(QWidget):
         self.updateGeometry()
 
     def _on_button_clicked(self, launcher: Launcher) -> None:
+        if self._suppress_click:
+            self._suppress_click = False
+            return
         self.launch_requested.emit(launcher)
         # Note: hide decision (respecting pinned state) is now handled in main.py's on_launch
+
+    def _launch_buttons(self) -> list[LaunchButton]:
+        return [b for b in self._buttons if isinstance(b, LaunchButton)]
+
+    def _cancel_drag(self) -> None:
+        button = self._drag_button
+        self._drag_scroll_timer.stop()
+        self._drag_active = False
+        self._drag_button = None
+        if button is None:
+            return
+        if self.mouseGrabber() is button:
+            button.releaseMouse()
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._set_drag_style(button, False)
+
+    def _set_drag_style(self, button: LaunchButton, dragging: bool) -> None:
+        button.setProperty("dragging", "true" if dragging else "false")
+        button.style().polish(button)
+        button.update()
+
+    def _begin_drag(self, button: LaunchButton) -> None:
+        self._drag_active = True
+        self._cancel_hide()
+        button.setDown(False)
+        self._set_drag_style(button, True)
+        button.setCursor(Qt.CursorShape.ClosedHandCursor)
+        button.grabMouse()
+        self._drag_scroll_timer.start()
+
+    def _finish_drag(self, global_pos: QPoint) -> None:
+        button = self._drag_button
+        self._suppress_click = True
+        self._cancel_drag()
+        self._emit_reordered()
+        if button is None or self._config.settings.pinned_open:
+            return
+        local = self.mapFromGlobal(global_pos)
+        if not self.rect().contains(local):
+            self._schedule_hide()
+            self.hover_leave.emit()
+
+    def _emit_reordered(self) -> None:
+        visible_ids = [b.launcher.id for b in self._launch_buttons() if b.isVisible()]
+        visible_set = set(visible_ids)
+        entries = [
+            (launcher.id, launcher.enabled and launcher.id in visible_set)
+            for launcher in self._config.launchers
+        ]
+        new_ids = merge_visible_order(entries, visible_ids)
+        current_ids = [launcher.id for launcher in self._config.launchers]
+        if new_ids != current_ids:
+            self.reordered.emit(new_ids)
+
+    def _target_visible_index(self, global_y: int) -> int:
+        """Index to insert the dragged row at. len(visible) means after the last row."""
+        visible = [b for b in self._launch_buttons() if b.isVisible()]
+        for index, button in enumerate(visible):
+            center = button.mapToGlobal(QPoint(0, button.height() // 2)).y()
+            if global_y < center:
+                return index
+        return len(visible)
+
+    def _move_dragged_to(self, index: int) -> None:
+        dragged = self._drag_button
+        if dragged is None:
+            return
+        visible = [b for b in self._launch_buttons() if b.isVisible()]
+        if dragged not in visible:
+            return
+        old = visible.index(dragged)
+        # index is an insertion point, so the slot just after the row is the same place.
+        if index == old or index == old + 1:
+            return
+        visible.pop(old)
+        if old < index:
+            index -= 1
+        index = max(0, min(index, len(visible)))
+        visible.insert(index, dragged)
+
+        entries = [(b.launcher.id, b.isVisible()) for b in self._launch_buttons()]
+        new_ids = merge_visible_order(entries, [b.launcher.id for b in visible])
+        by_id = {b.launcher.id: b for b in self._launch_buttons()}
+        labels = [b for b in self._buttons if not isinstance(b, LaunchButton)]
+        ordered = [by_id[item_id] for item_id in new_ids if item_id in by_id]
+        self._relayout_buttons(ordered + labels)
+
+    def _relayout_buttons(self, buttons: list) -> None:
+        for button in buttons:
+            self._button_layout.removeWidget(button)
+        for button in buttons:
+            self._button_layout.addWidget(button)
+        self._buttons = list(buttons)
+        self._visible_buttons = [b for b in self._buttons if isinstance(b, LaunchButton) and b.isVisible()]
+
+    def _drag_step(self, global_pos: QPoint) -> None:
+        self._drag_last_global = global_pos
+        self._autoscroll_once(global_pos)
+        self._move_dragged_to(self._target_visible_index(global_pos.y()))
+
+    def _autoscroll_once(self, global_pos: QPoint) -> None:
+        viewport = self._scroll.viewport()
+        local_y = viewport.mapFromGlobal(global_pos).y()
+        bar = self._scroll.verticalScrollBar()
+        if local_y < 16:
+            bar.setValue(bar.value() - 14)
+        elif local_y > viewport.height() - 16:
+            bar.setValue(bar.value() + 14)
+
+    def _drag_autoscroll(self) -> None:
+        if not self._drag_active or self._drag_button is None:
+            self._drag_scroll_timer.stop()
+            return
+        self._drag_step(self._drag_last_global)
+
+    def _handle_reorder_event(self, button: LaunchButton, event: QEvent) -> bool:
+        kind = event.type()
+        if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self._suppress_click = False
+            self._drag_button = button
+            self._drag_press_y = event.globalPosition().toPoint().y()
+            self._drag_last_global = event.globalPosition().toPoint()
+            self._drag_active = False
+            return False
+        if (
+            kind == QEvent.Type.MouseMove
+            and self._drag_button is button
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            global_pos = event.globalPosition().toPoint()
+            if not self._drag_active:
+                if abs(global_pos.y() - self._drag_press_y) < _DRAG_THRESHOLD_PX:
+                    return False
+                self._begin_drag(button)
+            self._drag_step(global_pos)
+            return True
+        if (
+            kind == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._drag_button is button
+            and self._drag_active
+        ):
+            # Swallow the release so the row does not launch at the end of a drag.
+            self._finish_drag(event.globalPosition().toPoint())
+            return True
+        return False
+
+    def _show_item_menu(self, button: LaunchButton, pos: QPoint) -> None:
+        """Right-click menu for one row. Edit and Delete only."""
+        if self._drag_active:
+            return
+        previous = self._item_menu
+        if previous is not None:
+            try:
+                previous.aboutToHide.disconnect(self._on_item_menu_hidden)
+            except RuntimeError:
+                pass
+            previous.close()
+
+        launcher = button.launcher
+        menu = QMenu(self)
+        mark_stay_on_top(menu)
+        edit_action = menu.addAction("Edit")
+        delete_action = menu.addAction("Delete")
+        edit_action.triggered.connect(lambda checked=False, item=launcher: self.edit_requested.emit(item))
+        delete_action.triggered.connect(lambda checked=False, item=launcher: self.delete_requested.emit(item))
+
+        self._item_menu = menu
+        self._in_context_menu = True
+        self._cancel_hide()
+        menu.aboutToHide.connect(self._on_item_menu_hidden)
+        global_pos = button.mapToGlobal(pos)
+        # Frameless tool windows close a context menu immediately on macOS
+        # unless popup is deferred until after the right-click release.
+        QTimer.singleShot(0, lambda m=menu, p=global_pos: m.popup(p))
+
+    def _on_item_menu_hidden(self) -> None:
+        self._in_context_menu = False
+        if self._config.settings.pinned_open:
+            return
+        if self.frameGeometry().contains(QCursor.pos()):
+            return
+        self._schedule_hide()
+        self.hover_leave.emit()
 
     # --- Keyboard navigation helpers ---
 
@@ -433,13 +665,15 @@ class DropdownPanel(QWidget):
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        if self._drag_active or self._in_context_menu:
+            return
         if not self._config.settings.pinned_open:
             self._schedule_hide()
         self.hover_leave.emit()
         super().leaveEvent(event)
 
     def _schedule_hide(self) -> None:
-        if self._config.settings.pinned_open:
+        if self._config.settings.pinned_open or self._drag_active or self._in_context_menu:
             return
         self._hide_timer.start()
 
@@ -672,6 +906,8 @@ class DropdownPanel(QWidget):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj, event):  # type: ignore[override]
+        if isinstance(obj, LaunchButton) and self._handle_reorder_event(obj, event):
+            return True
         if obj is self._search_edit and event.type() == QEvent.Type.KeyPress:
             if isinstance(event, QKeyEvent):
                 if event.key() == Qt.Key.Key_Escape:

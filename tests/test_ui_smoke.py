@@ -317,14 +317,19 @@ def test_trigger_mouse_resize_drag_hover(qapp, qtbot):
     qtbot.addWidget(trigger)
     trigger.setGeometry(200, 200, 40, 40)  # give it a real rect for edge detection
     trigger.show()
+    # show() reapplies the saved arrow size, which is larger than the old 36px default.
+    right = trigger.width() - 1
+    bottom = trigger.height() - 1
+    mid_x = trigger.width() // 2
+    mid_y = trigger.height() // 2
 
     # Direct helper coverage (no event needed)
     assert trigger._get_resize_edge(QPoint(1, 1)) == "topleft"
-    assert trigger._get_resize_edge(QPoint(39, 1)) == "topright"
-    assert trigger._get_resize_edge(QPoint(1, 39)) == "bottomleft"
-    assert trigger._get_resize_edge(QPoint(39, 39)) == "bottomright"
-    assert trigger._get_resize_edge(QPoint(1, 20)) == "left"
-    assert trigger._get_resize_edge(QPoint(20, 1)) == "top"
+    assert trigger._get_resize_edge(QPoint(right, 1)) == "topright"
+    assert trigger._get_resize_edge(QPoint(1, bottom)) == "bottomleft"
+    assert trigger._get_resize_edge(QPoint(right, bottom)) == "bottomright"
+    assert trigger._get_resize_edge(QPoint(1, mid_y)) == "left"
+    assert trigger._get_resize_edge(QPoint(mid_x, 1)) == "top"
     trigger._update_resize_cursor(QPoint(1, 1))  # sets cursor, no assert needed
 
     # Mouse press near edge -> _resizing

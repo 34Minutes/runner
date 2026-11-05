@@ -28,7 +28,11 @@ from ..config import Launcher
 class AddEditDialog(StayOnTopDialog):
     """Modal dialog to create or edit a Launcher."""
 
-    def __init__(self, launcher: Launcher | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        launcher: Launcher | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add Launcher" if launcher is None else "Edit Launcher")
         self.setModal(True)
@@ -94,6 +98,8 @@ class AddEditDialog(StayOnTopDialog):
         main_layout.addRow(buttons)
 
         self.setLayout(main_layout)
+        hint = self.sizeHint()
+        self.resize(max(440, hint.width() + 24), max(self.height(), hint.height() + 12))
 
         if launcher:
             self._name_edit.setText(launcher.name)
