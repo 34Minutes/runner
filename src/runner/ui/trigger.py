@@ -518,11 +518,11 @@ class TriggerWidget(QWidget):
 
         # Subtle background pill / rounded rect
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(30, 30, 30, 220))
+        painter.setBrush(QColor(30, 30, 30, 170))
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
 
         # Downward arrow (▼)
-        painter.setPen(QPen(QColor(230, 230, 230), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(QColor(230, 230, 230, 210), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         w = self.width()
         h = self.height()
         cx = w / 2
