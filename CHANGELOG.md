@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.5] - 2026-11-13
+
+### Added
+- Container groups. **Add Container Group** on the arrow menu names a submenu and picks launchers for it. The row appears at the top of the main popup. Hovering it opens those launchers, and a click starts one. **Only in Container Group** hides a launcher from the main popup while any container it belongs to has that switch on. When the switch is off on every one of those containers, the launcher shows in the main popup again. It can belong to many container groups and many execute groups.
+- Add and edit launcher show **Container groups I belong to** and **Execute groups I belong to**, with add and remove.
+
+### Changed
+- Groups that run their launchers are called **Execute Groups**. The list heading, the arrow menu, and the add, edit, and manage windows use that name.
+
+### Fixed
+- The launcher list, the execute-group list, and a container submenu open with no row highlighted. Arrow keys, Home, and End choose a row. Enter launches only a row that is already highlighted.
+
 ## [1.0.4] - 2026-11-12
 
 ### Added

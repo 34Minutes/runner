@@ -182,6 +182,7 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     dialog = GroupDialog(mgr, None)
     qtbot.addWidget(dialog)
     dialog.show()
+    assert dialog.windowTitle() == "Add Execute Group"
     qtbot.waitExposed(dialog)
     headers = [dialog._table.horizontalHeaderItem(column).text() for column in range(3)]
     assert headers == ["Launcher", "Concurrent", "Only In Groups"]
@@ -317,7 +318,7 @@ def test_manage_groups_deletes_the_group_and_keeps_its_launchers(qapp, qtbot, tm
 
     dialog = GroupManagerDialog(mgr)
     qtbot.addWidget(dialog)
-    assert dialog.windowTitle() == "Manage Groups"
+    assert dialog.windowTitle() == "Manage Execute Groups"
     assert dialog._list.item(0).text() == "Class  (1 launcher)"
     dialog._list.setCurrentRow(0)
     with patch("runner.ui.group_manager.question", return_value=QMessageBox.StandardButton.Yes):
@@ -343,7 +344,16 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-6:] == ["---", "Add group", "Manage groups", "Groups", "---", "Exit"]
+    assert labels[-8:] == [
+        "---",
+        "Add Execute Group",
+        "Manage Execute Groups",
+        "Execute Groups",
+        "Add Container Group",
+        "Manage Container Groups",
+        "---",
+        "Exit",
+    ]
 
     trigger._action_add_group.trigger()
     trigger._action_manage_groups.trigger()
@@ -366,8 +376,8 @@ def test_show_groups_switch_sits_under_the_greeting_switch(qapp, qtbot):
     menu = trigger.findChildren(QMenu)[-1]
     qtbot.addWidget(menu)
     names = [switch.text() for switch in menu.findChildren(ToggleSwitch)]
-    assert names.index("Show groups") == names.index("Show greeting message") + 1
-    switch = next(item for item in menu.findChildren(ToggleSwitch) if item.text() == "Show groups")
+    assert names.index("Show execute groups") == names.index("Show greeting message") + 1
+    switch = next(item for item in menu.findChildren(ToggleSwitch) if item.text() == "Show execute groups")
     assert switch.isChecked() is False
     switch.click()
     assert seen == [True]
@@ -393,7 +403,7 @@ class _Arrow:
 def test_empty_groups_list_shows_no_message(qapp, qtbot):
     panel = DropdownPanel(AppConfig(), honor_pin=False)
     qtbot.addWidget(panel)
-    panel.set_list_copy(placeholder="Filter groups...", empty_hint="")
+    panel.set_list_copy(placeholder="Filter execute groups...", empty_hint="")
     panel.set_heading("Groups")
     panel.rebuild_buttons([])
     labels = [widget for widget in panel._buttons if isinstance(widget, QLabel)]
@@ -410,10 +420,10 @@ def test_groups_list_opens_beside_launchers_toward_the_middle(qapp, qtbot):
     cfg = AppConfig()
     launchers = DropdownPanel(cfg)
     groups = DropdownPanel(cfg, honor_pin=False)
-    groups.set_heading("Groups")
+    groups.set_heading("Execute Groups")
     qtbot.addWidget(launchers)
     qtbot.addWidget(groups)
-    assert groups._heading.text() == "Groups"
+    assert groups._heading.text() == "Execute Groups"
     assert groups._heading.isHidden() is False
     assert "11px" in groups._heading.styleSheet()
     assert groups._layout.indexOf(groups._heading) < groups._layout.indexOf(groups._search_edit)

@@ -64,10 +64,52 @@ class Group:
         return cls(id=str(uuid4()), name=name, members=list(members or []))
 
 
+@dataclass
+class ContainerMember:
+    """One launcher inside a container group.
+
+    only_in_container hides that launcher from the main popup while it stays
+    in this container. The launcher is shown again when every container it
+    belongs to has this off.
+    """
+
+    launcher_id: str
+    only_in_container: bool = False
+
+
+@dataclass
+class ContainerGroup:
+    """A named submenu. Hovering it lists its launchers. It does not run them."""
+
+    id: str
+    name: str
+    members: list[ContainerMember] = field(default_factory=list)
+
+    @classmethod
+    def new(cls, name: str, members: list[ContainerMember] | None = None) -> ContainerGroup:
+        return cls(id=str(uuid4()), name=name, members=list(members or []))
+
+
 def _from_fields(cls, data: dict[str, Any]):
     """Build a dataclass from JSON, ignoring keys this version does not know."""
     known = {item.name for item in fields(cls)}
     return cls(**{key: value for key, value in data.items() if key in known})
+
+
+def _unique_known(ids: list[str], known: set[str]) -> set[str]:
+    return {item_id for item_id in ids if item_id in known}
+
+
+def _sync_members(members: list, launcher_id: str, keep: bool, make_member):
+    """Drop or append this launcher. An existing row stays put, flags included."""
+    existing = next((member for member in members if member.launcher_id == launcher_id), None)
+    if keep:
+        if existing is not None:
+            return list(members)
+        return [*members, make_member()]
+    if existing is None:
+        return list(members)
+    return [member for member in members if member.launcher_id != launcher_id]
 
 
 @dataclass
@@ -99,6 +141,7 @@ class AppConfig:
 
     launchers: list[Launcher] = field(default_factory=list)
     groups: list[Group] = field(default_factory=list)
+    container_groups: list[ContainerGroup] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
     version: int = 1
 
@@ -108,6 +151,7 @@ class AppConfig:
             "settings": asdict(self.settings),
             "launchers": [asdict(l) for l in self.launchers],
             "groups": [asdict(group) for group in self.groups],
+            "container_groups": [asdict(group) for group in self.container_groups],
         }
 
     @classmethod
@@ -119,7 +163,21 @@ class AppConfig:
         for item in data.get("groups", []):
             members = [_from_fields(GroupMember, member) for member in item.get("members", [])]
             groups.append(Group(id=item["id"], name=item.get("name", ""), members=members))
-        return cls(launchers=launchers, settings=settings, groups=groups, version=version)
+        container_groups = []
+        for item in data.get("container_groups", []):
+            members = [
+                _from_fields(ContainerMember, member) for member in item.get("members", [])
+            ]
+            container_groups.append(
+                ContainerGroup(id=item["id"], name=item.get("name", ""), members=members)
+            )
+        return cls(
+            launchers=launchers,
+            settings=settings,
+            groups=groups,
+            container_groups=container_groups,
+            version=version,
+        )
 
 
 class ConfigManager:
@@ -186,11 +244,13 @@ class ConfigManager:
         return [l for l in self.config.launchers if l.enabled]
 
     def get_main_view_launchers(self) -> list[Launcher]:
-        """Enabled launchers that are not reserved for groups."""
+        """Enabled launchers that belong on the main hover list."""
+        from .containers import shown_in_main_menu
+
         return [
             launcher
             for launcher in self.config.launchers
-            if launcher.enabled and not launcher.only_in_groups
+            if shown_in_main_menu(launcher, self.config.container_groups)
         ]
 
     def reload(self) -> AppConfig:
@@ -216,6 +276,10 @@ class ConfigManager:
             l for l in self.config.launchers if l.id != launcher_id
         ]
         for group in self.config.groups:
+            group.members = [
+                member for member in group.members if member.launcher_id != launcher_id
+            ]
+        for group in self.config.container_groups:
             group.members = [
                 member for member in group.members if member.launcher_id != launcher_id
             ]
@@ -245,6 +309,67 @@ class ConfigManager:
                 new_order.append(by_id.pop(group_id))
         new_order.extend(by_id.values())
         self.config.groups = new_order
+        self.save()
+
+    def add_container_group(self, group: ContainerGroup) -> None:
+        self.config.container_groups.append(group)
+        self.save()
+
+    def update_container_group(self, group: ContainerGroup) -> None:
+        for index, existing in enumerate(self.config.container_groups):
+            if existing.id == group.id:
+                self.config.container_groups[index] = group
+                self.save()
+                return
+        self.add_container_group(group)
+
+    def remove_container_group(self, group_id: str) -> None:
+        self.config.container_groups = [
+            group for group in self.config.container_groups if group.id != group_id
+        ]
+        self.save()
+
+    def reorder_container_groups(self, ordered_ids: list[str]) -> None:
+        by_id = {group.id: group for group in self.config.container_groups}
+        new_order = []
+        for group_id in ordered_ids:
+            if group_id in by_id:
+                new_order.append(by_id.pop(group_id))
+        new_order.extend(by_id.values())
+        self.config.container_groups = new_order
+        self.save()
+
+    def set_launcher_membership(
+        self,
+        launcher_id: str,
+        container_ids: list[str],
+        execute_ids: list[str],
+    ) -> None:
+        """Put this launcher in exactly these container and execute groups.
+
+        A membership that stays keeps its Only in Container Group flag or its
+        Concurrent flag. A newly added membership starts with both off.
+        """
+        container_keep = _unique_known(
+            container_ids, {group.id for group in self.config.container_groups}
+        )
+        execute_keep = _unique_known(
+            execute_ids, {group.id for group in self.config.groups}
+        )
+        for group in self.config.container_groups:
+            group.members = _sync_members(
+                group.members,
+                launcher_id,
+                group.id in container_keep,
+                lambda: ContainerMember(launcher_id, only_in_container=False),
+            )
+        for group in self.config.groups:
+            group.members = _sync_members(
+                group.members,
+                launcher_id,
+                group.id in execute_keep,
+                lambda: GroupMember(launcher_id, concurrent=False),
+            )
         self.save()
 
     def reorder_launchers(self, ordered_ids: list[str]) -> None:

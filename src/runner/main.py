@@ -30,15 +30,19 @@ from .config import (
     DEFAULT_TRIGGER_WIDTH,
     AppConfig,
     ConfigManager,
+    ContainerGroup,
     Group,
     Launcher,
 )
+from .containers import submenu_launchers
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .launcher import launch
 from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel
 from .ui.add_dialog import AddEditDialog
+from .ui.container_dialog import ContainerDialog
+from .ui.container_manager import ContainerManagerDialog
 from .ui.group_dialog import GroupDialog
 from .ui.group_manager import GroupManagerDialog
 from .ui.manager_dialog import ManagerDialog
@@ -92,6 +96,14 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
         cfg.add_launcher(s)
 
 
+def _fill_main_dropdown(dropdown: DropdownPanel, cfg: ConfigManager) -> None:
+    """Launcher rows, with container groups above them."""
+    dropdown.set_submenu_items(
+        [(group.id, group.name) for group in cfg.config.container_groups]
+    )
+    dropdown.rebuild_buttons(cfg.get_main_view_launchers())
+
+
 def create_tray(
     app: QApplication,
     trigger: TriggerWidget,
@@ -136,7 +148,7 @@ def create_tray(
     act_reload = QAction("Reload config", menu)
     def do_reload():
         cfg.reload()
-        dropdown.rebuild_buttons(cfg.get_main_view_launchers())
+        _fill_main_dropdown(dropdown, cfg)
         trigger.update_size_from_settings()
         if on_reloaded is not None:
             on_reloaded()
@@ -167,7 +179,7 @@ def create_tray(
             if before_show is not None:
                 before_show()
             dropdown.position_adjacent(trigger)
-            dropdown.rebuild_buttons(cfg.get_main_view_launchers())
+            _fill_main_dropdown(dropdown, cfg)
             if cfg.config.settings.pinned_open:
                 dropdown.ensure_visible_and_sized()
             else:
@@ -277,21 +289,31 @@ def main() -> int:
     dropdown = DropdownPanel(cfg_mgr.config)
     group_panel = DropdownPanel(cfg_mgr.config, honor_pin=False)
     group_panel.set_list_copy(
-        placeholder="Filter groups...",
+        placeholder="Filter execute groups...",
         empty_hint="",
     )
     group_panel.set_order_ids(lambda: [group.id for group in cfg_mgr.config.groups])
     group_panel.set_row_tooltip(
         lambda row: (
-            f"Run group: {row.name}\n"
+            f"Run execute group: {row.name}\n"
             "Drag up or down to reorder\n"
             "Right-click to edit or delete"
         )
     )
-    group_panel.set_heading("Groups")
+    group_panel.set_heading("Execute Groups")
 
-    # Initial button population. Launchers marked only-in-groups stay off this list.
-    dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
+    container_panel = DropdownPanel(
+        cfg_mgr.config,
+        honor_pin=False,
+        allow_reorder=False,
+    )
+    container_panel.set_list_copy(
+        placeholder="Filter launchers...",
+        empty_hint="Nothing in this container.",
+    )
+
+    # Initial button population. Launchers hidden by a group stay off this list.
+    _fill_main_dropdown(dropdown, cfg_mgr)
 
     # Validate that saved position is still on screen (e.g. after monitor changes)
     # If not, reset to a safe default.
@@ -336,6 +358,10 @@ def main() -> int:
     hide_timer.setSingleShot(True)
     hide_timer.setInterval(cfg_mgr.config.settings.hover_delay_ms)
     showing_groups = False
+    open_container_id: str | None = None
+    container_hide_timer = QTimer()
+    container_hide_timer.setSingleShot(True)
+    container_hide_timer.setInterval(180)
 
     def schedule_hide():
         hide_timer.start()
@@ -344,11 +370,21 @@ def main() -> int:
         hide_timer.stop()
         dropdown.cancel_hide()  # also cancel dropdown's internal timer to keep list open when mouse is over trigger
         group_panel.cancel_hide()
+        container_panel.cancel_hide()
 
     def _show_groups_enabled() -> bool:
         return bool(getattr(cfg_mgr.config.settings, "show_groups", False))
 
+    def _hide_container_menu() -> None:
+        nonlocal open_container_id
+        container_hide_timer.stop()
+        open_container_id = None
+        container_panel.use_position_hook(None)
+        if container_panel.isVisible():
+            container_panel.force_hide()
+
     def do_hide():
+        _hide_container_menu()
         if showing_groups:
             group_panel.start_hide_animation()
             return
@@ -400,6 +436,7 @@ def main() -> int:
 
     def _show_group_panel() -> None:
         nonlocal showing_groups
+        _hide_container_menu()
         if not cfg_mgr.config.groups:
             showing_groups = False
             _hide_groups_beside()
@@ -429,6 +466,7 @@ def main() -> int:
 
     def on_trigger_enter():
         cancel_hide()  # cancels both main timer and dropdown's internal timer
+        _hide_container_menu()
         if showing_groups:
             group_panel.position_adjacent(trigger)
             if group_panel.is_closing() or not group_panel.isVisible():
@@ -437,7 +475,7 @@ def main() -> int:
             group_panel.stackUnder(trigger)
             return
         dropdown.position_adjacent(trigger)
-        dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
+        _fill_main_dropdown(dropdown, cfg_mgr)
         if not dropdown.isVisible():
             dropdown.start_show_animation()
         trigger.raise_()
@@ -453,7 +491,7 @@ def main() -> int:
     def on_trigger_leave():
         # Moving from the arrow menu onto a list must not start a hide.
         # The list's own leave collapses it.
-        if _pointer_over(dropdown) or _pointer_over(group_panel):
+        if _pointer_over(dropdown) or _pointer_over(group_panel) or _pointer_over(container_panel):
             return
         if showing_groups or not cfg_mgr.config.settings.pinned_open:
             schedule_hide()
@@ -462,6 +500,9 @@ def main() -> int:
         cancel_hide()
 
     def on_dropdown_leave():
+        if _pointer_over(container_panel):
+            return
+        _schedule_container_hide()
         if not cfg_mgr.config.settings.pinned_open:
             schedule_hide()
 
@@ -475,6 +516,88 @@ def main() -> int:
     def on_group_leave():
         if showing_groups or (_show_groups_enabled() and not cfg_mgr.config.settings.pinned_open):
             schedule_hide()
+
+    def _container_by_id(group_id: str) -> ContainerGroup | None:
+        for group in cfg_mgr.config.container_groups:
+            if group.id == group_id:
+                return group
+        return None
+
+    def _container_prefer_right() -> bool:
+        """Open on the side opposite the execute-groups list when that list is up."""
+        if group_panel.isVisible() and group_panel.x() >= dropdown.x():
+            return False
+        return True
+
+    def _place_container() -> None:
+        if not open_container_id:
+            return
+        button = dropdown.submenu_button(open_container_id)
+        if button is None or not button.isVisible():
+            return
+        container_panel.position_next_to(
+            dropdown,
+            button,
+            prefer_right=_container_prefer_right(),
+        )
+
+    def _show_container_menu(group_id: str) -> None:
+        nonlocal open_container_id
+        group = _container_by_id(group_id)
+        if group is None or not dropdown.isVisible():
+            _hide_container_menu()
+            return
+        button = dropdown.submenu_button(group_id)
+        if button is None or not button.isVisible():
+            _hide_container_menu()
+            return
+        container_hide_timer.stop()
+        open_container_id = group_id
+        container_panel.set_heading(group.name)
+        container_panel.rebuild_buttons(submenu_launchers(group, cfg_mgr.config.launchers))
+        container_panel.use_position_hook(_place_container)
+        container_panel.cancel_hide()
+        if container_panel.isVisible() and not container_panel.is_closing():
+            container_panel.ensure_visible_and_sized()
+        else:
+            container_panel.start_show_animation()
+        trigger.raise_()
+        dropdown.stackUnder(trigger)
+        container_panel.stackUnder(trigger)
+
+    def _on_submenu_left(group_id: str) -> None:
+        if group_id == open_container_id:
+            _schedule_container_hide()
+
+    def _schedule_container_hide() -> None:
+        if open_container_id:
+            container_hide_timer.start()
+
+    def _hide_container_if_left() -> None:
+        if _pointer_over(container_panel):
+            return
+        if open_container_id:
+            button = dropdown.submenu_button(open_container_id)
+            if (
+                button is not None
+                and button.isVisible()
+                and button.rect().contains(button.mapFromGlobal(QCursor.pos()))
+            ):
+                return
+        _hide_container_menu()
+
+    def on_container_enter():
+        cancel_hide()
+        container_hide_timer.stop()
+
+    def on_container_leave():
+        _schedule_container_hide()
+        if _pointer_over(dropdown) or _pointer_over(trigger):
+            return
+        if showing_groups or not cfg_mgr.config.settings.pinned_open:
+            schedule_hide()
+
+    container_hide_timer.timeout.connect(_hide_container_if_left)
 
     def reset_position_and_size():
         """Reset the trigger to a sensible default location and size."""
@@ -498,6 +621,10 @@ def main() -> int:
     group_panel.hover_enter.connect(on_group_enter)
     group_panel.hover_leave.connect(on_group_leave)
     group_panel.closed.connect(on_group_panel_closed)
+    container_panel.hover_enter.connect(on_container_enter)
+    container_panel.hover_leave.connect(on_container_leave)
+    dropdown.submenu_hovered.connect(_show_container_menu)
+    dropdown.submenu_left.connect(_on_submenu_left)
 
     trigger.request_reset.connect(reset_position_and_size)
 
@@ -517,6 +644,7 @@ def main() -> int:
                 f"Could not launch '{launcher.name}':\n{exc}",
             )
         finally:
+            _hide_container_menu()
             if not cfg_mgr.config.settings.pinned_open:
                 # short delay for click visual feedback, then hide (unless pinned)
                 QTimer.singleShot(80, dropdown.start_hide_animation)
@@ -533,8 +661,13 @@ def main() -> int:
 
     dropdown.reordered.connect(on_reordered)
 
+    def _refresh_open_container() -> None:
+        if open_container_id and container_panel.isVisible():
+            _show_container_menu(open_container_id)
+
     def _refresh_open_list() -> None:
-        dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
+        _fill_main_dropdown(dropdown, cfg_mgr)
+        _refresh_open_container()
         if cfg_mgr.config.settings.pinned_open:
             apply_pinned_state()
 
@@ -574,7 +707,7 @@ def main() -> int:
         _follow_trigger()
 
     def show_add_dialog(existing: Launcher | None = None):
-        dlg = AddEditDialog(existing, trigger)
+        dlg = AddEditDialog(existing, trigger, cfg=cfg_mgr)
         if dlg.exec():
             new_or_updated = dlg.result_launcher
             if new_or_updated:
@@ -582,7 +715,9 @@ def main() -> int:
                     cfg_mgr.update_launcher(new_or_updated)
                 else:
                     cfg_mgr.add_launcher(new_or_updated)
-                dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
+                _fill_main_dropdown(dropdown, cfg_mgr)
+                _refresh_open_container()
+                _sync_groups_after_change()
 
     def _follow_trigger() -> None:
         """Keep whichever list is open beside the arrow."""
@@ -621,13 +756,16 @@ def main() -> int:
                 _show_groups_beside()
         else:
             dropdown.force_hide()
+            _hide_container_menu()
             _hide_groups_beside()
 
     def show_manager_dialog():
         dlg = ManagerDialog(cfg_mgr, trigger)
         dlg.exec()
         # always rebuild after manager (launchers may have changed) and apply pin state
-        dropdown.rebuild_buttons(cfg_mgr.get_main_view_launchers())
+        _fill_main_dropdown(dropdown, cfg_mgr)
+        _refresh_open_container()
+        _sync_groups_after_change()
         apply_pinned_state()
 
     def show_group_dialog(existing: Group | None = None) -> None:
@@ -655,6 +793,7 @@ def main() -> int:
             return
         steps = execution_steps(group, cfg_mgr.config.launchers)
         group_panel.force_hide()
+        _hide_container_menu()
         if not cfg_mgr.config.settings.pinned_open:
             dropdown.start_hide_animation()
         if not steps:
@@ -703,7 +842,7 @@ def main() -> int:
             return
         reply = stay_on_top_question(
             trigger,
-            "Delete Group",
+            "Delete Execute Group",
             f"Delete '{group.name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -722,9 +861,55 @@ def main() -> int:
 
     trigger.request_add.connect(lambda: show_add_dialog())
     trigger.request_manage.connect(lambda: show_manager_dialog())
+    def show_container_dialog(existing: ContainerGroup | None = None) -> None:
+        dialog = ContainerDialog(cfg_mgr, existing, trigger)
+        dialog.launchers_changed.connect(_refresh_open_list)
+        accepted = bool(dialog.exec())
+        result = dialog.result_group
+        if accepted and result is not None:
+            if existing is None:
+                cfg_mgr.add_container_group(result)
+            else:
+                cfg_mgr.update_container_group(result)
+        _refresh_open_list()
+
+    def show_container_manager() -> None:
+        dialog = ContainerManagerDialog(cfg_mgr, trigger)
+        dialog.exec()
+        _refresh_open_list()
+
+    def on_container_edit(group_id: str) -> None:
+        group = _container_by_id(group_id)
+        if group is not None:
+            show_container_dialog(group)
+
+    def on_container_delete(group_id: str) -> None:
+        group = _container_by_id(group_id)
+        if group is None:
+            return
+        reply = stay_on_top_question(
+            trigger,
+            "Delete Container Group",
+            f"Delete '{group.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        cfg_mgr.remove_container_group(group.id)
+        _hide_container_menu()
+        _refresh_open_list()
+
+    container_panel.launch_requested.connect(on_launch)
+    container_panel.edit_requested.connect(on_edit_requested)
+    container_panel.delete_requested.connect(on_delete_requested)
+    dropdown.submenu_edit_requested.connect(on_container_edit)
+    dropdown.submenu_delete_requested.connect(on_container_delete)
+
     trigger.request_add_group.connect(lambda: show_group_dialog())
     trigger.request_manage_groups.connect(show_group_manager)
     trigger.request_groups.connect(_show_group_panel)
+    trigger.request_add_container.connect(lambda: show_container_dialog())
+    trigger.request_manage_containers.connect(show_container_manager)
 
     # Connect the quick toggles from the arrow's right-click menu
     def on_pin_toggled(checked):
@@ -737,6 +922,7 @@ def main() -> int:
         cfg_mgr.update_settings(show_filter_box=checked)
         dropdown.refresh_filter_visibility()
         group_panel.refresh_filter_visibility()
+        container_panel.refresh_filter_visibility()
         if showing_groups and group_panel.isVisible():
             group_panel.update_height_for_content()
             group_panel.position_adjacent(trigger)
@@ -839,6 +1025,7 @@ def main() -> int:
             _show_groups_beside()
 
     def _before_tray_show() -> None:
+        _hide_container_menu()
         if showing_groups:
             group_panel.force_hide()
 

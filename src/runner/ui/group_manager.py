@@ -23,7 +23,7 @@ class GroupManagerDialog(StayOnTopDialog):
 
     def __init__(self, cfg: ConfigManager, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Manage Groups")
+        self.setWindowTitle("Manage Execute Groups")
         self.resize(480, 320)
         self._cfg = cfg
         self._groups: list[Group] = list(cfg.config.groups)
@@ -103,7 +103,7 @@ class GroupManagerDialog(StayOnTopDialog):
             return
         reply = question(
             self,
-            "Delete Group",
+            "Delete Execute Group",
             f"Delete '{group.name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )

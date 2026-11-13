@@ -157,6 +157,8 @@ class TriggerWidget(QWidget):
     request_add_group = Signal()
     request_manage_groups = Signal()
     request_groups = Signal()
+    request_add_container = Signal()
+    request_manage_containers = Signal()
     request_reset = Signal()
     request_exit = Signal()
     pin_toggled = Signal(bool)
@@ -212,8 +214,8 @@ class TriggerWidget(QWidget):
         # Optional: slight tooltip
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
-            "Right-click for quick toggles (Pin, Filter, Greeting, Show groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Groups, Reset position & size, Exit"
+            "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
+            "Add, Manage, Execute Groups, Container Groups, Reset position & size, Exit"
         )
 
     def _create_actions(self) -> None:
@@ -226,14 +228,20 @@ class TriggerWidget(QWidget):
         self._action_reset = QAction("Reset position & size", self)
         self._action_reset.triggered.connect(self.request_reset.emit)
 
-        self._action_add_group = QAction("Add group", self)
+        self._action_add_group = QAction("Add Execute Group", self)
         self._action_add_group.triggered.connect(self.request_add_group.emit)
 
-        self._action_manage_groups = QAction("Manage groups", self)
+        self._action_manage_groups = QAction("Manage Execute Groups", self)
         self._action_manage_groups.triggered.connect(self.request_manage_groups.emit)
 
-        self._action_groups = QAction("Groups", self)
+        self._action_groups = QAction("Execute Groups", self)
         self._action_groups.triggered.connect(self.request_groups.emit)
+
+        self._action_add_container = QAction("Add Container Group", self)
+        self._action_add_container.triggered.connect(self.request_add_container.emit)
+
+        self._action_manage_containers = QAction("Manage Container Groups", self)
+        self._action_manage_containers.triggered.connect(self.request_manage_containers.emit)
 
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
@@ -278,7 +286,7 @@ class TriggerWidget(QWidget):
         greeting_switch.toggled.connect(lambda checked: self.greeting_toggled.emit(checked))
         menu.addAction(greeting_action)
 
-        groups_switch = ToggleSwitch("Show groups")
+        groups_switch = ToggleSwitch("Show execute groups")
         groups_switch.blockSignals(True)
         groups_switch.setChecked(getattr(self._config.settings, "show_groups", False))
         groups_switch.blockSignals(False)
@@ -302,6 +310,8 @@ class TriggerWidget(QWidget):
         menu.addAction(self._action_add_group)
         menu.addAction(self._action_manage_groups)
         menu.addAction(self._action_groups)
+        menu.addAction(self._action_add_container)
+        menu.addAction(self._action_manage_containers)
         menu.addSeparator()
         menu.addAction(self._action_exit)
 

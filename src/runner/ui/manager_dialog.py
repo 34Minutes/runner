@@ -123,7 +123,7 @@ class ManagerDialog(StayOnTopDialog):
         launcher = self._get_selected_launcher()
         if not launcher:
             return
-        dlg = AddEditDialog(launcher, self)
+        dlg = AddEditDialog(launcher, self, cfg=self._cfg)
         if dlg.exec():
             # The dialog mutates the launcher in place when editing
             self._cfg.update_launcher(launcher)  # persist
@@ -167,7 +167,7 @@ class ManagerDialog(StayOnTopDialog):
         self._cfg.reorder_launchers(ordered_ids)
 
     def _on_add_new(self):
-        dlg = AddEditDialog(None, self)
+        dlg = AddEditDialog(None, self, cfg=self._cfg)
         if dlg.exec():
             new_l = dlg.result_launcher
             if new_l:

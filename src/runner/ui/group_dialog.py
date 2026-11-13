@@ -154,7 +154,7 @@ class GroupDialog(StayOnTopDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Add Group" if group is None else "Edit Group")
+        self.setWindowTitle("Add Execute Group" if group is None else "Edit Execute Group")
         self.setModal(True)
         self.resize(680, 480)
         self._cfg = cfg
@@ -485,7 +485,7 @@ class GroupDialog(StayOnTopDialog):
             return
 
     def _on_add_launcher(self) -> None:
-        dialog = AddEditDialog(None, self)
+        dialog = AddEditDialog(None, self, cfg=self._cfg)
         if not dialog.exec():
             return
         created = dialog.result_launcher
@@ -493,7 +493,25 @@ class GroupDialog(StayOnTopDialog):
             return
         self._cfg.add_launcher(created)
         self.launchers_changed.emit()
+        self._absorb_new_member(created.id)
         self._rebuild()
+
+    def _absorb_new_member(self, launcher_id: str) -> None:
+        """Keep a launcher the add screen just put in this execute group."""
+        if self._original is None:
+            return
+        saved = next(
+            (group for group in self._cfg.config.groups if group.id == self._original.id),
+            None,
+        )
+        if saved is None:
+            return
+        for member in saved.members:
+            if member.launcher_id != launcher_id:
+                continue
+            self._selected = select_member(self._base_ids(), self._selected, launcher_id)
+            self._concurrent[launcher_id] = member.concurrent
+            return
 
     def accept(self) -> None:
         name = self._name_edit.text().strip()

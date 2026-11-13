@@ -642,8 +642,17 @@ def test_main_test_quit_parsing_and_setup(qapp, monkeypatch):
         ) or mock_timer.singleShot.called
 
 
+def _no_keyboard_selection(panel) -> bool:
+    if panel._current_button is not None:
+        return False
+    return not any(
+        isinstance(button, LaunchButton) and button.is_keyboard_selected()
+        for button in panel._buttons
+    )
+
+
 def test_dropdown_keyboard_navigation(qapp, qtbot):
-    """Cover arrow key selection, Enter-to-launch, Home/End, Down-from-filter, filter auto-select, and Esc paths."""
+    """Arrow keys choose a row. Opening, filtering, and resizing do not."""
     from PySide6.QtGui import QKeyEvent
     from PySide6.QtCore import QEvent
 
@@ -656,82 +665,85 @@ def test_dropdown_keyboard_navigation(qapp, qtbot):
         Launcher.new("Beta", "beta-cmd"),
         Launcher.new("Gamma", "gamma-cmd"),
     ]
+    panel._anchor_trigger = panel
     panel.rebuild_buttons(launchers)
     panel.show()
+    panel.start_show_animation()
+    panel.ensure_visible_and_sized()
     QApplication.processEvents()
 
-    # After show + rebuild, first should be auto-selected via _select_first_visible path
-    assert panel._current_button is not None
+    assert _no_keyboard_selection(panel)
+
+    down = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    panel.keyPressEvent(down)
     assert panel._current_button.launcher.name == "Alpha"
     assert panel._current_button.is_keyboard_selected()
 
-    # Down moves to Beta
-    down = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
     panel.keyPressEvent(down)
     assert panel._current_button.launcher.name == "Beta"
 
-    # Up back to Alpha
     up = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
     panel.keyPressEvent(up)
     assert panel._current_button.launcher.name == "Alpha"
 
-    # End -> Gamma
     end = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_End, Qt.KeyboardModifier.NoModifier)
     panel.keyPressEvent(end)
     assert panel._current_button.launcher.name == "Gamma"
 
-    # Home -> Alpha
     home = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Home, Qt.KeyboardModifier.NoModifier)
     panel.keyPressEvent(home)
     assert panel._current_button.launcher.name == "Alpha"
 
-    # Capture launches
     launched = []
-    def _cap(l):
-        launched.append(l.name)
+
+    def _cap(launcher):
+        launched.append(launcher.name)
+
     panel.launch_requested.connect(_cap)
 
-    # Enter on Alpha should emit
     enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
     panel.keyPressEvent(enter)
     assert launched == ["Alpha"]
 
-    # Now filter to only Beta + Gamma
+    # Filtering away the highlighted row clears it and does not pick a new one.
     panel._search_edit.setText("beta")
     QApplication.processEvents()
-    # Filter auto-selects the (now first) match
-    assert panel._current_button is not None
-    assert panel._current_button.launcher.name == "Beta"
-    assert panel._current_button.isVisible()
+    assert _no_keyboard_selection(panel)
+    assert any(
+        button.launcher.name == "Beta" and button.isVisible()
+        for button in panel._buttons
+        if isinstance(button, LaunchButton)
+    )
 
-    # Down-from-search: simulate key on the edit (eventFilter path)
     down_evt = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
-    # eventFilter returns True when consumed
     consumed = panel.eventFilter(panel._search_edit, down_evt)
     assert consumed is True
-    # Current should still be on a visible (Beta)
     assert panel._current_button is not None and panel._current_button.launcher.name == "Beta"
 
-    # Clear filter via Esc in search (eventFilter)
+    # Enter in the filter does nothing until a row has been chosen.
+    panel._clear_keyboard_selection()
+    enter_in_search = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    assert panel.eventFilter(panel._search_edit, enter_in_search) is False
+    assert launched == ["Alpha"]
+
     panel._search_edit.setText("g")
     esc_in_search = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
     panel.eventFilter(panel._search_edit, esc_in_search)
     assert panel._search_edit.text() == ""
-    # After clear, first visible (Alpha) re-selected
-    assert panel._current_button is not None
-    assert panel._current_button.launcher.name == "Alpha"
+    assert _no_keyboard_selection(panel)
 
-    # Full Esc on panel (empty filter) -> force hide (not pinned)
     cfg.settings.pinned_open = False
     esc = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
     panel.keyPressEvent(esc)
-    # hide path taken (we don't assert visibility strictly in offscreen, but no crash + cleared)
     assert panel._current_button is None or not panel._current_button.is_keyboard_selected()
 
-    # Rebuild with filter active exercises visible list rebuild + select
     panel.rebuild_buttons(launchers)
     panel._search_edit.setText("ga")
     QApplication.processEvents()
-    assert any(b.launcher.name == "Gamma" and b.isVisible() for b in panel._buttons if hasattr(b, "launcher"))
-    assert panel._current_button is not None
-    assert panel._current_button.launcher.name == "Gamma"
+    # force_hide has hidden the window, so isVisible() is false for every row.
+    assert any(
+        button.launcher.name == "Gamma" and not button.isHidden()
+        for button in panel._buttons
+        if isinstance(button, LaunchButton)
+    )
+    assert _no_keyboard_selection(panel)

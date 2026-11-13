@@ -10,19 +10,111 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialogButtonBox,
     QFormLayout,
-    QLineEdit,
-    QPushButton,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
 from .stay_on_top import StayOnTopDialog, get_existing_directory, get_open_file_name, warning
 from .toggle_switch import ToggleSwitch
 
-from ..config import Launcher
+from ..config import ConfigManager, Launcher
+
+
+class _MembershipList(QWidget):
+    """Groups this launcher belongs to, with add and remove."""
+
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._title = title
+        self._ids: list[str] = []
+        self._names: dict[str, str] = {}
+
+        self._list = QListWidget()
+        self._list.setObjectName(title)
+        self._list.setMaximumHeight(96)
+        self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+
+        self._combo = QComboBox()
+        self._add = QPushButton("Add")
+        self._remove = QPushButton("Remove")
+        self._add.clicked.connect(self._on_add)
+        self._remove.clicked.connect(self._on_remove)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.addWidget(self._combo, 1)
+        controls.addWidget(self._add)
+        controls.addWidget(self._remove)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel(title))
+        layout.addWidget(self._list)
+        layout.addLayout(controls)
+
+    def set_groups(self, groups: list[tuple[str, str]], selected_ids: list[str]) -> None:
+        """groups is (id, name) in display order. selected_ids are current members."""
+        self._names = {group_id: name for group_id, name in groups}
+        known = []
+        seen: set[str] = set()
+        for group_id in selected_ids:
+            if group_id in self._names and group_id not in seen:
+                known.append(group_id)
+                seen.add(group_id)
+        self._ids = known
+        self._refresh()
+
+    def selected_ids(self) -> list[str]:
+        return list(self._ids)
+
+    def _refresh(self) -> None:
+        current = self._list.currentRow()
+        self._list.clear()
+        for group_id in self._ids:
+            item = QListWidgetItem(self._names.get(group_id, group_id))
+            item.setData(Qt.ItemDataRole.UserRole, group_id)
+            self._list.addItem(item)
+        if self._list.count():
+            self._list.setCurrentRow(min(max(current, 0), self._list.count() - 1))
+
+        chosen = set(self._ids)
+        self._combo.clear()
+        for group_id, name in self._names.items():
+            if group_id not in chosen:
+                self._combo.addItem(name, group_id)
+        self._add.setEnabled(self._combo.count() > 0)
+        self._remove.setEnabled(self._list.count() > 0)
+
+    def _on_add(self) -> None:
+        group_id = self._combo.currentData()
+        if not group_id or group_id in self._ids:
+            return
+        self._ids.append(group_id)
+        self._refresh()
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item is not None and item.data(Qt.ItemDataRole.UserRole) == group_id:
+                self._list.setCurrentRow(row)
+                break
+
+    def _on_remove(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            return
+        group_id = item.data(Qt.ItemDataRole.UserRole)
+        self._ids = [existing for existing in self._ids if existing != group_id]
+        self._refresh()
 
 
 class AddEditDialog(StayOnTopDialog):
@@ -32,6 +124,7 @@ class AddEditDialog(StayOnTopDialog):
         self,
         launcher: Launcher | None = None,
         parent: QWidget | None = None,
+        cfg: ConfigManager | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add Launcher" if launcher is None else "Edit Launcher")
@@ -39,6 +132,7 @@ class AddEditDialog(StayOnTopDialog):
         self.resize(440, 340)
 
         self._original = launcher
+        self._cfg = cfg
         self._result_launcher: Launcher | None = None
 
         self._name_edit = QLineEdit()
@@ -80,6 +174,10 @@ class AddEditDialog(StayOnTopDialog):
         self._run_as_admin_cb = ToggleSwitch("Run as administrator (Windows)")
         self._show_console_cb = ToggleSwitch("Show console / terminal (Windows)")
 
+        self._container_membership = _MembershipList("Container groups I belong to")
+        self._execute_membership = _MembershipList("Execute groups I belong to")
+        self._load_membership(launcher)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -98,11 +196,13 @@ class AddEditDialog(StayOnTopDialog):
         main_layout.addRow("Working directory:", work_row)
         main_layout.addRow("", self._run_as_admin_cb)
         main_layout.addRow("", self._show_console_cb)
+        main_layout.addRow(self._container_membership)
+        main_layout.addRow(self._execute_membership)
         main_layout.addRow(buttons)
 
         self.setLayout(main_layout)
         hint = self.sizeHint()
-        self.resize(max(440, hint.width() + 24), max(self.height(), hint.height() + 12))
+        self.resize(max(520, hint.width() + 24), max(560, hint.height() + 12))
 
         if launcher:
             self._name_edit.setText(launcher.name)
@@ -115,6 +215,28 @@ class AddEditDialog(StayOnTopDialog):
             self._show_console_cb.setChecked(launcher.show_console)
 
         self._name_edit.setFocus()
+
+    def _load_membership(self, launcher: Launcher | None) -> None:
+        cfg = self._cfg
+        if cfg is None:
+            self._container_membership.set_groups([], [])
+            self._execute_membership.set_groups([], [])
+            return
+        launcher_id = launcher.id if launcher is not None else ""
+        containers = [(group.id, group.name) for group in cfg.config.container_groups]
+        container_ids = [
+            group.id
+            for group in cfg.config.container_groups
+            if any(member.launcher_id == launcher_id for member in group.members)
+        ]
+        executes = [(group.id, group.name) for group in cfg.config.groups]
+        execute_ids = [
+            group.id
+            for group in cfg.config.groups
+            if any(member.launcher_id == launcher_id for member in group.members)
+        ]
+        self._container_membership.set_groups(containers, container_ids)
+        self._execute_membership.set_groups(executes, execute_ids)
 
     def _on_browse(self) -> None:
         if sys.platform == "darwin":
@@ -164,6 +286,13 @@ class AddEditDialog(StayOnTopDialog):
                 working_dir=work_dir,
                 run_as_admin=run_admin,
                 show_console=show_console,
+            )
+
+        if self._cfg is not None and self._result_launcher is not None:
+            self._cfg.set_launcher_membership(
+                self._result_launcher.id,
+                self._container_membership.selected_ids(),
+                self._execute_membership.selected_ids(),
             )
 
         super().accept()

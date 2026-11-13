@@ -20,11 +20,54 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QApplication,
+    QPushButton,
 )
 
 from ..config import AppConfig, Launcher
 from .launch_button import LaunchButton
 from .stay_on_top import mark_stay_on_top
+
+
+class SubmenuButton(QPushButton):
+    """A main-list row that opens another list on hover. It does not launch."""
+
+    hovered = Signal(str)
+    left = Signal(str)
+
+    def __init__(self, item_id: str, name: str, parent=None) -> None:
+        super().__init__(f"{name}    ›", parent)
+        self.item_id = item_id
+        self.item_name = name
+        self.setObjectName("submenuRow")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(28)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setStyleSheet(
+            """
+            QPushButton {
+                background-color: rgba(48, 52, 64, 210);
+                color: #eee;
+                border: 1px solid rgba(90, 100, 120, 180);
+                border-radius: 5px;
+                padding: 4px 10px;
+                text-align: left;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 110, 170, 210);
+                border: 1px solid rgba(100, 140, 200, 220);
+            }
+            """
+        )
+        self.setToolTip("Hover to open\nRight-click to edit or delete")
+
+    def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        self.hovered.emit(self.item_id)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        self.left.emit(self.item_id)
+        super().leaveEvent(event)
 
 # Vertical pixels before a press becomes a reorder drag, so a click still launches.
 _DRAG_THRESHOLD_PX = 10
@@ -60,6 +103,10 @@ class DropdownPanel(QWidget):
     reordered = Signal(list)  # full launcher id order after a drag
     edit_requested = Signal(Launcher)
     delete_requested = Signal(Launcher)
+    submenu_hovered = Signal(str)
+    submenu_left = Signal(str)
+    submenu_edit_requested = Signal(str)
+    submenu_delete_requested = Signal(str)
     hover_enter = Signal()
     hover_leave = Signal()
     closed = Signal()
@@ -70,10 +117,13 @@ class DropdownPanel(QWidget):
         parent: QWidget | None = None,
         *,
         honor_pin: bool = True,
+        allow_reorder: bool = True,
     ) -> None:
         super().__init__(parent)
         self._config = config
         self._honor_pin = honor_pin
+        self._allow_reorder = allow_reorder
+        self._submenu_items: list[tuple[str, str]] = []
         self._order_ids: Callable[[], list[str]] | None = None
         self._row_tooltip: Callable[[Launcher], str] | None = None
         self._empty_hint = "No launchers yet.\nRight-click the arrow → Add new launcher..."
@@ -220,6 +270,16 @@ class DropdownPanel(QWidget):
         self._empty_hint = empty_hint
         self._search_edit.setPlaceholderText(placeholder)
 
+    def set_submenu_items(self, items: list[tuple[str, str]]) -> None:
+        """Rows shown above the launchers. Each is (id, name). Hover opens a side list."""
+        self._submenu_items = list(items)
+
+    def submenu_button(self, item_id: str) -> SubmenuButton | None:
+        for button in self._buttons:
+            if isinstance(button, SubmenuButton) and button.item_id == item_id:
+                return button
+        return None
+
     def set_order_ids(self, provider: Callable[[], list[str]] | None) -> None:
         """Reorder these ids instead of the main launcher list."""
         self._order_ids = provider
@@ -260,6 +320,17 @@ class DropdownPanel(QWidget):
         self._buttons.clear()
         self._visible_buttons.clear()
 
+        for item_id, name in self._submenu_items:
+            button = SubmenuButton(item_id, name, self._button_container)
+            button.hovered.connect(self.submenu_hovered)
+            button.left.connect(self.submenu_left)
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(
+                lambda pos, row=button: self._show_submenu_menu(row, pos)
+            )
+            self._button_layout.addWidget(button)
+            self._buttons.append(button)
+
         for launcher in launchers:
             btn = LaunchButton(launcher, self._button_container)
             btn.clicked.connect(lambda checked=False, l=launcher: self._on_button_clicked(l))
@@ -274,7 +345,7 @@ class DropdownPanel(QWidget):
             self._buttons.append(btn)
 
         # A blank hint means show nothing when the list is empty.
-        if not launchers and self._empty_hint.strip():
+        if not launchers and not self._submenu_items and self._empty_hint.strip():
             hint = QLabel(self._empty_hint)
             hint.setStyleSheet("color: #888; font-size: 11px; padding: 8px;")
             hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -287,10 +358,13 @@ class DropdownPanel(QWidget):
 
     def _apply_filter(self, text: str) -> None:
         """Hide non-matching buttons (by name); show matching. Then recompute height.
-        Empty text shows all.
-        Also refreshes the keyboard-visible list and auto-selects first match for nav.
+
+        Empty text shows all. Nothing is highlighted just because the list
+        opened or the filter changed. A row the user already moved to stays
+        highlighted only while it remains visible.
         """
         q = (text or "").strip().lower()
+        previous = self._current_button
         self._clear_keyboard_selection()
         self._visible_buttons.clear()
 
@@ -300,22 +374,19 @@ class DropdownPanel(QWidget):
                 w.setVisible(match)
                 if match:
                     self._visible_buttons.append(w)
+            elif isinstance(w, SubmenuButton):
+                match = q == "" or q in w.item_name.lower()
+                was_visible = w.isVisible()
+                w.setVisible(match)
+                if was_visible and not match:
+                    self.submenu_left.emit(w.item_id)
             elif isinstance(w, QLabel):
                 # the empty hint label
                 w.setVisible(q == "")
 
         self._update_height_for_content()
-
-        # Keep keyboard selection sensible after filter/rebuild:
-        # - If we have visible items and panel is (or will be) shown, ensure a current selection.
-        # - Prefer keeping a still-visible previous current; otherwise pick first.
-        if self.isVisible() or getattr(self, "_anchor_trigger", None) is not None:
-            vis = self._visible_buttons or [b for b in self._buttons if isinstance(b, LaunchButton) and b.isVisible()]
-            if vis:
-                if not self._current_button or not self._current_button.isVisible():
-                    self._set_keyboard_current(vis[0])
-            else:
-                self._clear_keyboard_selection()
+        if previous is not None and previous in self._visible_buttons and previous.isVisible():
+            self._set_keyboard_current(previous)
 
     def _update_height_for_content(self) -> None:
         """Compute the height required so that each button row gets its full height
@@ -509,9 +580,8 @@ class DropdownPanel(QWidget):
         entries = [(button.launcher.id, button.launcher.id in in_play) for button in self._launch_buttons()]
         new_ids = merge_visible_order(entries, [button.launcher.id for button in visible_order])
         by_id = {button.launcher.id: button for button in self._launch_buttons()}
-        labels = [button for button in self._buttons if not isinstance(button, LaunchButton)]
         ordered = [by_id[item_id] for item_id in new_ids if item_id in by_id]
-        self._relayout_buttons(ordered + labels)
+        self._place_launcher_rows(ordered)
 
     def _finish_drag(self, global_pos: QPoint) -> None:
         button = self._drag_button
@@ -582,9 +652,18 @@ class DropdownPanel(QWidget):
         entries = [(b.launcher.id, b.isVisible()) for b in self._launch_buttons()]
         new_ids = merge_visible_order(entries, [b.launcher.id for b in visible])
         by_id = {b.launcher.id: b for b in self._launch_buttons()}
-        labels = [b for b in self._buttons if not isinstance(b, LaunchButton)]
         ordered = [by_id[item_id] for item_id in new_ids if item_id in by_id]
-        self._relayout_buttons(ordered + labels)
+        self._place_launcher_rows(ordered)
+
+    def _place_launcher_rows(self, launchers: list[LaunchButton]) -> None:
+        """Keep container rows above the launchers when a drag reorders the list."""
+        prefixes = [button for button in self._buttons if isinstance(button, SubmenuButton)]
+        labels = [
+            button
+            for button in self._buttons
+            if not isinstance(button, (LaunchButton, SubmenuButton))
+        ]
+        self._relayout_buttons(prefixes + launchers + labels)
 
     def _relayout_buttons(self, buttons: list) -> None:
         for button in buttons:
@@ -617,6 +696,8 @@ class DropdownPanel(QWidget):
         self._drag_step(self._drag_last_global)
 
     def _handle_reorder_event(self, button: LaunchButton, event: QEvent) -> bool:
+        if not self._allow_reorder:
+            return False
         kind = event.type()
         if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
             self._suppress_click = False
@@ -675,6 +756,37 @@ class DropdownPanel(QWidget):
         global_pos = button.mapToGlobal(pos)
         # Frameless tool windows close a context menu immediately on macOS
         # unless popup is deferred until after the right-click release.
+        QTimer.singleShot(0, lambda m=menu, p=global_pos: m.popup(p))
+
+    def _show_submenu_menu(self, button: SubmenuButton, pos: QPoint) -> None:
+        """Right-click menu for a container group row. Edit and Delete only."""
+        if self._drag_active:
+            return
+        previous = self._item_menu
+        if previous is not None:
+            try:
+                previous.aboutToHide.disconnect(self._on_item_menu_hidden)
+            except RuntimeError:
+                pass
+            previous.close()
+
+        item_id = button.item_id
+        menu = QMenu(self)
+        mark_stay_on_top(menu)
+        edit_action = menu.addAction("Edit")
+        delete_action = menu.addAction("Delete")
+        edit_action.triggered.connect(
+            lambda checked=False, group_id=item_id: self.submenu_edit_requested.emit(group_id)
+        )
+        delete_action.triggered.connect(
+            lambda checked=False, group_id=item_id: self.submenu_delete_requested.emit(group_id)
+        )
+
+        self._item_menu = menu
+        self._in_context_menu = True
+        self._cancel_hide()
+        menu.aboutToHide.connect(self._on_item_menu_hidden)
+        global_pos = button.mapToGlobal(pos)
         QTimer.singleShot(0, lambda m=menu, p=global_pos: m.popup(p))
 
     def _on_item_menu_hidden(self) -> None:
@@ -886,6 +998,49 @@ class DropdownPanel(QWidget):
         self._grow_direction = "below" if grow_from_top else "above"
         self._fixed_edge_y = rect.top() if grow_from_top else rect.bottom()
 
+    def position_next_to(self, host: QWidget, anchor: QWidget, *, prefer_right: bool = True) -> None:
+        """Open beside the launcher list, lined up with one row.
+
+        prefer_right places it on the right of the list. The other side is used
+        when the preferred side would leave the screen.
+        """
+        self._update_height_for_content()
+        target_w = self.width()
+        target_h = self._frame.height() or self.height() or 120
+        host_geo = host.frameGeometry()
+        anchor_top = anchor.mapToGlobal(QPoint(0, 0)).y()
+        screen = QApplication.screenAt(host_geo.center()) or QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        gap = 4
+
+        def place(on_right: bool) -> QRect:
+            if on_right:
+                x = host_geo.right() + gap
+            else:
+                x = host_geo.left() - gap - target_w
+            return QRect(x, anchor_top, target_w, target_h)
+
+        rect = place(prefer_right)
+        if prefer_right and rect.right() > avail.right():
+            rect = place(False)
+        elif not prefer_right and rect.left() < avail.left():
+            rect = place(True)
+        if rect.left() < avail.left():
+            rect.moveLeft(avail.left())
+        if rect.right() > avail.right():
+            rect.moveRight(avail.right())
+        if rect.top() < avail.top():
+            rect.moveTop(avail.top())
+        if rect.bottom() > avail.bottom():
+            rect.moveBottom(avail.bottom())
+
+        self.move(rect.topLeft())
+        self._grow_from_top = rect.top() <= anchor_top + 2
+        self._grow_direction = "below" if self._grow_from_top else "above"
+        self._fixed_edge_y = rect.top() if self._grow_from_top else rect.bottom()
+
     # --- Hover handling (combined area: trigger + this panel) ---
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
         self._cancel_hide()
@@ -932,9 +1087,8 @@ class DropdownPanel(QWidget):
             self._frame.setMaximumHeight(16777215)
             self._frame.updateGeometry()
             self.updateGeometry()
-        # Keyboard: ensure a current item is selected for arrow/Enter use
-        if not self._current_button or not self._current_button.isVisible():
-            self._select_first_visible()
+        if self._current_button is not None and not self._current_button.isVisible():
+            self._clear_keyboard_selection()
 
     def _do_hide(self) -> None:
         self.start_hide_animation()
@@ -972,8 +1126,6 @@ class DropdownPanel(QWidget):
             self.setFocus(Qt.FocusReason.OtherFocusReason)
 
         self._update_height_for_content()
-        # Prepare keyboard nav: pick first visible result (after filter applied in rebuild path)
-        QTimer.singleShot(0, self._select_first_visible)  # after layout settles
 
         self._button_container.setMinimumHeight(0)
         self._scroll.setMinimumHeight(0)
@@ -1128,8 +1280,6 @@ class DropdownPanel(QWidget):
         if key == Qt.Key.Key_Escape:
             if self._search_edit.text():
                 self._search_edit.clear()
-                # After clearing filter, re-select first visible
-                QTimer.singleShot(0, self._select_first_visible)
                 event.accept()
                 return
             if not self._pinned():
@@ -1184,7 +1334,6 @@ class DropdownPanel(QWidget):
                 if event.key() == Qt.Key.Key_Escape:
                     if self._search_edit.text():
                         self._search_edit.clear()
-                        QTimer.singleShot(0, self._select_first_visible)
                         return True
                 if event.key() == Qt.Key.Key_Down:
                     # From filter box, Down jumps into the list (first result)
@@ -1198,10 +1347,8 @@ class DropdownPanel(QWidget):
                             pass
                         return True  # consume so it doesn't insert text
                 if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                    # Enter while in search: launch the current (or first) selection
-                    vis = self._get_visible_launch_buttons()
-                    target = self._current_button if (self._current_button and self._current_button.isVisible()) else (vis[0] if vis else None)
-                    if target:
-                        self._on_button_clicked(target.launcher)
+                    # Enter launches only a row the user has already moved to.
+                    if self._current_button is not None and self._current_button.isVisible():
+                        self._on_button_clicked(self._current_button.launcher)
                         return True
         return super().eventFilter(obj, event)
