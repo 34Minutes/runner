@@ -268,8 +268,8 @@ else:
                 "LSUIElement": True,
                 "CFBundleName": "Runner",
                 "CFBundleDisplayName": "Runner",
-                "CFBundleShortVersionString": "1.0.1",
-                "CFBundleVersion": "1.0.1",
+                "CFBundleShortVersionString": "1.0.6",
+                "CFBundleVersion": "1.0.6",
                 "NSHighResolutionCapable": True,
             },
         )

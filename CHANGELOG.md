@@ -8,8 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Drag a container row among the launchers in the main popup. Drag the launchers inside a container to reorder that container. Drag a launcher from any open menu onto another menu to move it, including from a container to an execute group and from an execute group onto the main popup. Hover an execute group to open its launchers. A click on the group row still runs the group.
 - (planning) Per-launcher icons (auto + custom).
+
+## [1.0.6] - 2026-11-13
+
+### Added
+- Drag a container row among the launchers in the main popup. Drag the launchers inside a container to reorder that container. Drag a launcher from any open menu onto another menu to move it, including from a container to an execute group and from an execute group onto the main popup. Hover an execute group to open its launchers. A click on the group row still runs the group.
 
 ### Changed
 - The arrow menu lists **Execute Groups**, **Container Groups**, **Add Execute Group**, **Add Container Group**, **Manage Execute Groups**, then **Manage Container Groups**. **Container Groups** opens the main popup.
