@@ -4,8 +4,9 @@ Click a launcher anywhere on its name to include it. Each click moves that
 launcher to the top, in the order it was clicked. Click it again to put it
 back in the main-view order. Checked rows can be dragged to change the start
 order. A drag lifts that row off the list and keeps it under the pointer until
-release. Concurrent and Only In Groups are checkboxes on the row. Only In Groups
-is the same launcher setting as the edit-launcher switch.
+release. Concurrent and Only In Groups are checkboxes on the row. Only In Groups is
+the opposite of Include in dropdown list. Changing it updates that switch
+and every container group.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import ConfigManager, Group, GroupMember
+from ..containers import shown_in_main_menu
 from ..groups import (
     display_order,
     select_member,
@@ -283,7 +285,7 @@ class GroupDialog(StayOnTopDialog):
             self._table.setCellWidget(row, 2, self._check_widget(
                 launcher_id,
                 "only",
-                launcher.only_in_groups,
+                not shown_in_main_menu(launcher, self._cfg.config.container_groups),
                 member,
             ))
             self._table.setRowHeight(row, 34)
@@ -474,15 +476,8 @@ class GroupDialog(StayOnTopDialog):
         self._on_visual_order(visual)
 
     def _set_only_in_groups(self, launcher_id: str, checked: bool) -> None:
-        for launcher in self._cfg.config.launchers:
-            if launcher.id != launcher_id:
-                continue
-            if launcher.only_in_groups == checked:
-                return
-            launcher.only_in_groups = checked
-            self._cfg.update_launcher(launcher)
-            self.launchers_changed.emit()
-            return
+        self._cfg.set_shown_in_main_menu(launcher_id, not checked)
+        self.launchers_changed.emit()
 
     def _on_add_launcher(self) -> None:
         dialog = AddEditDialog(None, self, cfg=self._cfg)

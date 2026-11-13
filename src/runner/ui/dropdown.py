@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QTimer, Signal, QPoint, QRect
-from PySide6.QtGui import QCursor, QKeyEvent
+from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import AppConfig, Launcher
+from ..moves import container_token, launcher_token, merge_visible_order
 from .launch_button import LaunchButton
 from .stay_on_top import mark_stay_on_top
 
@@ -57,9 +58,17 @@ class SubmenuButton(QPushButton):
                 background-color: rgba(70, 110, 170, 210);
                 border: 1px solid rgba(100, 140, 200, 220);
             }
+            QPushButton[dragging="true"],
+            QPushButton[dragging="true"]:hover,
+            QPushButton[dragging="true"]:pressed {
+                background-color: rgba(70, 110, 170, 235);
+                border: 4px solid rgba(255, 220, 70, 240);
+                border-radius: 6px;
+                padding: 1px 7px;
+            }
             """
         )
-        self.setToolTip("Hover to open\nRight-click to edit or delete")
+        self.setToolTip("Hover to open\nDrag up or down to reorder\nRight-click to edit or delete")
 
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
         self.hovered.emit(self.item_id)
@@ -69,7 +78,8 @@ class SubmenuButton(QPushButton):
         self.left.emit(self.item_id)
         super().leaveEvent(event)
 
-# Vertical pixels before a press becomes a reorder drag, so a click still launches.
+# Pixels of movement before a press becomes a drag, so a click still launches.
+# Any direction counts, so a row can be dragged sideways onto another menu.
 _DRAG_THRESHOLD_PX = 10
 # A small step out of the column. Large enough to read as lifted, small enough
 # that the row still feels under the pointer.
@@ -77,23 +87,42 @@ _DRAG_LIFT_X = 8
 _DRAG_SLIDE_MS = 150
 
 
-def merge_visible_order(entries: list[tuple[str, bool]], visible_ids: list[str]) -> list[str]:
-    """Reorder the flagged rows and leave every other row where it is.
+class _RowGhost(QWidget):
+    """Yellow-bordered stand-in that follows the pointer outside the list.
 
-    entries is (id, in_play) in the current order. visible_ids is the new
-    top-to-bottom order of the in-play rows. Disabled launchers, and enabled
-    ones hidden by the filter, stay in their slots.
+    The real row lives in a scroll area, which clips it. This window is
+    mouse-transparent so the drag's mouse grab stays on the source row.
     """
-    in_play = {eid for eid, flagged in entries if flagged}
-    queue = [vid for vid in visible_ids if vid in in_play]
-    pending = iter(queue)
-    merged: list[str] = []
-    for eid, flagged in entries:
-        if flagged and eid in in_play:
-            merged.append(next(pending))
-        else:
-            merged.append(eid)
-    return merged
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self._label = QLabel(self)
+        self._label.setStyleSheet(
+            "QLabel {"
+            " background-color: rgba(80, 120, 180, 235);"
+            " color: #eee;"
+            " border: 4px solid rgba(255, 220, 70, 240);"
+            " border-radius: 6px;"
+            " padding: 1px 7px;"
+            " font-size: 13px;"
+            "}"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._label)
+        self.hide()
+
+    def set_text(self, text: str) -> None:
+        self._label.setText(text)
 
 
 class DropdownPanel(QWidget):
@@ -110,6 +139,15 @@ class DropdownPanel(QWidget):
     hover_enter = Signal()
     hover_leave = Signal()
     closed = Signal()
+    # Mixed main-list order. Tokens are "container:<id>" and "launcher:<id>".
+    rows_reordered = Signal(list)
+    # launcher id, source menu key, destination menu key, insertion index.
+    # Index -1 appends. Emitted instead of reordered when the row changes menus.
+    external_drop = Signal(str, str, str, int)
+    drag_finished = Signal()
+    # Execute-group rows. Emitted on hover when set_emit_row_hover is on.
+    row_hovered = Signal(str)
+    row_left = Signal(str)
 
     def __init__(
         self,
@@ -145,19 +183,31 @@ class DropdownPanel(QWidget):
         self._current_button: LaunchButton | None = None
         self._visible_buttons: list[LaunchButton] = []  # subset of _buttons that are currently visible (post-filter)
 
-        # Click-drag reorder. A short press still launches; a vertical drag moves the row.
-        self._drag_button: LaunchButton | None = None
-        self._drag_press_y = 0
+        # Click-drag reorder. A short press still launches. A longer drag moves the row.
+        self._drag_button: QPushButton | None = None
+        self._drag_press = QPoint()
         self._drag_last_global = QPoint()
         self._drag_active = False
         self._drag_detached = False
-        self._drag_order: list[LaunchButton] = []
+        self._drag_order: list[QPushButton] = []
         self._drag_base_y = 0
         self._drag_home_x = 0
         self._drag_row_step = 0
         self._drag_row_h = 0
-        self._row_anims: dict[LaunchButton, QPropertyAnimation] = {}
+        self._row_anims: dict[QPushButton, QPropertyAnimation] = {}
         self._suppress_click = False
+        # Main popup interleaves container rows with launchers. Other lists do not.
+        self._mix_rows = False
+        # "main", "groups", "container:<id>", or "execute:<id>". Empty skips cross-menu drops.
+        self._drag_source_key = ""
+        self._peer_at: Callable[[QPoint], DropdownPanel | None] | None = None
+        self._emit_row_hover = False
+        self._external_target: tuple[str, int] | None = None
+        self._pre_drag_buttons: list | None = None
+        self._pre_drag_tokens: list[str] = []
+        self._ghost: _RowGhost | None = None
+        self._app_filter = False
+        self._in_drag_step = False
         self._in_context_menu = False
         self._item_menu: QMenu | None = None
         self._drag_scroll_timer = QTimer(self)
@@ -284,6 +334,124 @@ class DropdownPanel(QWidget):
         """Reorder these ids instead of the main launcher list."""
         self._order_ids = provider
 
+    def set_mix_rows(self, enabled: bool) -> None:
+        """Drag container rows among the launchers and save one mixed order."""
+        self._mix_rows = enabled
+
+    def set_drag_source_key(self, key: str) -> None:
+        """Menu key for this list. Empty, or 'groups', never starts a cross-menu move."""
+        self._drag_source_key = key
+
+    def set_peer_finder(self, finder: Callable[[QPoint], DropdownPanel | None] | None) -> None:
+        """Panel under a global point while a row is dragged. None keeps drags inside this list."""
+        self._peer_at = finder
+
+    def set_emit_row_hover(self, enabled: bool) -> None:
+        """Emit row_hovered and row_left for launcher rows. The groups list uses this."""
+        self._emit_row_hover = enabled
+
+    def is_dragging(self) -> bool:
+        return self._drag_active
+
+    def dragging_submenu(self) -> bool:
+        """True while a container row, not a launcher, is the dragged row."""
+        return self._drag_active and isinstance(self._drag_button, SubmenuButton)
+
+    def launcher_button(self, launcher_id: str) -> LaunchButton | None:
+        for button in self._launch_buttons():
+            if button.launcher.id == launcher_id:
+                return button
+        return None
+
+    def row_at(self, global_pos: QPoint) -> QPushButton | None:
+        """Visible launcher or container row under this global point."""
+        for button in self._buttons:
+            if not isinstance(button, (LaunchButton, SubmenuButton)) or not button.isVisible():
+                continue
+            if button.rect().contains(button.mapFromGlobal(global_pos)):
+                return button
+        return None
+
+    def row_tokens(self) -> list[str]:
+        """Visible main-popup rows as container:<id> and launcher:<id> tokens."""
+        tokens: list[str] = []
+        for button in self._buttons:
+            token = self._token_for(button)
+            if token is not None and button.isVisible():
+                tokens.append(token)
+        return tokens
+
+    def visible_launcher_ids(self) -> list[str]:
+        return [button.launcher.id for button in self._launch_buttons() if button.isVisible()]
+
+    def drop_target_at(self, global_pos: QPoint) -> tuple[str, int] | None:
+        """Where a launcher dropped at this point would land.
+
+        A group row joins that execute group (index -1 appends). A container row
+        on the main list joins that container. Anywhere else on a launcher list
+        inserts among the visible rows.
+        """
+        if not self.isVisible() or not self.rect().contains(self.mapFromGlobal(global_pos)):
+            return None
+        if self._drag_source_key == "groups":
+            row = self.row_at(global_pos)
+            if isinstance(row, LaunchButton):
+                return (f"execute:{row.launcher.id}", -1)
+            return None
+        if self._drag_source_key == "main":
+            row = self.row_at(global_pos)
+            if isinstance(row, SubmenuButton):
+                return (container_token(row.item_id), -1)
+            return ("main", self._insertion_index(global_pos, launchers_only=False))
+        if self._drag_source_key.startswith("container:") or self._drag_source_key.startswith("execute:"):
+            return (self._drag_source_key, self._insertion_index(global_pos, launchers_only=True))
+        return None
+
+    def apply_token_order(self, tokens: list[str]) -> None:
+        """Put the existing rows in this token order. Unknown tokens are skipped."""
+        by_token: dict[str, QPushButton] = {}
+        rest = []
+        for button in self._buttons:
+            token = self._token_for(button)
+            if token is None:
+                rest.append(button)
+            else:
+                by_token[token] = button
+        ordered: list[QPushButton] = []
+        used: set[str] = set()
+        for token in tokens:
+            button = by_token.get(token)
+            if button is not None and token not in used:
+                ordered.append(button)
+                used.add(token)
+        for token, button in by_token.items():
+            if token not in used:
+                ordered.append(button)
+        self._relayout_buttons(ordered + rest)
+
+    def _token_for(self, button) -> str | None:
+        if isinstance(button, SubmenuButton):
+            return container_token(button.item_id)
+        if isinstance(button, LaunchButton):
+            return launcher_token(button.launcher.id)
+        return None
+
+    def _insertion_index(self, global_pos: QPoint, *, launchers_only: bool) -> int:
+        rows = []
+        for button in self._buttons:
+            if launchers_only and not isinstance(button, LaunchButton):
+                continue
+            if not launchers_only and not isinstance(button, (LaunchButton, SubmenuButton)):
+                continue
+            if button.isVisible():
+                rows.append(button)
+        y = global_pos.y()
+        for index, button in enumerate(rows):
+            center = button.mapToGlobal(QPoint(0, button.height() // 2)).y()
+            if y < center:
+                return index
+        return len(rows)
+
     def set_row_tooltip(self, provider: Callable[[Launcher], str] | None) -> None:
         """Replace the default launch tooltip. Used by the group list."""
         self._row_tooltip = provider
@@ -328,6 +496,7 @@ class DropdownPanel(QWidget):
             button.customContextMenuRequested.connect(
                 lambda pos, row=button: self._show_submenu_menu(row, pos)
             )
+            button.installEventFilter(self)
             self._button_layout.addWidget(button)
             self._buttons.append(button)
 
@@ -480,12 +649,16 @@ class DropdownPanel(QWidget):
 
     def _cancel_drag(self) -> None:
         button = self._drag_button
+        self._remove_drag_filter()
         self._drag_scroll_timer.stop()
         self._drag_active = False
         self._drag_button = None
+        self._external_target = None
+        self._hide_ghost()
         self._stop_row_anims()
         if self._drag_detached:
             self._commit_drag_order()
+        self._pre_drag_buttons = None
         if button is None:
             return
         if self.mouseGrabber() is button:
@@ -493,20 +666,42 @@ class DropdownPanel(QWidget):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._set_drag_style(button, False)
 
-    def _set_drag_style(self, button: LaunchButton, dragging: bool) -> None:
+    def _set_drag_style(self, button: QPushButton, dragging: bool) -> None:
         button.setProperty("dragging", "true" if dragging else "false")
         button.style().polish(button)
         button.update()
 
-    def _begin_drag(self, button: LaunchButton) -> None:
+    def _begin_drag(self, button: QPushButton) -> None:
         self._drag_active = True
         self._cancel_hide()
+        self._pre_drag_buttons = list(self._buttons)
+        self._pre_drag_tokens = self.row_tokens()
+        self._external_target = None
         button.setDown(False)
         self._set_drag_style(button, True)
         button.setCursor(Qt.CursorShape.ClosedHandCursor)
         button.grabMouse()
+        self._install_drag_filter()
         self._detach_for_drag(button)
         self._drag_scroll_timer.start()
+
+    def _install_drag_filter(self) -> None:
+        # A new window under the pointer can steal the row's mouse grab on macOS.
+        if self._app_filter:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.installEventFilter(self)
+        self._app_filter = True
+
+    def _remove_drag_filter(self) -> None:
+        if not self._app_filter:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._app_filter = False
 
     def _stop_row_anims(self) -> None:
         running = list(self._row_anims.values())
@@ -514,9 +709,13 @@ class DropdownPanel(QWidget):
         for anim in running:
             anim.stop()
 
-    def _detach_for_drag(self, button: LaunchButton) -> None:
+    def _rows_for_drag(self) -> list[QPushButton]:
+        kinds = (LaunchButton, SubmenuButton) if self._mix_rows else (LaunchButton,)
+        return [item for item in self._buttons if isinstance(item, kinds) and item.isVisible()]
+
+    def _detach_for_drag(self, button: QPushButton) -> None:
         """Lift this row out of the column and leave a gap the others can slide around."""
-        visible = [item for item in self._launch_buttons() if item.isVisible()]
+        visible = self._rows_for_drag()
         if button not in visible:
             return
         self._drag_order = list(visible)
@@ -545,7 +744,7 @@ class DropdownPanel(QWidget):
             slot += 1
             self._move_row(button, target, animate)
 
-    def _move_row(self, button: LaunchButton, target: QPoint, animate: bool) -> None:
+    def _move_row(self, button: QPushButton, target: QPoint, animate: bool) -> None:
         running = self._row_anims.pop(button, None)
         if running is not None:
             running.stop()
@@ -560,7 +759,7 @@ class DropdownPanel(QWidget):
         anim.start()
         self._row_anims[button] = anim
 
-    def _place_lifted(self, button: LaunchButton) -> None:
+    def _place_lifted(self, button: QPushButton) -> None:
         local_y = self._button_container.mapFromGlobal(self._drag_last_global).y()
         y = local_y - button.height() // 2
         limit = self._drag_base_y + max(0, len(self._drag_order) - 1) * self._drag_row_step
@@ -576,6 +775,9 @@ class DropdownPanel(QWidget):
         self._drag_order = []
         if not visible_order:
             return
+        if self._mix_rows:
+            self._commit_mixed_order(visible_order)
+            return
         in_play = {button.launcher.id for button in visible_order}
         entries = [(button.launcher.id, button.launcher.id in in_play) for button in self._launch_buttons()]
         new_ids = merge_visible_order(entries, [button.launcher.id for button in visible_order])
@@ -583,19 +785,81 @@ class DropdownPanel(QWidget):
         ordered = [by_id[item_id] for item_id in new_ids if item_id in by_id]
         self._place_launcher_rows(ordered)
 
+    def _commit_mixed_order(self, visible_order: list) -> None:
+        visible_tokens = []
+        for button in visible_order:
+            token = self._token_for(button)
+            if token is not None:
+                visible_tokens.append(token)
+        in_play = set(visible_tokens)
+        rows = [button for button in self._buttons if isinstance(button, (LaunchButton, SubmenuButton))]
+        entries = []
+        for button in rows:
+            token = self._token_for(button)
+            if token is None:
+                continue
+            entries.append((token, token in in_play))
+        new_tokens = merge_visible_order(entries, visible_tokens)
+        by_token = {}
+        for button in rows:
+            token = self._token_for(button)
+            if token is not None:
+                by_token[token] = button
+        ordered = [by_token[token] for token in new_tokens if token in by_token]
+        labels = [
+            button
+            for button in self._buttons
+            if not isinstance(button, (LaunchButton, SubmenuButton))
+        ]
+        self._relayout_buttons(ordered + labels)
+
     def _finish_drag(self, global_pos: QPoint) -> None:
+        if not self._drag_active or self._drag_button is None:
+            return
         button = self._drag_button
+        external = self._external_target
+        outside = isinstance(button, SubmenuButton) and not self.rect().contains(self.mapFromGlobal(global_pos))
         self._suppress_click = True
+        if external is not None and isinstance(button, LaunchButton):
+            launcher_id = button.launcher.id
+            source_key = self._drag_source_key
+            target_key, index = external
+            self._cancel_drag()
+            self.external_drop.emit(launcher_id, source_key, target_key, index)
+            self.drag_finished.emit()
+            return
+        if outside:
+            self._abort_drag_without_commit()
+            if not self._pinned():
+                self._schedule_hide()
+                self.hover_leave.emit()
+            self.drag_finished.emit()
+            return
         self._cancel_drag()
         self._emit_reordered()
-        if button is None or self._pinned():
-            return
-        local = self.mapFromGlobal(global_pos)
-        if not self.rect().contains(local):
-            self._schedule_hide()
-            self.hover_leave.emit()
+        if not self._pinned():
+            local = self.mapFromGlobal(global_pos)
+            if not self.rect().contains(local):
+                self._schedule_hide()
+                self.hover_leave.emit()
+        self.drag_finished.emit()
+
+    def _abort_drag_without_commit(self) -> None:
+        """Put the rows back. A container row that left this list does not move."""
+        self._stop_row_anims()
+        if self._pre_drag_buttons is not None:
+            self._drag_detached = False
+            self._drag_order = []
+            self._relayout_buttons(list(self._pre_drag_buttons))
+            self._button_layout.activate()
+        self._cancel_drag()
 
     def _emit_reordered(self) -> None:
+        if self._mix_rows:
+            tokens = self.row_tokens()
+            if tokens != self._pre_drag_tokens:
+                self.rows_reordered.emit(tokens)
+            return
         visible_ids = [b.launcher.id for b in self._launch_buttons() if b.isVisible()]
         visible_set = set(visible_ids)
         if self._order_ids is not None:
@@ -632,7 +896,7 @@ class DropdownPanel(QWidget):
         dragged = self._drag_button
         if dragged is None:
             return
-        visible = list(self._drag_order) if self._drag_detached else [b for b in self._launch_buttons() if b.isVisible()]
+        visible = list(self._drag_order) if self._drag_detached else self._rows_for_drag()
         if dragged not in visible:
             return
         old = visible.index(dragged)
@@ -647,6 +911,9 @@ class DropdownPanel(QWidget):
         if self._drag_detached:
             self._drag_order = visible
             self._slide_rest(animate=True)
+            return
+        if self._mix_rows:
+            self._commit_mixed_order(visible)
             return
 
         entries = [(b.launcher.id, b.isVisible()) for b in self._launch_buttons()]
@@ -674,11 +941,88 @@ class DropdownPanel(QWidget):
         self._visible_buttons = [b for b in self._buttons if isinstance(b, LaunchButton) and b.isVisible()]
 
     def _drag_step(self, global_pos: QPoint) -> None:
-        self._drag_last_global = global_pos
-        self._autoscroll_once(global_pos)
-        self._move_dragged_to(self._target_visible_index(global_pos.y()))
-        if self._drag_button is not None and self._drag_detached:
-            self._place_lifted(self._drag_button)
+        if self._in_drag_step:
+            return
+        self._in_drag_step = True
+        try:
+            self._drag_last_global = global_pos
+            self._autoscroll_once(global_pos)
+            if self._container_row_left(global_pos):
+                self._external_target = None
+                self._hide_ghost()
+                if self._drag_detached:
+                    self._park_rows(ghost=False)
+                return
+            external = self._external_at(global_pos)
+            if external is not None:
+                self._external_target = external
+                if self._drag_detached:
+                    self._park_rows(ghost=True)
+                self._show_ghost(global_pos)
+                return
+            self._external_target = None
+            self._hide_ghost()
+            if not self._drag_detached and self._drag_button is not None:
+                self._set_drag_style(self._drag_button, True)
+                self._detach_for_drag(self._drag_button)
+            self._move_dragged_to(self._target_visible_index(global_pos.y()))
+            if self._drag_button is not None and self._drag_detached:
+                self._place_lifted(self._drag_button)
+        finally:
+            self._in_drag_step = False
+
+    def _container_row_left(self, global_pos: QPoint) -> bool:
+        return isinstance(self._drag_button, SubmenuButton) and not self.rect().contains(
+            self.mapFromGlobal(global_pos)
+        )
+
+    def _external_at(self, global_pos: QPoint) -> tuple[str, int] | None:
+        """A different menu under the pointer. None keeps the drag inside this list."""
+        if not self._drag_source_key or self._drag_source_key == "groups":
+            return None
+        if not isinstance(self._drag_button, LaunchButton) or self._peer_at is None:
+            return None
+        peer = self._peer_at(global_pos)
+        if peer is None or peer is self:
+            return None
+        found = peer.drop_target_at(global_pos)
+        if found is None:
+            return None
+        key, index = found
+        if key == self._drag_source_key:
+            return None
+        return key, index
+
+    def _park_rows(self, *, ghost: bool) -> None:
+        """Put every row back. The ghost, when shown, is what follows the pointer."""
+        self._stop_row_anims()
+        self._drag_order = []
+        self._drag_detached = False
+        if self._pre_drag_buttons is not None:
+            self._relayout_buttons(list(self._pre_drag_buttons))
+            self._button_layout.activate()
+        if self._drag_button is not None:
+            self._set_drag_style(self._drag_button, not ghost)
+
+    def _ghost_widget(self) -> _RowGhost:
+        if self._ghost is None:
+            self._ghost = _RowGhost(self)
+        return self._ghost
+
+    def _show_ghost(self, global_pos: QPoint) -> None:
+        button = self._drag_button
+        if button is None:
+            return
+        ghost = self._ghost_widget()
+        ghost.set_text(button.text())
+        ghost.setFixedSize(button.size())
+        ghost.move(global_pos.x() - button.width() // 2, global_pos.y() - button.height() // 2)
+        ghost.show()
+        ghost.raise_()
+
+    def _hide_ghost(self) -> None:
+        if self._ghost is not None:
+            self._ghost.hide()
 
     def _autoscroll_once(self, global_pos: QPoint) -> None:
         viewport = self._scroll.viewport()
@@ -695,16 +1039,19 @@ class DropdownPanel(QWidget):
             return
         self._drag_step(self._drag_last_global)
 
-    def _handle_reorder_event(self, button: LaunchButton, event: QEvent) -> bool:
+    def _handle_reorder_event(self, button: QPushButton, event: QEvent) -> bool:
         if not self._allow_reorder:
+            return False
+        if isinstance(button, SubmenuButton) and not self._mix_rows:
             return False
         kind = event.type()
         if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if self._drag_active:
+                return False
             self._suppress_click = False
             self._drag_button = button
-            self._drag_press_y = event.globalPosition().toPoint().y()
-            self._drag_last_global = event.globalPosition().toPoint()
-            self._drag_active = False
+            self._drag_press = event.globalPosition().toPoint()
+            self._drag_last_global = self._drag_press
             return False
         if (
             kind == QEvent.Type.MouseMove
@@ -713,7 +1060,7 @@ class DropdownPanel(QWidget):
         ):
             global_pos = event.globalPosition().toPoint()
             if not self._drag_active:
-                if abs(global_pos.y() - self._drag_press_y) < _DRAG_THRESHOLD_PX:
+                if (global_pos - self._drag_press).manhattanLength() < _DRAG_THRESHOLD_PX:
                     return False
                 self._begin_drag(button)
             self._drag_step(global_pos)
@@ -722,11 +1069,12 @@ class DropdownPanel(QWidget):
             kind == QEvent.Type.MouseButtonRelease
             and event.button() == Qt.MouseButton.LeftButton
             and self._drag_button is button
-            and self._drag_active
         ):
-            # Swallow the release so the row does not launch at the end of a drag.
-            self._finish_drag(event.globalPosition().toPoint())
-            return True
+            if self._drag_active:
+                # Swallow the release so the row does not launch at the end of a drag.
+                self._finish_drag(event.globalPosition().toPoint())
+                return True
+            self._drag_button = None
         return False
 
     def _show_item_menu(self, button: LaunchButton, pos: QPoint) -> None:
@@ -1110,19 +1458,21 @@ class DropdownPanel(QWidget):
         self._anims.append(anim)
 
     # --- Animations ---
-    def start_show_animation(self) -> None:
+    def start_show_animation(self, *, focus: bool = True) -> None:
         self._cancel_hide()
         motion = self._invalidate_motion()
         self._close_motion = 0
         # Pin and Show groups open this panel from a toggle on the arrow menu.
         # Taking focus would dismiss that popup while the pointer is still on it.
+        # A drag also skips focus so the new list does not steal the mouse grab.
         menu_open = isinstance(QApplication.activePopupWidget(), QMenu)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, menu_open)
+        take_focus = focus and not menu_open
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, not take_focus)
         self.show()
         self.raise_()
         self._place()
         self.raise_()
-        if not menu_open:
+        if take_focus:
             self.setFocus(Qt.FocusReason.OtherFocusReason)
 
         self._update_height_for_content()
@@ -1196,6 +1546,8 @@ class DropdownPanel(QWidget):
     def start_hide_animation(self) -> None:
         if self._pinned():
             return
+        if self._drag_active:
+            self._abort_drag_without_commit()
         if not self.isVisible():
             return
 
@@ -1260,6 +1612,10 @@ class DropdownPanel(QWidget):
     def force_hide(self) -> None:
         """Immediate hide (used on launch or escape)."""
         was_visible = self.isVisible()
+        if self._drag_active:
+            self._abort_drag_without_commit()
+        else:
+            self._hide_ghost()
         self._cancel_hide()
         self._invalidate_motion()
         self._close_motion = 0
@@ -1327,7 +1683,27 @@ class DropdownPanel(QWidget):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj, event):  # type: ignore[override]
-        if isinstance(obj, LaunchButton) and self._handle_reorder_event(obj, event):
+        # Follow the pointer after another window takes the mouse grab.
+        if (
+            self._drag_active
+            and obj is not self._drag_button
+            and isinstance(event, QMouseEvent)
+        ):
+            if event.type() == QEvent.Type.MouseMove and event.buttons() & Qt.MouseButton.LeftButton:
+                self._drag_step(event.globalPosition().toPoint())
+                return False
+            if (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                self._finish_drag(event.globalPosition().toPoint())
+                return False
+        if self._emit_row_hover and not self._drag_active and isinstance(obj, LaunchButton):
+            if event.type() == QEvent.Type.Enter:
+                self.row_hovered.emit(obj.launcher.id)
+            elif event.type() == QEvent.Type.Leave:
+                self.row_left.emit(obj.launcher.id)
+        if isinstance(obj, (LaunchButton, SubmenuButton)) and self._handle_reorder_event(obj, event):
             return True
         if obj is self._search_edit and event.type() == QEvent.Type.KeyPress:
             if isinstance(event, QKeyEvent):

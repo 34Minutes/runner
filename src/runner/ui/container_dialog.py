@@ -3,7 +3,8 @@
 A container group is a submenu. Click a launcher name to include it. Each
 click moves that launcher to the top, in the order it was clicked. Click it
 again to put it back. Checked rows can be dragged to change the submenu order.
-Only in Container Group is a switch on the row. It is saved with this container.
+Only in Container Group is a switch on the row. It is the opposite of
+Include in dropdown list. Changing it updates that switch and every group.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import ConfigManager, ContainerGroup, ContainerMember
+from ..containers import shown_in_main_menu
 from ..groups import (
     display_order,
     select_member,
@@ -86,7 +88,6 @@ class ContainerDialog(StayOnTopDialog):
         self._original = group
         self._result: ContainerGroup | None = None
         self._selected: list[str] = []
-        self._only: dict[str, bool] = {}
         self._drag_id: str | None = None
         self._drag_visual: list[str] | None = None
         self._drag_hotspot: QPoint | None = None
@@ -101,12 +102,6 @@ class ContainerDialog(StayOnTopDialog):
                 for member in group.members
                 if member.launcher_id in known
             ]
-            self._only = {
-                member.launcher_id: member.only_in_container
-                for member in group.members
-                if member.launcher_id in known
-            }
-
         self._name_edit = QLineEdit()
         if group is not None:
             self._name_edit.setText(group.name)
@@ -227,7 +222,14 @@ class ContainerDialog(StayOnTopDialog):
         switch = ToggleSwitch("Only in Container Group")
         switch.setProperty("launcher_id", launcher_id)
         switch.setProperty("role", "only")
-        switch.setChecked(member and self._only.get(launcher_id, False))
+        launcher = next(
+            (item for item in self._cfg.config.launchers if item.id == launcher_id),
+            None,
+        )
+        hidden = launcher is not None and not shown_in_main_menu(
+            launcher, self._cfg.config.container_groups
+        )
+        switch.setChecked(hidden)
         switch.setEnabled(member)
         cell = _SwitchCell(switch, on_click=lambda lid=launcher_id: self._on_only_clicked(lid))
         self._paint(cell, member)
@@ -268,7 +270,15 @@ class ContainerDialog(StayOnTopDialog):
     def _on_only_clicked(self, launcher_id: str) -> None:
         if launcher_id not in self._selected:
             return
-        self._only[launcher_id] = not self._only.get(launcher_id, False)
+        launcher = next(
+            (item for item in self._cfg.config.launchers if item.id == launcher_id),
+            None,
+        )
+        if launcher is None:
+            return
+        shown = shown_in_main_menu(launcher, self._cfg.config.container_groups)
+        self._cfg.set_shown_in_main_menu(launcher_id, not shown)
+        self.launchers_changed.emit()
         QTimer.singleShot(0, self._rebuild)
 
     def _on_member_toggled(self, launcher_id: str, checked: bool) -> None:
@@ -278,7 +288,6 @@ class ContainerDialog(StayOnTopDialog):
             self._selected = select_member(self._base_ids(), self._selected, launcher_id)
         else:
             self._selected = unselect_member(self._selected, launcher_id)
-            self._only[launcher_id] = False
         QTimer.singleShot(0, self._rebuild)
 
     def _on_visual_order(self, visual_ids: list[str]) -> None:
@@ -391,7 +400,6 @@ class ContainerDialog(StayOnTopDialog):
             if member.launcher_id != launcher_id:
                 continue
             self._selected = select_member(self._base_ids(), self._selected, launcher_id)
-            self._only[launcher_id] = member.only_in_container
             return
 
     def _on_add_launcher(self) -> None:
@@ -411,10 +419,16 @@ class ContainerDialog(StayOnTopDialog):
         if not name:
             warning(self, "Missing info", "Name is required.")
             return
-        members = [
-            ContainerMember(launcher_id, only_in_container=self._only.get(launcher_id, False))
-            for launcher_id in self._selected
-        ]
+        members = []
+        for launcher_id in self._selected:
+            launcher = next(
+                (item for item in self._cfg.config.launchers if item.id == launcher_id),
+                None,
+            )
+            hidden = launcher is not None and not shown_in_main_menu(
+                launcher, self._cfg.config.container_groups
+            )
+            members.append(ContainerMember(launcher_id, only_in_container=hidden))
         if self._original is not None:
             self._original.name = name
             self._original.members = members

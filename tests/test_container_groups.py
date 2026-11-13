@@ -15,7 +15,7 @@ from runner.config import (
     GroupMember,
     Launcher,
 )
-from runner.containers import shown_in_main_menu, submenu_launchers
+from runner.containers import set_shown_in_main_menu, shown_in_main_menu, submenu_launchers
 from runner.ui.add_dialog import AddEditDialog
 from runner.ui.container_dialog import ContainerDialog, _NOTE
 from runner.ui.container_manager import ContainerManagerDialog
@@ -31,6 +31,20 @@ def _isolate_config(monkeypatch, tmp_path):
         lambda *a, **k: str(tmp_path),
     )
     return ConfigManager()
+
+
+def test_showing_a_launcher_enables_it_and_hiding_leaves_a_disabled_one_off():
+    off = Launcher.new("Off", "off", enabled=False)
+    folder = ContainerGroup.new("Folder", [ContainerMember(off.id, only_in_container=False)])
+    set_shown_in_main_menu(off, [folder], False)
+    assert off.enabled is False
+    assert off.only_in_groups is True
+    assert folder.members[0].only_in_container is True
+    set_shown_in_main_menu(off, [folder], True)
+    assert off.enabled is True
+    assert off.only_in_groups is False
+    assert folder.members[0].only_in_container is False
+    assert shown_in_main_menu(off, [folder]) is True
 
 
 def test_main_list_hides_a_launcher_when_any_container_switch_is_on():
@@ -175,11 +189,13 @@ def test_container_dialog_saves_click_order_and_the_switch(qapp, qtbot, tmp_path
     assert dialog.display_ids() == [beta.id, alpha.id, ]
     assert _SELECTED_BG in dialog.name_cell(beta.id).styleSheet()
     assert dialog.only_switch(alpha.id).box.text() == "Only in Container Group"
-    assert dialog.only_switch(alpha.id).box.isChecked() is False
+    # Alpha is already off the main list, so the shared switch starts on.
+    assert dialog.only_switch(alpha.id).box.isChecked() is True
 
     qtbot.mouseClick(dialog.only_switch(alpha.id), Qt.MouseButton.LeftButton)
     qapp.processEvents()
-    assert dialog.only_switch(alpha.id).box.isChecked() is True
+    assert dialog.only_switch(alpha.id).box.isChecked() is False
+    assert alpha.only_in_groups is False
 
     click_name(alpha.id)
     assert dialog.only_switch(alpha.id).box.isChecked() is False
@@ -202,6 +218,65 @@ def test_container_dialog_saves_click_order_and_the_switch(qapp, qtbot, tmp_path
         (beta.id, False),
         (alpha.id, True),
     ]
+
+
+def test_include_in_dropdown_and_the_group_switches_are_one_setting(
+    qapp, qtbot, tmp_path, monkeypatch
+):
+    mgr = _isolate_config(monkeypatch, tmp_path)
+    alpha = Launcher.new("Alpha", "a")
+    mgr.add_launcher(alpha)
+    folder = ContainerGroup.new("Folder", [ContainerMember(alpha.id)])
+    extra = ContainerGroup.new("Extra", [ContainerMember(alpha.id)])
+    mgr.add_container_group(folder)
+    mgr.add_container_group(extra)
+    mgr.add_group(Group.new("Run", [GroupMember(alpha.id)]))
+
+    edit = AddEditDialog(alpha, cfg=mgr)
+    qtbot.addWidget(edit)
+    assert edit._enabled_cb.isChecked() is True
+    edit._enabled_cb.setChecked(False)
+    edit.accept()
+    assert alpha.enabled is True
+    assert alpha.only_in_groups is True
+    assert all(
+        member.only_in_container
+        for group in mgr.config.container_groups
+        for member in group.members
+    )
+    assert shown_in_main_menu(alpha, mgr.config.container_groups) is False
+
+    groups = GroupDialog(mgr, mgr.config.groups[0])
+    qtbot.addWidget(groups)
+    groups.show()
+    qtbot.waitExposed(groups)
+    assert groups.only_in_groups_checkbox(alpha.id).box.isChecked() is True
+    qtbot.mouseClick(groups.only_in_groups_checkbox(alpha.id), Qt.MouseButton.LeftButton)
+    assert alpha.only_in_groups is False
+    assert all(
+        not member.only_in_container
+        for group in mgr.config.container_groups
+        for member in group.members
+    )
+
+    again = AddEditDialog(alpha, cfg=mgr)
+    qtbot.addWidget(again)
+    assert again._enabled_cb.isChecked() is True
+
+    container = ContainerDialog(mgr, mgr.config.container_groups[0])
+    qtbot.addWidget(container)
+    container.show()
+    qtbot.waitExposed(container)
+    assert container.only_switch(alpha.id).box.isChecked() is False
+    qtbot.mouseClick(container.only_switch(alpha.id), Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert alpha.only_in_groups is True
+    assert mgr.config.container_groups[1].members[0].only_in_container is True
+    final = AddEditDialog(alpha, cfg=mgr)
+    qtbot.addWidget(final)
+    assert final._enabled_cb.isChecked() is False
+    container.close()
+    groups.close()
 
 
 def test_container_and_execute_dialogs_list_launchers_hidden_from_the_main_popup(
@@ -257,7 +332,11 @@ def test_launcher_screen_adds_and_removes_both_kinds_of_group(qapp, qtbot, tmp_p
 
     dialog.accept()
     assert [member.launcher_id for member in mgr.config.container_groups[0].members] == []
-    assert mgr.config.container_groups[1].members == [ContainerMember(alpha.id)]
+    # Alpha was already off the main popup, so the new container keeps that choice.
+    assert mgr.config.container_groups[1].members == [
+        ContainerMember(alpha.id, only_in_container=True)
+    ]
+    assert alpha.only_in_groups is True
     assert mgr.config.groups[0].members == [GroupMember(alpha.id, concurrent=True)]
     assert mgr.config.groups[1].members == [GroupMember(alpha.id)]
 

@@ -36,10 +36,12 @@ from .config import (
 )
 from .containers import submenu_launchers
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
+from .moves import enabled_member_launchers, visible_main_tokens
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .launcher import launch
 from .ui.trigger import TriggerWidget
-from .ui.dropdown import DropdownPanel
+from .ui.dropdown import DropdownPanel, SubmenuButton
+from .ui.launch_button import LaunchButton
 from .ui.add_dialog import AddEditDialog
 from .ui.container_dialog import ContainerDialog
 from .ui.container_manager import ContainerManagerDialog
@@ -97,11 +99,12 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
 
 
 def _fill_main_dropdown(dropdown: DropdownPanel, cfg: ConfigManager) -> None:
-    """Launcher rows, with container groups above them."""
+    """Launcher rows and container rows, in the saved mixed order."""
     dropdown.set_submenu_items(
         [(group.id, group.name) for group in cfg.config.container_groups]
     )
     dropdown.rebuild_buttons(cfg.get_main_view_launchers())
+    dropdown.apply_token_order(visible_main_tokens(cfg.config))
 
 
 def create_tray(
@@ -296,21 +299,27 @@ def main() -> int:
     group_panel.set_row_tooltip(
         lambda row: (
             f"Run execute group: {row.name}\n"
+            "Hover to see its launchers\n"
             "Drag up or down to reorder\n"
             "Right-click to edit or delete"
         )
     )
     group_panel.set_heading("Execute Groups")
+    group_panel.set_drag_source_key("groups")
+    group_panel.set_emit_row_hover(True)
 
-    container_panel = DropdownPanel(
-        cfg_mgr.config,
-        honor_pin=False,
-        allow_reorder=False,
-    )
+    container_panel = DropdownPanel(cfg_mgr.config, honor_pin=False)
     container_panel.set_list_copy(
         placeholder="Filter launchers...",
         empty_hint="Nothing in this container.",
     )
+    execute_member_panel = DropdownPanel(cfg_mgr.config, honor_pin=False)
+    execute_member_panel.set_list_copy(
+        placeholder="Filter launchers...",
+        empty_hint="Nothing in this execute group.",
+    )
+    dropdown.set_mix_rows(True)
+    dropdown.set_drag_source_key("main")
 
     # Initial button population. Launchers hidden by a group stay off this list.
     _fill_main_dropdown(dropdown, cfg_mgr)
@@ -359,9 +368,13 @@ def main() -> int:
     hide_timer.setInterval(cfg_mgr.config.settings.hover_delay_ms)
     showing_groups = False
     open_container_id: str | None = None
+    open_execute_id: str | None = None
     container_hide_timer = QTimer()
     container_hide_timer.setSingleShot(True)
     container_hide_timer.setInterval(180)
+    execute_hide_timer = QTimer()
+    execute_hide_timer.setSingleShot(True)
+    execute_hide_timer.setInterval(180)
 
     def schedule_hide():
         hide_timer.start()
@@ -371,6 +384,7 @@ def main() -> int:
         dropdown.cancel_hide()  # also cancel dropdown's internal timer to keep list open when mouse is over trigger
         group_panel.cancel_hide()
         container_panel.cancel_hide()
+        execute_member_panel.cancel_hide()
 
     def _show_groups_enabled() -> bool:
         return bool(getattr(cfg_mgr.config.settings, "show_groups", False))
@@ -383,8 +397,17 @@ def main() -> int:
         if container_panel.isVisible():
             container_panel.force_hide()
 
+    def _hide_execute_menu() -> None:
+        nonlocal open_execute_id
+        execute_hide_timer.stop()
+        open_execute_id = None
+        execute_member_panel.use_position_hook(None)
+        if execute_member_panel.isVisible():
+            execute_member_panel.force_hide()
+
     def do_hide():
         _hide_container_menu()
+        _hide_execute_menu()
         if showing_groups:
             group_panel.start_hide_animation()
             return
@@ -437,6 +460,7 @@ def main() -> int:
     def _show_group_panel() -> None:
         nonlocal showing_groups
         _hide_container_menu()
+        _hide_execute_menu()
         if not cfg_mgr.config.groups:
             showing_groups = False
             _hide_groups_beside()
@@ -464,19 +488,16 @@ def main() -> int:
         if cfg_mgr.config.settings.pinned_open:
             apply_pinned_state()
 
-    def on_trigger_enter():
-        cancel_hide()  # cancels both main timer and dropdown's internal timer
+    def _show_main_popup() -> None:
+        """Open the launcher list, where container group rows live."""
+        nonlocal showing_groups
+        showing_groups = False
+        cancel_hide()
         _hide_container_menu()
-        if showing_groups:
-            group_panel.position_adjacent(trigger)
-            if group_panel.is_closing() or not group_panel.isVisible():
-                _show_group_panel()
-            trigger.raise_()
-            group_panel.stackUnder(trigger)
-            return
+        _hide_execute_menu()
         dropdown.position_adjacent(trigger)
         _fill_main_dropdown(dropdown, cfg_mgr)
-        if not dropdown.isVisible():
+        if not dropdown.isVisible() or dropdown.is_closing():
             dropdown.start_show_animation()
         trigger.raise_()
         dropdown.stackUnder(trigger)
@@ -485,13 +506,31 @@ def main() -> int:
         else:
             _hide_groups_beside()
 
+    def on_trigger_enter():
+        cancel_hide()  # cancels both main timer and dropdown's internal timer
+        _hide_container_menu()
+        _hide_execute_menu()
+        if showing_groups:
+            group_panel.position_adjacent(trigger)
+            if group_panel.is_closing() or not group_panel.isVisible():
+                _show_group_panel()
+            trigger.raise_()
+            group_panel.stackUnder(trigger)
+            return
+        _show_main_popup()
+
     def _pointer_over(widget) -> bool:
         return widget.isVisible() and widget.frameGeometry().contains(QCursor.pos())
 
     def on_trigger_leave():
         # Moving from the arrow menu onto a list must not start a hide.
         # The list's own leave collapses it.
-        if _pointer_over(dropdown) or _pointer_over(group_panel) or _pointer_over(container_panel):
+        if (
+            _pointer_over(dropdown)
+            or _pointer_over(group_panel)
+            or _pointer_over(container_panel)
+            or _pointer_over(execute_member_panel)
+        ):
             return
         if showing_groups or not cfg_mgr.config.settings.pinned_open:
             schedule_hide()
@@ -500,7 +539,7 @@ def main() -> int:
         cancel_hide()
 
     def on_dropdown_leave():
-        if _pointer_over(container_panel):
+        if _pointer_over(container_panel) or _pointer_over(execute_member_panel):
             return
         _schedule_container_hide()
         if not cfg_mgr.config.settings.pinned_open:
@@ -508,12 +547,16 @@ def main() -> int:
 
     def on_group_enter():
         cancel_hide()
+        execute_hide_timer.stop()
         if showing_groups and group_panel.is_closing():
             group_panel.start_show_animation()
         elif not showing_groups and _show_groups_enabled() and group_panel.is_closing():
             _show_groups_beside()
 
     def on_group_leave():
+        if _pointer_over(execute_member_panel):
+            return
+        _schedule_execute_hide()
         if showing_groups or (_show_groups_enabled() and not cfg_mgr.config.settings.pinned_open):
             schedule_hide()
 
@@ -541,8 +584,25 @@ def main() -> int:
             prefer_right=_container_prefer_right(),
         )
 
-    def _show_container_menu(group_id: str) -> None:
+    def _any_drag() -> bool:
+        return any(
+            panel.is_dragging()
+            for panel in (dropdown, group_panel, container_panel, execute_member_panel)
+        )
+
+    def _container_member_ids() -> list[str]:
+        group = _container_by_id(open_container_id) if open_container_id else None
+        if group is None:
+            return []
+        return [member.launcher_id for member in group.members]
+
+    container_panel.set_order_ids(_container_member_ids)
+
+    def _show_container_menu(group_id: str, *, force: bool = False) -> None:
         nonlocal open_container_id
+        # This panel is the source while a launcher is dragged out of it.
+        if container_panel.is_dragging():
+            return
         group = _container_by_id(group_id)
         if group is None or not dropdown.isVisible():
             _hide_container_menu()
@@ -552,15 +612,24 @@ def main() -> int:
             _hide_container_menu()
             return
         container_hide_timer.stop()
+        already = (
+            not force
+            and open_container_id == group_id
+            and container_panel.isVisible()
+            and not container_panel.is_closing()
+        )
         open_container_id = group_id
+        container_panel.set_drag_source_key(f"container:{group_id}")
         container_panel.set_heading(group.name)
-        container_panel.rebuild_buttons(submenu_launchers(group, cfg_mgr.config.launchers))
         container_panel.use_position_hook(_place_container)
         container_panel.cancel_hide()
+        if already:
+            return
+        container_panel.rebuild_buttons(submenu_launchers(group, cfg_mgr.config.launchers))
         if container_panel.isVisible() and not container_panel.is_closing():
             container_panel.ensure_visible_and_sized()
         else:
-            container_panel.start_show_animation()
+            container_panel.start_show_animation(focus=not _any_drag())
         trigger.raise_()
         dropdown.stackUnder(trigger)
         container_panel.stackUnder(trigger)
@@ -592,12 +661,155 @@ def main() -> int:
 
     def on_container_leave():
         _schedule_container_hide()
-        if _pointer_over(dropdown) or _pointer_over(trigger):
+        if _pointer_over(dropdown) or _pointer_over(trigger) or _pointer_over(execute_member_panel):
             return
         if showing_groups or not cfg_mgr.config.settings.pinned_open:
             schedule_hide()
 
     container_hide_timer.timeout.connect(_hide_container_if_left)
+
+    def _execute_member_ids() -> list[str]:
+        if not open_execute_id:
+            return []
+        for group in cfg_mgr.config.groups:
+            if group.id == open_execute_id:
+                return [member.launcher_id for member in group.members]
+        return []
+
+    execute_member_panel.set_order_ids(_execute_member_ids)
+
+    def _execute_prefer_right() -> bool:
+        """Open away from the main list when both lists are on screen."""
+        if dropdown.isVisible() and dropdown.x() >= group_panel.x():
+            return False
+        return True
+
+    def _place_execute_members() -> None:
+        if not open_execute_id:
+            return
+        button = group_panel.launcher_button(open_execute_id)
+        if button is None or not button.isVisible():
+            return
+        execute_member_panel.position_next_to(
+            group_panel,
+            button,
+            prefer_right=_execute_prefer_right(),
+        )
+
+    def _show_execute_members(group_id: str, *, force: bool = False) -> None:
+        nonlocal open_execute_id
+        if execute_member_panel.is_dragging() or group_panel.is_dragging():
+            return
+        group = None
+        for item in cfg_mgr.config.groups:
+            if item.id == group_id:
+                group = item
+                break
+        if group is None or not group_panel.isVisible():
+            _hide_execute_menu()
+            return
+        button = group_panel.launcher_button(group_id)
+        if button is None or not button.isVisible():
+            _hide_execute_menu()
+            return
+        execute_hide_timer.stop()
+        already = (
+            not force
+            and open_execute_id == group_id
+            and execute_member_panel.isVisible()
+            and not execute_member_panel.is_closing()
+        )
+        open_execute_id = group_id
+        execute_member_panel.set_drag_source_key(f"execute:{group_id}")
+        execute_member_panel.set_heading(group.name)
+        execute_member_panel.use_position_hook(_place_execute_members)
+        execute_member_panel.cancel_hide()
+        if already:
+            return
+        execute_member_panel.rebuild_buttons(
+            enabled_member_launchers(group.members, cfg_mgr.config.launchers)
+        )
+        if execute_member_panel.isVisible() and not execute_member_panel.is_closing():
+            execute_member_panel.ensure_visible_and_sized()
+        else:
+            execute_member_panel.start_show_animation(focus=not _any_drag())
+        trigger.raise_()
+        group_panel.stackUnder(trigger)
+        execute_member_panel.stackUnder(trigger)
+
+    def _on_execute_row_left(group_id: str) -> None:
+        if group_id == open_execute_id:
+            _schedule_execute_hide()
+
+    def _schedule_execute_hide() -> None:
+        if open_execute_id:
+            execute_hide_timer.start()
+
+    def _hide_execute_if_left() -> None:
+        if _pointer_over(execute_member_panel):
+            return
+        if open_execute_id:
+            button = group_panel.launcher_button(open_execute_id)
+            if (
+                button is not None
+                and button.isVisible()
+                and button.rect().contains(button.mapFromGlobal(QCursor.pos()))
+            ):
+                return
+        _hide_execute_menu()
+
+    def on_execute_enter():
+        cancel_hide()
+        execute_hide_timer.stop()
+
+    def on_execute_leave():
+        _schedule_execute_hide()
+        if (
+            _pointer_over(group_panel)
+            or _pointer_over(dropdown)
+            or _pointer_over(trigger)
+            or _pointer_over(container_panel)
+        ):
+            return
+        if showing_groups or not cfg_mgr.config.settings.pinned_open:
+            schedule_hide()
+
+    execute_hide_timer.timeout.connect(_hide_execute_if_left)
+
+    def _find_drop_peer(global_pos: QPoint) -> DropdownPanel | None:
+        """Open the menu under the pointer, then return the list that contains it."""
+        source = next(
+            (
+                panel
+                for panel in (dropdown, container_panel, execute_member_panel, group_panel)
+                if panel.is_dragging()
+            ),
+            None,
+        )
+        cancel_hide()
+        container_hide_timer.stop()
+        execute_hide_timer.stop()
+        # A container row only reorders inside the main list.
+        if source is dropdown and source.dragging_submenu():
+            if dropdown.isVisible() and dropdown.frameGeometry().contains(global_pos):
+                return dropdown
+            return None
+        if source is not execute_member_panel and group_panel.isVisible() and not group_panel.is_dragging():
+            row = group_panel.row_at(global_pos)
+            if isinstance(row, LaunchButton):
+                _show_execute_members(row.launcher.id)
+        if source is not container_panel and dropdown.isVisible():
+            row = dropdown.row_at(global_pos)
+            if isinstance(row, SubmenuButton):
+                _show_container_menu(row.item_id)
+        for panel in (execute_member_panel, container_panel, dropdown, group_panel):
+            if panel.isVisible() and panel.frameGeometry().contains(global_pos):
+                return panel
+        return None
+
+    dropdown.set_peer_finder(_find_drop_peer)
+    container_panel.set_peer_finder(_find_drop_peer)
+    execute_member_panel.set_peer_finder(_find_drop_peer)
 
     def reset_position_and_size():
         """Reset the trigger to a sensible default location and size."""
@@ -623,8 +835,12 @@ def main() -> int:
     group_panel.closed.connect(on_group_panel_closed)
     container_panel.hover_enter.connect(on_container_enter)
     container_panel.hover_leave.connect(on_container_leave)
+    execute_member_panel.hover_enter.connect(on_execute_enter)
+    execute_member_panel.hover_leave.connect(on_execute_leave)
     dropdown.submenu_hovered.connect(_show_container_menu)
     dropdown.submenu_left.connect(_on_submenu_left)
+    group_panel.row_hovered.connect(_show_execute_members)
+    group_panel.row_left.connect(_on_execute_row_left)
 
     trigger.request_reset.connect(reset_position_and_size)
 
@@ -645,6 +861,7 @@ def main() -> int:
             )
         finally:
             _hide_container_menu()
+            _hide_execute_menu()
             if not cfg_mgr.config.settings.pinned_open:
                 # short delay for click visual feedback, then hide (unless pinned)
                 QTimer.singleShot(80, dropdown.start_hide_animation)
@@ -656,18 +873,80 @@ def main() -> int:
 
     dropdown.launch_requested.connect(on_launch)
 
-    def on_reordered(ordered_ids: list[str]) -> None:
-        cfg_mgr.reorder_launchers(ordered_ids)
+    def on_rows_reordered(tokens: list[str]) -> None:
+        cfg_mgr.apply_main_row_order(tokens)
 
-    dropdown.reordered.connect(on_reordered)
+    dropdown.rows_reordered.connect(on_rows_reordered)
+
+    def on_container_reordered(ordered_ids: list[str]) -> None:
+        if open_container_id:
+            cfg_mgr.reorder_container_members(open_container_id, ordered_ids)
+
+    container_panel.reordered.connect(on_container_reordered)
+
+    def on_execute_members_reordered(ordered_ids: list[str]) -> None:
+        if open_execute_id:
+            cfg_mgr.reorder_group_members(open_execute_id, ordered_ids)
+
+    execute_member_panel.reordered.connect(on_execute_members_reordered)
+
+    def _dest_visible(target_key: str) -> list[str] | None:
+        if target_key == "main":
+            return dropdown.row_tokens()
+        kind, _, ident = target_key.partition(":")
+        if kind == "container" and open_container_id == ident and container_panel.isVisible():
+            return container_panel.visible_launcher_ids()
+        if kind == "execute" and open_execute_id == ident and execute_member_panel.isVisible():
+            return execute_member_panel.visible_launcher_ids()
+        return None
+
+    def on_external_drop(launcher_id: str, source_key: str, target_key: str, index: int) -> None:
+        visible = _dest_visible(target_key)
+        cfg_mgr.move_launcher(launcher_id, source_key, target_key, index, visible)
+        _fill_main_dropdown(dropdown, cfg_mgr)
+        if open_container_id:
+            _show_container_menu(open_container_id, force=True)
+        if open_execute_id:
+            _show_execute_members(open_execute_id, force=True)
+
+    dropdown.external_drop.connect(on_external_drop)
+    container_panel.external_drop.connect(on_external_drop)
+    execute_member_panel.external_drop.connect(on_external_drop)
+
+    def _on_drag_finished() -> None:
+        _hide_container_if_left()
+        _hide_execute_if_left()
+        # The mouse grab swallows leave events. Keep whichever list is under
+        # the pointer, and hide the session when the pointer is over none of them.
+        if (
+            _pointer_over(trigger)
+            or _pointer_over(dropdown)
+            or _pointer_over(group_panel)
+            or _pointer_over(container_panel)
+            or _pointer_over(execute_member_panel)
+        ):
+            cancel_hide()
+            return
+        if showing_groups or not cfg_mgr.config.settings.pinned_open:
+            schedule_hide()
+
+    dropdown.drag_finished.connect(_on_drag_finished)
+    container_panel.drag_finished.connect(_on_drag_finished)
+    execute_member_panel.drag_finished.connect(_on_drag_finished)
+    group_panel.drag_finished.connect(_on_drag_finished)
 
     def _refresh_open_container() -> None:
         if open_container_id and container_panel.isVisible():
-            _show_container_menu(open_container_id)
+            _show_container_menu(open_container_id, force=True)
+
+    def _refresh_open_execute() -> None:
+        if open_execute_id and execute_member_panel.isVisible():
+            _show_execute_members(open_execute_id, force=True)
 
     def _refresh_open_list() -> None:
         _fill_main_dropdown(dropdown, cfg_mgr)
         _refresh_open_container()
+        _refresh_open_execute()
         if cfg_mgr.config.settings.pinned_open:
             apply_pinned_state()
 
@@ -757,6 +1036,7 @@ def main() -> int:
         else:
             dropdown.force_hide()
             _hide_container_menu()
+            _hide_execute_menu()
             _hide_groups_beside()
 
     def show_manager_dialog():
@@ -794,6 +1074,7 @@ def main() -> int:
         steps = execution_steps(group, cfg_mgr.config.launchers)
         group_panel.force_hide()
         _hide_container_menu()
+        _hide_execute_menu()
         if not cfg_mgr.config.settings.pinned_open:
             dropdown.start_hide_animation()
         if not steps:
@@ -902,12 +1183,16 @@ def main() -> int:
     container_panel.launch_requested.connect(on_launch)
     container_panel.edit_requested.connect(on_edit_requested)
     container_panel.delete_requested.connect(on_delete_requested)
+    execute_member_panel.launch_requested.connect(on_launch)
+    execute_member_panel.edit_requested.connect(on_edit_requested)
+    execute_member_panel.delete_requested.connect(on_delete_requested)
     dropdown.submenu_edit_requested.connect(on_container_edit)
     dropdown.submenu_delete_requested.connect(on_container_delete)
 
     trigger.request_add_group.connect(lambda: show_group_dialog())
     trigger.request_manage_groups.connect(show_group_manager)
     trigger.request_groups.connect(_show_group_panel)
+    trigger.request_containers.connect(_show_main_popup)
     trigger.request_add_container.connect(lambda: show_container_dialog())
     trigger.request_manage_containers.connect(show_container_manager)
 
@@ -923,6 +1208,7 @@ def main() -> int:
         dropdown.refresh_filter_visibility()
         group_panel.refresh_filter_visibility()
         container_panel.refresh_filter_visibility()
+        execute_member_panel.refresh_filter_visibility()
         if showing_groups and group_panel.isVisible():
             group_panel.update_height_for_content()
             group_panel.position_adjacent(trigger)
@@ -1004,10 +1290,16 @@ def main() -> int:
     def _sync_groups_after_change() -> None:
         """Keep an open groups list in step with add, edit, and delete.
 
+        The member list closes when its execute group is gone.
+
         Hover builds the list from current groups. Saving a group while that
         list is already open, or while the launcher list is pinned open, updates
         it immediately. With no groups left, the list hides.
         """
+        if open_execute_id and _group_by_id(open_execute_id) is None:
+            _hide_execute_menu()
+        elif open_execute_id:
+            _refresh_open_execute()
         if showing_groups:
             if not cfg_mgr.config.groups:
                 group_panel.force_hide()
@@ -1026,6 +1318,7 @@ def main() -> int:
 
     def _before_tray_show() -> None:
         _hide_container_menu()
+        _hide_execute_menu()
         if showing_groups:
             group_panel.force_hide()
 

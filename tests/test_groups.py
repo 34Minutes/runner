@@ -248,8 +248,9 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     assert reloaded.config.launchers[0].only_in_groups is True
     edit = AddEditDialog(reloaded.config.launchers[0])
     qtbot.addWidget(edit)
-    assert edit._only_in_groups_cb.text() == "Only In Groups"
-    assert edit._only_in_groups_cb.isChecked() is True
+    assert edit._enabled_cb.text() == "Include in dropdown list"
+    assert edit._enabled_cb.isChecked() is False
+    assert not hasattr(edit, "_only_in_groups_cb")
 
     dialog._name_edit.setText("  ")
     with patch("runner.ui.group_dialog.warning") as warn:
@@ -344,12 +345,13 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-8:] == [
+    assert labels[-9:] == [
         "---",
-        "Add Execute Group",
-        "Manage Execute Groups",
         "Execute Groups",
+        "Container Groups",
+        "Add Execute Group",
         "Add Container Group",
+        "Manage Execute Groups",
         "Manage Container Groups",
         "---",
         "Exit",

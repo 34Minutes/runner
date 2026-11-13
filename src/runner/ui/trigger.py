@@ -157,6 +157,7 @@ class TriggerWidget(QWidget):
     request_add_group = Signal()
     request_manage_groups = Signal()
     request_groups = Signal()
+    request_containers = Signal()
     request_add_container = Signal()
     request_manage_containers = Signal()
     request_reset = Signal()
@@ -215,7 +216,7 @@ class TriggerWidget(QWidget):
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
             "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Execute Groups, Container Groups, Reset position & size, Exit"
+            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position & size, Exit"
         )
 
     def _create_actions(self) -> None:
@@ -236,6 +237,9 @@ class TriggerWidget(QWidget):
 
         self._action_groups = QAction("Execute Groups", self)
         self._action_groups.triggered.connect(self.request_groups.emit)
+
+        self._action_containers = QAction("Container Groups", self)
+        self._action_containers.triggered.connect(self.request_containers.emit)
 
         self._action_add_container = QAction("Add Container Group", self)
         self._action_add_container.triggered.connect(self.request_add_container.emit)
@@ -307,10 +311,11 @@ class TriggerWidget(QWidget):
             menu.addAction(startup_action)
 
         menu.addSeparator()
-        menu.addAction(self._action_add_group)
-        menu.addAction(self._action_manage_groups)
         menu.addAction(self._action_groups)
+        menu.addAction(self._action_containers)
+        menu.addAction(self._action_add_group)
         menu.addAction(self._action_add_container)
+        menu.addAction(self._action_manage_groups)
         menu.addAction(self._action_manage_containers)
         menu.addSeparator()
         menu.addAction(self._action_exit)

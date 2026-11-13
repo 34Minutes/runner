@@ -22,7 +22,7 @@ class LaunchButton(QPushButton):
         # Future: add icon on left
         self.setToolTip(
             f"Launch: {launcher.command} {launcher.args}".strip()
-            + "\nDrag up or down to reorder"
+            + "\nDrag to reorder, or onto another menu to move it"
             + "\nRight-click to edit or delete"
         )
 

@@ -68,9 +68,8 @@ class Group:
 class ContainerMember:
     """One launcher inside a container group.
 
-    only_in_container hides that launcher from the main popup while it stays
-    in this container. The launcher is shown again when every container it
-    belongs to has this off.
+    only_in_container matches the launcher's main-popup choice. It is on
+    when Include in dropdown list is off, and off when that switch is on.
     """
 
     launcher_id: str
@@ -142,6 +141,9 @@ class AppConfig:
     launchers: list[Launcher] = field(default_factory=list)
     groups: list[Group] = field(default_factory=list)
     container_groups: list[ContainerGroup] = field(default_factory=list)
+    # Mixed order of the main popup. Tokens are "container:<id>" and "launcher:<id>".
+    # Empty means containers first, then launchers, which is the order before any drag.
+    main_order: list[str] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
     version: int = 1
 
@@ -152,6 +154,7 @@ class AppConfig:
             "launchers": [asdict(l) for l in self.launchers],
             "groups": [asdict(group) for group in self.groups],
             "container_groups": [asdict(group) for group in self.container_groups],
+            "main_order": list(self.main_order),
         }
 
     @classmethod
@@ -171,11 +174,13 @@ class AppConfig:
             container_groups.append(
                 ContainerGroup(id=item["id"], name=item.get("name", ""), members=members)
             )
+        main_order = [item for item in data.get("main_order", []) if isinstance(item, str)]
         return cls(
             launchers=launchers,
             settings=settings,
             groups=groups,
             container_groups=container_groups,
+            main_order=main_order,
             version=version,
         )
 
@@ -329,6 +334,52 @@ class ConfigManager:
         ]
         self.save()
 
+    def reorder_container_members(self, group_id: str, ordered_ids: list[str]) -> None:
+        from .moves import reorder_members
+
+        for group in self.config.container_groups:
+            if group.id == group_id:
+                group.members = reorder_members(group.members, ordered_ids)
+                self.save()
+                return
+
+    def reorder_group_members(self, group_id: str, ordered_ids: list[str]) -> None:
+        from .moves import reorder_members
+
+        for group in self.config.groups:
+            if group.id == group_id:
+                group.members = reorder_members(group.members, ordered_ids)
+                self.save()
+                return
+
+    def apply_main_row_order(self, visible_tokens: list[str]) -> None:
+        from .moves import apply_visible_row_order
+
+        apply_visible_row_order(self.config, visible_tokens)
+        self.save()
+
+    def move_launcher(
+        self,
+        launcher_id: str,
+        source_key: str,
+        dest_key: str,
+        dest_index: int,
+        dest_visible_ids: list[str] | None = None,
+    ) -> bool:
+        from .moves import move_launcher
+
+        moved = move_launcher(
+            self.config,
+            launcher_id,
+            source_key,
+            dest_key,
+            dest_index,
+            dest_visible_ids,
+        )
+        if moved:
+            self.save()
+        return moved
+
     def reorder_container_groups(self, ordered_ids: list[str]) -> None:
         by_id = {group.id: group for group in self.config.container_groups}
         new_order = []
@@ -339,16 +390,31 @@ class ConfigManager:
         self.config.container_groups = new_order
         self.save()
 
+    def set_shown_in_main_menu(self, launcher_id: str, shown: bool) -> None:
+        """Save the one main-popup choice for this launcher."""
+        from .containers import set_shown_in_main_menu
+
+        for launcher in self.config.launchers:
+            if launcher.id != launcher_id:
+                continue
+            set_shown_in_main_menu(launcher, self.config.container_groups, shown)
+            self.save()
+            return
+
     def set_launcher_membership(
         self,
         launcher_id: str,
         container_ids: list[str],
         execute_ids: list[str],
+        *,
+        hidden_from_main: bool | None = None,
     ) -> None:
         """Put this launcher in exactly these container and execute groups.
 
-        A membership that stays keeps its Only in Container Group flag or its
-        Concurrent flag. A newly added membership starts with both off.
+        A membership that stays keeps its Concurrent flag. When
+        hidden_from_main is set, every container membership uses that value.
+        Otherwise an existing Only in Container Group flag is kept, and a new
+        container membership starts off.
         """
         container_keep = _unique_known(
             container_ids, {group.id for group in self.config.container_groups}
@@ -356,13 +422,19 @@ class ConfigManager:
         execute_keep = _unique_known(
             execute_ids, {group.id for group in self.config.groups}
         )
+        hide = bool(hidden_from_main)
         for group in self.config.container_groups:
             group.members = _sync_members(
                 group.members,
                 launcher_id,
                 group.id in container_keep,
-                lambda: ContainerMember(launcher_id, only_in_container=False),
+                lambda: ContainerMember(launcher_id, only_in_container=hide),
             )
+        if hidden_from_main is not None:
+            for group in self.config.container_groups:
+                for member in group.members:
+                    if member.launcher_id == launcher_id:
+                        member.only_in_container = hide
         for group in self.config.groups:
             group.members = _sync_members(
                 group.members,
