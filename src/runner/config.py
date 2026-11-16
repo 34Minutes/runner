@@ -58,6 +58,8 @@ class Group:
     id: str
     name: str
     members: list[GroupMember] = field(default_factory=list)
+    # Hover opens this group's launchers only when this is on. Default is collapsed.
+    show_contents: bool = False
 
     @classmethod
     def new(cls, name: str, members: list[GroupMember] | None = None) -> Group:
@@ -129,6 +131,8 @@ class Settings:
     show_startup_greeting: bool = True
     # When true, hovering the arrow shows the groups list beside the launchers.
     show_groups: bool = False
+    # dark, bright, or medium. Unknown values display as Dark.
+    color_scheme: str = "dark"
     # False until the one-time enlarge below has been saved. Old config files
     # omit this, so they pick up the larger arrow once and then keep any resize.
     applied_visible_trigger_size: bool = False
@@ -165,7 +169,15 @@ class AppConfig:
         groups = []
         for item in data.get("groups", []):
             members = [_from_fields(GroupMember, member) for member in item.get("members", [])]
-            groups.append(Group(id=item["id"], name=item.get("name", ""), members=members))
+            show_contents = item.get("show_contents", False)
+            groups.append(
+                Group(
+                    id=item["id"],
+                    name=item.get("name", ""),
+                    members=members,
+                    show_contents=show_contents if isinstance(show_contents, bool) else False,
+                )
+            )
         container_groups = []
         for item in data.get("container_groups", []):
             members = [

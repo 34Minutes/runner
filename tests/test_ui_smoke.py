@@ -164,9 +164,19 @@ def test_arrow_menu_close_collapses_hover_after_a_toggle(qapp, qtbot, monkeypatc
 def _open_arrow_menu(trigger, qapp):
     trigger._show_context_menu(QPoint(12, 12))
     qapp.processEvents()
-    menu = trigger.findChildren(QMenu)[-1]
+    menu = _arrow_menu(trigger)
     assert menu.isVisible()
     return menu
+
+
+def _arrow_menu(trigger):
+    found = [
+        menu
+        for menu in trigger.findChildren(QMenu)
+        if any(action.text() == "Exit" for action in menu.actions())
+    ]
+    assert found
+    return found[-1]
 
 
 def test_arrow_menu_reopens_while_the_pointer_stays_on_it(qapp, qtbot, monkeypatch):

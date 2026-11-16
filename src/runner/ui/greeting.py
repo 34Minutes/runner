@@ -37,6 +37,14 @@ _GAP = 10
 _PAD_X = 18
 _PAD_Y = 12
 _LINE_GAP = 4
+# The greeting stays this yellow on every color scheme.
+_GREETING_TEXT = (20, 20, 20)
+_GREETING_FILL = (255, 241, 140)
+_GREETING_BORDER_ON = (255, 214, 0)
+_GREETING_BORDER_OFF = (230, 176, 0)
+_GREETING_SHADOW = (0, 0, 0, 60)
+_GREETING_RIM_ON = (255, 230, 0)
+_GREETING_RIM_OFF = (255, 196, 0)
 GREETING_LINES = (
     "Resize arrow to preferred size",
     "Drag arrow to preferred location",
@@ -132,9 +140,9 @@ def bubble_box_size(font: QFont | None = None) -> QSize:
 
 
 def _paint_greeting_lines(painter: QPainter, box: QRect, font: QFont) -> None:
-    """Draw the two first-run lines, dark on the yellow fill."""
+    """Draw the two first-run lines on the bubble fill."""
     painter.setFont(font)
-    painter.setPen(QColor(20, 20, 20))
+    painter.setPen(QColor(*_GREETING_TEXT))
     metrics = QFontMetrics(font)
     line_h = metrics.height()
     total = line_h * len(GREETING_LINES) + _LINE_GAP * (len(GREETING_LINES) - 1)
@@ -223,12 +231,12 @@ class GreetingBubble(QWidget):
         painter.setOpacity(self._opacity)
         try:
             box, tip, base_a, base_b = self._bubble_geometry()
-            border = QColor(255, 214, 0) if self._flash_on else QColor(230, 176, 0)
+            border = QColor(*(_GREETING_BORDER_ON if self._flash_on else _GREETING_BORDER_OFF))
             pen_w = 4 if self._flash_on else 3
-            fill = QColor(255, 241, 140)
+            fill = QColor(*_GREETING_FILL)
 
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 60))
+            painter.setBrush(QColor(*_GREETING_SHADOW))
             painter.drawRoundedRect(box.adjusted(2, 3, 2, 3), 14, 14)
 
             painter.setPen(QPen(border, pen_w))
@@ -309,10 +317,10 @@ class GreetingBorder(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setOpacity(self._opacity)
         if self._flash_on:
-            color = QColor(255, 230, 0)
+            color = QColor(*_GREETING_RIM_ON)
             pen_w = 6
         else:
-            color = QColor(255, 196, 0)
+            color = QColor(*_GREETING_RIM_OFF)
             pen_w = 4
         inset = pen_w // 2
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -342,6 +350,10 @@ class StartupGreeting(QObject):
         self._fade.setEasingCurve(QEasingCurve.Type.InOutSine)
         self._fade.valueChanged.connect(self._on_fade_value)
         self._fade.finished.connect(self._finish_fade)
+
+    def apply_theme(self) -> None:
+        self._bubble.update()
+        self._border.update()
 
     @property
     def bubble(self) -> GreetingBubble:

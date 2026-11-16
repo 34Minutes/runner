@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton
 
 from ..config import Launcher
+from .theme import launch_button_qss
 
 
 class LaunchButton(QPushButton):
@@ -27,47 +28,12 @@ class LaunchButton(QPushButton):
         )
 
     def _apply_style(self) -> None:
-        # Base + hover + pressed + keyboard-selected (for arrow nav highlight)
-        # Use attribute selector for kbSelected so we can toggle via setProperty + polish
-        self.setStyleSheet(
-            """
-            QPushButton {
-                background-color: rgba(55, 55, 60, 200);
-                color: #eee;
-                border: 1px solid rgba(90, 90, 95, 180);
-                border-radius: 5px;
-                padding: 4px 10px;
-                text-align: left;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: rgba(70, 110, 170, 210);
-                border: 1px solid rgba(100, 140, 200, 220);
-            }
-            QPushButton:pressed {
-                background-color: rgba(50, 85, 140, 230);
-            }
-            QPushButton[kbSelected="true"] {
-                background-color: rgba(65, 95, 145, 225);
-                border: 1px solid rgba(120, 160, 220, 240);
-            }
-            QPushButton[kbSelected="true"]:hover {
-                background-color: rgba(75, 115, 175, 230);
-                border: 1px solid rgba(130, 170, 230, 250);
-            }
-            QPushButton[dragging="true"],
-            QPushButton[dragging="true"]:hover,
-            QPushButton[dragging="true"]:pressed,
-            QPushButton[kbSelected="true"][dragging="true"],
-            QPushButton[kbSelected="true"][dragging="true"]:hover,
-            QPushButton[kbSelected="true"][dragging="true"]:pressed {
-                background-color: rgba(80, 120, 180, 235);
-                border: 4px solid rgba(255, 220, 70, 240);
-                border-radius: 6px;
-                padding: 1px 7px;
-            }
-            """
-        )
+        # Base + hover + pressed + keyboard-selected (for arrow nav highlight).
+        # kbSelected is an attribute selector toggled via setProperty + polish.
+        self.setStyleSheet(launch_button_qss())
+
+    def apply_theme(self) -> None:
+        self._apply_style()
 
     def set_keyboard_selected(self, selected: bool) -> None:
         """Highlight this button as the current keyboard-navigated item."""

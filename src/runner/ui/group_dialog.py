@@ -6,7 +6,8 @@ back in the main-view order. Checked rows can be dragged to change the start
 order. A drag lifts that row off the list and keeps it under the pointer until
 release. Concurrent and Only In Groups are checkboxes on the row. Only In Groups is
 the opposite of Include in dropdown list. Changing it updates that switch
-and every container group.
+and every container group. Show group contents is off until the user
+turns it on. Only then does hovering that group open its launchers.
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ from ..groups import (
 )
 from .add_dialog import AddEditDialog
 from .stay_on_top import StayOnTopDialog, warning
+from .theme import current
+from .toggle_switch import ToggleSwitch
 
 _NOTE = "These items will be executed in the order it appears in the list below"
 _DRAG_THRESHOLD_PX = 10
@@ -61,9 +64,12 @@ class _DragGhost(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.addWidget(self.label)
+        self._apply_label()
+
+    def _apply_label(self) -> None:
         self.label.setStyleSheet(
             "QLabel {"
-            f" color: {_SELECTED_FG};"
+            f" color: {current().dialog_selected_fg};"
             " background: transparent;"
             " border: none;"
             " font-weight: 600;"
@@ -71,9 +77,10 @@ class _DragGhost(QWidget):
         )
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
+        scheme = current()
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(_DRAG_BORDER))
-        painter.fillRect(self.rect().adjusted(4, 4, -4, -4), QColor(_SELECTED_BG))
+        painter.fillRect(self.rect(), QColor(scheme.dialog_drag_border))
+        painter.fillRect(self.rect().adjusted(4, 4, -4, -4), QColor(scheme.dialog_selected_bg))
         painter.end()
         event.accept()
 
@@ -188,6 +195,9 @@ class GroupDialog(StayOnTopDialog):
         if group is not None:
             self._name_edit.setText(group.name)
 
+        self._show_contents = ToggleSwitch("Show group contents")
+        self._show_contents.setChecked(group is not None and group.show_contents)
+
         note = QLabel(_NOTE)
         note.setWordWrap(True)
 
@@ -221,6 +231,7 @@ class GroupDialog(StayOnTopDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Name:"))
         layout.addWidget(self._name_edit)
+        layout.addWidget(self._show_contents)
         layout.addWidget(note)
         layout.addWidget(self._table, 1)
         layout.addLayout(buttons)
@@ -297,7 +308,7 @@ class GroupDialog(StayOnTopDialog):
         item.setData(Qt.ItemDataRole.UserRole, launcher_id)
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         if member:
-            item.setBackground(QBrush(QColor(_SELECTED_BG)))
+            item.setBackground(QBrush(QColor(current().dialog_selected_bg)))
         return item
 
     def _name_widget(self, launcher, member: bool) -> _NameCell:
@@ -339,8 +350,9 @@ class GroupDialog(StayOnTopDialog):
             cell.setStyleSheet("background: transparent;")
             cell.box.setStyleSheet("QCheckBox { background: transparent; }")
             return
-        colour = QColor(_SELECTED_BG)
-        text = QColor(_SELECTED_FG)
+        scheme = current()
+        colour = QColor(scheme.dialog_selected_bg)
+        text = QColor(scheme.dialog_selected_fg)
         palette = cell.palette()
         palette.setColor(QPalette.ColorRole.Window, colour)
         palette.setColor(QPalette.ColorRole.Base, colour)
@@ -348,10 +360,10 @@ class GroupDialog(StayOnTopDialog):
         palette.setColor(QPalette.ColorRole.Text, text)
         cell.setPalette(palette)
         cell.box.setPalette(palette)
-        cell.setStyleSheet(f"background-color: {_SELECTED_BG};")
+        cell.setStyleSheet(f"background-color: {scheme.dialog_selected_bg};")
         cell.box.setStyleSheet(
             "QCheckBox {"
-            f" color: {_SELECTED_FG};"
+            f" color: {scheme.dialog_selected_fg};"
             " background-color: transparent;"
             " font-weight: 600;"
             "}"
@@ -517,10 +529,14 @@ class GroupDialog(StayOnTopDialog):
             GroupMember(launcher_id, concurrent=self._concurrent.get(launcher_id, False))
             for launcher_id in self._selected
         ]
+        show_contents = self._show_contents.isChecked()
         if self._original is not None:
             self._original.name = name
             self._original.members = members
+            self._original.show_contents = show_contents
             self._result = self._original
         else:
-            self._result = Group.new(name, members)
+            created = Group.new(name, members)
+            created.show_contents = show_contents
+            self._result = created
         super().accept()

@@ -22,6 +22,7 @@ from runner.ui.greeting import (
     greeting_bubble_rect,
 )
 from runner.ui.greeting import GreetingBubble
+from runner.ui.theme import use
 from runner.ui.trigger import TriggerWidget
 
 
@@ -317,6 +318,41 @@ def _assert_greeting_text(bubble: GreetingBubble) -> None:
             if dark and yellow:
                 return
     assert dark and yellow, (dark, yellow, image.width(), image.height())
+    assert _has_near(image, (255, 241, 140)), "bubble fill is not the fixed yellow"
+
+
+def _has_near(image, rgb: tuple[int, int, int], tolerance: int = 16) -> bool:
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            color = image.pixelColor(x, y)
+            if color.alpha() < 200:
+                continue
+            if (
+                abs(color.red() - rgb[0]) <= tolerance
+                and abs(color.green() - rgb[1]) <= tolerance
+                and abs(color.blue() - rgb[2]) <= tolerance
+            ):
+                return True
+    return False
+
+
+def test_greeting_stays_yellow_on_every_color_scheme(qapp, qtbot):
+    trigger = _shown_trigger(qtbot, 360, 240)
+    greeting = StartupGreeting()
+    try:
+        greeting.present(trigger)
+        QApplication.processEvents()
+        for scheme_id in ("dark", "medium", "bright"):
+            use(scheme_id)
+            greeting.bubble.set_flash_on(True)
+            greeting.border.set_flash_on(True)
+            greeting.bubble.repaint()
+            greeting.border.repaint()
+            assert _has_near(greeting.bubble.grab().toImage(), (255, 241, 140)), scheme_id
+            assert _has_near(greeting.border.grab().toImage(), (255, 230, 0)), scheme_id
+    finally:
+        use("dark")
+        greeting.shutdown()
 
 
 def test_bubble_click_dismisses_for_this_launch(qapp, qtbot):
@@ -340,7 +376,12 @@ def test_greeting_switch_is_on_the_arrow_menu(qapp, qtbot):
     trigger.greeting_toggled.connect(seen.append)
 
     trigger._show_context_menu(QPoint(12, 12))
-    menu = trigger.findChildren(QMenu)[-1]
+    found = [
+        menu
+        for menu in trigger.findChildren(QMenu)
+        if any(action.text() == "Exit" for action in menu.actions())
+    ]
+    menu = found[-1]
     qtbot.addWidget(menu)
     switches = [w for w in menu.findChildren(ToggleSwitch) if w.text() == "Show greeting message"]
     assert len(switches) == 1

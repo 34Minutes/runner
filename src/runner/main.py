@@ -38,6 +38,7 @@ from .containers import submenu_launchers
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .moves import enabled_member_launchers, visible_main_tokens
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
+from .ui.theme import current, use
 from .launcher import launch
 from .ui.trigger import TriggerWidget
 from .ui.dropdown import DropdownPanel, SubmenuButton
@@ -98,6 +99,25 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
         cfg.add_launcher(s)
 
 
+def _tray_icon() -> QIcon:
+    """Menu-bar arrow in the active scheme's accent color."""
+    icon_size = 18
+    pix = QPixmap(icon_size, icon_size)
+    pix.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    pen = QPen(QColor(current().tray_icon), 2.0)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    margin = 3
+    center_x = icon_size // 2
+    painter.drawLine(margin, margin + 1, center_x, icon_size - margin)
+    painter.drawLine(center_x, icon_size - margin, icon_size - margin, margin + 1)
+    painter.end()
+    return QIcon(pix)
+
+
 def _fill_main_dropdown(dropdown: DropdownPanel, cfg: ConfigManager) -> None:
     """Launcher rows and container rows, in the saved mixed order."""
     dropdown.set_submenu_items(
@@ -119,23 +139,7 @@ def create_tray(
     """Create and return a system tray icon with useful menu."""
     tray = QSystemTrayIcon()
 
-    # Draw a crisp small downward arrow for the menu bar / tray.
-    # This looks consistent and professional without needing external icon files.
-    icon_size = 18
-    pix = QPixmap(icon_size, icon_size)
-    pix.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pix)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    pen = QPen(QColor("#0a84ff"), 2.0)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(pen)
-    m = 3
-    cx = icon_size // 2
-    p.drawLine(m, m + 1, cx, icon_size - m)
-    p.drawLine(cx, icon_size - m, icon_size - m, m + 1)
-    p.end()
-    tray.setIcon(QIcon(pix))
+    tray.setIcon(_tray_icon())
 
     menu = QMenu()
 
@@ -151,8 +155,12 @@ def create_tray(
     act_reload = QAction("Reload config", menu)
     def do_reload():
         cfg.reload()
+        use(cfg.config.settings.color_scheme)
         _fill_main_dropdown(dropdown, cfg)
+        dropdown.apply_theme()
         trigger.update_size_from_settings()
+        trigger.update()
+        tray.setIcon(_tray_icon())
         if on_reloaded is not None:
             on_reloaded()
         elif cfg.config.settings.pinned_open:
@@ -285,6 +293,7 @@ def main() -> int:
 
     cfg_mgr = ConfigManager()
     seed_test_data_if_needed(cfg_mgr)
+    use(cfg_mgr.config.settings.color_scheme)
 
     # Create core widgets
     trigger = TriggerWidget(cfg_mgr.config)
@@ -296,14 +305,16 @@ def main() -> int:
         empty_hint="",
     )
     group_panel.set_order_ids(lambda: [group.id for group in cfg_mgr.config.groups])
-    group_panel.set_row_tooltip(
-        lambda row: (
-            f"Run execute group: {row.name}\n"
-            "Hover to see its launchers\n"
-            "Drag up or down to reorder\n"
-            "Right-click to edit or delete"
-        )
-    )
+    def _group_row_tooltip(row: Launcher) -> str:
+        lines = [f"Run execute group: {row.name}"]
+        group = next((item for item in cfg_mgr.config.groups if item.id == row.id), None)
+        if group is not None and group.show_contents:
+            lines.append("Hover to see its launchers")
+        lines.append("Drag up or down to reorder")
+        lines.append("Right-click to edit or delete")
+        return "\n".join(lines)
+
+    group_panel.set_row_tooltip(_group_row_tooltip)
     group_panel.set_heading("Execute Groups")
     group_panel.set_drag_source_key("groups")
     group_panel.set_emit_row_hover(True)
@@ -726,6 +737,11 @@ def main() -> int:
                 break
         if group is None or not group_panel.isVisible():
             _hide_execute_menu()
+            return
+        # Show group contents defaults off. Hover and drag-over stay collapsed.
+        if not group.show_contents:
+            if open_execute_id is not None:
+                _hide_execute_menu()
             return
         button = group_panel.launcher_button(group_id)
         if button is None or not button.isVisible():
@@ -1343,7 +1359,11 @@ def main() -> int:
         if showing_groups:
             group_panel.force_hide()
 
+    scheme_refresh: list[Callable[[], None]] = []
+
     def _after_reload() -> None:
+        for refresh in scheme_refresh:
+            refresh()
         if showing_groups:
             _sync_groups_after_change()
             return
@@ -1361,6 +1381,21 @@ def main() -> int:
         before_show=_before_tray_show,
         on_reloaded=_after_reload,
     )
+
+    def _apply_color_scheme() -> None:
+        trigger.update()
+        for panel in (dropdown, group_panel, container_panel, execute_member_panel):
+            panel.apply_theme()
+        greeting.apply_theme()
+        tray.setIcon(_tray_icon())
+
+    def on_color_scheme(scheme_id: str) -> None:
+        use(scheme_id)
+        cfg_mgr.update_settings(color_scheme=scheme_id)
+        _apply_color_scheme()
+
+    scheme_refresh.append(_apply_color_scheme)
+    trigger.color_scheme_selected.connect(on_color_scheme)
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()

@@ -2,7 +2,7 @@
 
 - Frameless Tool window
 - Draggable by the user
-- Right-click context menu (Add..., Manage..., groups, Exit)
+- Right-click context menu (Add..., Manage..., groups, Exit, Color Schemes)
 - Emits hover enter/leave for the dropdown controller
 - Respects size from settings
 """
@@ -10,11 +10,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QEvent, QPoint, QRect, Signal, QPointF, QTimer, QObject
-from PySide6.QtGui import QAction, QCursor, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtWidgets import QWidget, QMenu, QApplication, QWidgetAction
 import sys
 
 from ..config import AppConfig, Launcher
+from .theme import SCHEMES, current, resolve
 from .toggle_switch import ToggleSwitch
 
 
@@ -57,9 +58,20 @@ class ArrowContextMenu(QMenu):
 
     def pointer_inside(self, rect: QRect | None = None) -> bool:
         bounds = self.frameGeometry() if rect is None else rect
-        if bounds.isNull() or bounds.isEmpty():
+        pos = QCursor.pos()
+        if not bounds.isNull() and not bounds.isEmpty() and bounds.contains(pos):
+            return True
+        # A saved rect is the menu window itself. Child menus count only for the live check,
+        # so moving onto Color Schemes does not look like the pointer has left.
+        if rect is not None:
             return False
-        return bounds.contains(QCursor.pos())
+        for child in self.findChildren(QMenu):
+            try:
+                if child.isVisible() and child.frameGeometry().contains(pos):
+                    return True
+            except RuntimeError:
+                continue
+        return False
 
     def close_if_pointer_left(self) -> None:
         """Leave-timer callback. A stale leave must not win while the pointer is still here."""
@@ -162,6 +174,7 @@ class TriggerWidget(QWidget):
     request_manage_containers = Signal()
     request_reset = Signal()
     request_exit = Signal()
+    color_scheme_selected = Signal(str)
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
     greeting_toggled = Signal(bool)
@@ -216,7 +229,7 @@ class TriggerWidget(QWidget):
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
             "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position & size, Exit"
+            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position & size, Exit, Color Schemes"
         )
 
     def _create_actions(self) -> None:
@@ -319,6 +332,28 @@ class TriggerWidget(QWidget):
         menu.addAction(self._action_manage_containers)
         menu.addSeparator()
         menu.addAction(self._action_exit)
+        menu.addSeparator()
+        scheme_menu = QMenu("Color Schemes", menu)
+        active_id = resolve(getattr(self._config.settings, "color_scheme", "dark")).id
+        scheme_group = QActionGroup(scheme_menu)
+        scheme_group.setExclusive(True)
+
+        def _pick_scheme(scheme_id: str) -> None:
+            # The row lives on the submenu, so the parent menu's triggered signal
+            # does not fire. Mark the choice or the menu pops open again.
+            menu._chose_action = True
+            self.color_scheme_selected.emit(scheme_id)
+
+        for scheme in SCHEMES:
+            action = QAction(scheme.label, scheme_menu)
+            action.setCheckable(True)
+            scheme_group.addAction(action)
+            action.setChecked(scheme.id == active_id)
+            action.triggered.connect(
+                lambda checked=False, scheme_id=scheme.id: _pick_scheme(scheme_id)
+            )
+            scheme_menu.addAction(action)
+        menu.addMenu(scheme_menu)
 
         # Auto-hide the entire menu when the mouse moves away from it (no click required to dismiss).
         # This makes the right-click menu feel lighter for the floating arrow widget.
@@ -335,18 +370,17 @@ class TriggerWidget(QWidget):
                 self.timer = timer
 
             def eventFilter(self, obj, event):
-                try:
-                    if not self.menu.isVisible():
-                        return False
-                    menu_rect = self.menu.frameGeometry()
-                except RuntimeError:
-                    return False
                 kind = event.type()
                 if kind not in (QEvent.Type.Leave, QEvent.Type.Enter):
                     return False
-                # A toggle is a child of the menu. Leave on that child still
-                # counts once the pointer has left the menu window itself.
-                over_menu = menu_rect.contains(QCursor.pos())
+                try:
+                    if not self.menu.isVisible():
+                        return False
+                    # Leave on a toggle still counts once the pointer has left
+                    # the menu. pointer_inside also covers Color Schemes.
+                    over_menu = self.menu.pointer_inside()
+                except RuntimeError:
+                    return False
                 if kind == QEvent.Type.Leave and not over_menu:
                     self.timer.start()
                 elif kind == QEvent.Type.Enter or over_menu:
@@ -354,12 +388,13 @@ class TriggerWidget(QWidget):
                 return False
 
         mouse_filter = MenuMouseFilter(menu, hide_timer)
-        watched = [menu, pin_switch, filter_switch, greeting_switch, groups_switch]
+        watched = [menu, scheme_menu, pin_switch, filter_switch, greeting_switch, groups_switch]
         if sys.platform == "win32":
             watched.append(startup_switch)
         for widget in watched:
             # A focused child inside a popup dismisses the menu on click.
-            if widget is not menu:
+            # The scheme submenu is itself a menu, so leave its focus policy alone.
+            if widget is not menu and not isinstance(widget, QMenu):
                 widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             widget.installEventFilter(mouse_filter)
 
@@ -532,12 +567,13 @@ class TriggerWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Subtle background pill / rounded rect
+        scheme = current()
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(30, 30, 30, 170))
+        painter.setBrush(QColor(*scheme.trigger_fill))
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
 
         # Downward arrow (▼)
-        painter.setPen(QPen(QColor(230, 230, 230, 210), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(QColor(*scheme.trigger_chevron), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         w = self.width()
         h = self.height()
         cx = w / 2

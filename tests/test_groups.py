@@ -163,6 +163,43 @@ def test_config_roundtrip_and_removing_a_launcher_strips_group_members(tmp_path,
     assert restored.version == 1
 
 
+def test_show_group_contents_defaults_off_and_saves_with_the_group(qapp, qtbot, tmp_path, monkeypatch):
+    mgr = _isolate_config(monkeypatch, tmp_path)
+    group = Group.new("Morning")
+    assert group.show_contents is False
+    mgr.add_group(group)
+
+    edit = GroupDialog(mgr, group)
+    qtbot.addWidget(edit)
+    edit.show()
+    assert edit.windowTitle() == "Edit Execute Group"
+    qtbot.waitExposed(edit)
+    assert edit._show_contents.text() == "Show group contents"
+    assert edit._show_contents.isChecked() is False
+    qtbot.mouseClick(edit._show_contents, Qt.MouseButton.LeftButton)
+    assert edit._show_contents.isChecked() is True
+    edit.accept()
+    assert group.show_contents is True
+    mgr.update_group(group)
+    assert ConfigManager().config.groups[0].show_contents is True
+
+    again = GroupDialog(mgr, ConfigManager().config.groups[0])
+    qtbot.addWidget(again)
+    assert again._show_contents.isChecked() is True
+    again._show_contents.setChecked(False)
+    again.accept()
+    assert again.result_group is not None
+    assert again.result_group.show_contents is False
+
+    old = {"version": 1, "groups": [{"id": "g1", "name": "Class", "members": []}]}
+    assert AppConfig.from_dict(old).groups[0].show_contents is False
+    junk = {
+        "version": 1,
+        "groups": [{"id": "g2", "name": "Class", "members": [], "show_contents": "yes"}],
+    }
+    assert AppConfig.from_dict(junk).groups[0].show_contents is False
+
+
 def test_reorder_groups_keeps_unknown_ids(tmp_path, monkeypatch):
     mgr = _isolate_config(monkeypatch, tmp_path)
     first = Group.new("First")
@@ -188,6 +225,8 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     assert headers == ["Launcher", "Concurrent", "Only In Groups"]
     notes = [label.text() for label in dialog.findChildren(QLabel)]
     assert _NOTE in notes
+    assert dialog._show_contents.text() == "Show group contents"
+    assert dialog._show_contents.isChecked() is False
     assert [button.text() for button in dialog.findChildren(QPushButton)] == [
         "Add new Launcher",
         "Save",
@@ -263,6 +302,7 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     result = dialog.result_group
     assert result is not None
     assert result.name == "Teaching Pre-School Class One"
+    assert result.show_contents is False
     assert [(member.launcher_id, member.concurrent) for member in result.members] == [
         (beta.id, True),
         (alpha.id, False),
@@ -329,6 +369,16 @@ def test_manage_groups_deletes_the_group_and_keeps_its_launchers(qapp, qtbot, tm
     assert mgr.config.groups == []
 
 
+def _arrow_menu(trigger):
+    found = [
+        menu
+        for menu in trigger.findChildren(QMenu)
+        if any(action.text() == "Exit" for action in menu.actions())
+    ]
+    assert found
+    return found[-1]
+
+
 def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
     trigger = TriggerWidget(AppConfig())
     qtbot.addWidget(trigger)
@@ -338,14 +388,14 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
     trigger.request_groups.connect(lambda: seen.append("groups"))
 
     trigger._show_context_menu(QPoint(8, 8))
-    menu = trigger.findChildren(QMenu)[-1]
+    menu = _arrow_menu(trigger)
     qtbot.addWidget(menu)
     labels = [
         "---" if action.isSeparator() else action.text()
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-9:] == [
+    assert labels[-11:] == [
         "---",
         "Execute Groups",
         "Container Groups",
@@ -355,6 +405,8 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "Manage Container Groups",
         "---",
         "Exit",
+        "---",
+        "Color Schemes",
     ]
 
     trigger._action_add_group.trigger()
@@ -375,7 +427,7 @@ def test_show_groups_switch_sits_under_the_greeting_switch(qapp, qtbot):
     seen = []
     trigger.groups_toggled.connect(seen.append)
     trigger._show_context_menu(QPoint(8, 8))
-    menu = trigger.findChildren(QMenu)[-1]
+    menu = _arrow_menu(trigger)
     qtbot.addWidget(menu)
     names = [switch.text() for switch in menu.findChildren(ToggleSwitch)]
     assert names.index("Show execute groups") == names.index("Show greeting message") + 1

@@ -7,6 +7,8 @@ from PySide6.QtCore import Property, QPropertyAnimation, QEasingCurve, Qt, QSize
 from PySide6.QtGui import QPainter, QColor, QPen, QPalette
 from PySide6.QtWidgets import QAbstractButton
 
+from .theme import current
+
 
 class ToggleSwitch(QAbstractButton):
     """Sliding on/off toggle switch.
@@ -79,15 +81,15 @@ class ToggleSwitch(QAbstractButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         try:
-            # Colors matching the app's dark theme
+            scheme = current()
             if self.isChecked():
-                track_color = QColor(70, 110, 170)  # accent blue from hover
-                track_border = QColor(90, 130, 190)
+                track_color = QColor(*scheme.toggle_on)
+                track_border = QColor(*scheme.toggle_on_border)
             else:
-                track_color = QColor(70, 70, 75)
-                track_border = QColor(95, 95, 100)
+                track_color = QColor(*scheme.toggle_off)
+                track_border = QColor(*scheme.toggle_off_border)
 
-            knob_color = QColor(245, 245, 247)
+            knob_color = QColor(*scheme.toggle_knob)
 
             # Track (rounded pill)
             track_rect = QRect(
@@ -110,7 +112,7 @@ class ToggleSwitch(QAbstractButton):
             painter.drawEllipse(knob_rect)
 
             # Optional subtle inner ring on knob for polish
-            painter.setPen(QPen(QColor(200, 200, 205, 120), 1))
+            painter.setPen(QPen(QColor(*scheme.toggle_knob_ring), 1))
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(knob_rect.adjusted(2, 2, -2, -2))
 

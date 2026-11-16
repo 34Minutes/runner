@@ -37,8 +37,9 @@ from ..groups import (
     unselect_member,
 )
 from .add_dialog import AddEditDialog
-from .group_dialog import _DragGhost, _NameCell, _SELECTED_BG, _SELECTED_FG
+from .group_dialog import _DragGhost, _NameCell
 from .stay_on_top import StayOnTopDialog, warning
+from .theme import current
 from .toggle_switch import ToggleSwitch
 
 _NOTE = (
@@ -199,7 +200,7 @@ class ContainerDialog(StayOnTopDialog):
         item.setData(Qt.ItemDataRole.UserRole, launcher_id)
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         if member:
-            item.setBackground(QBrush(QColor(_SELECTED_BG)))
+            item.setBackground(QBrush(QColor(current().dialog_selected_bg)))
         return item
 
     def _name_widget(self, launcher, member: bool) -> _NameCell:
@@ -246,8 +247,9 @@ class ContainerDialog(StayOnTopDialog):
             cell.setStyleSheet("background: transparent;")
             box.setStyleSheet("background: transparent;")
             return
-        colour = QColor(_SELECTED_BG)
-        text = QColor(_SELECTED_FG)
+        scheme = current()
+        colour = QColor(scheme.dialog_selected_bg)
+        text = QColor(scheme.dialog_selected_fg)
         palette = cell.palette()
         palette.setColor(QPalette.ColorRole.Window, colour)
         palette.setColor(QPalette.ColorRole.Base, colour)
@@ -255,11 +257,11 @@ class ContainerDialog(StayOnTopDialog):
         palette.setColor(QPalette.ColorRole.Text, text)
         cell.setPalette(palette)
         box.setPalette(palette)
-        cell.setStyleSheet(f"background-color: {_SELECTED_BG};")
+        cell.setStyleSheet(f"background-color: {scheme.dialog_selected_bg};")
         if isinstance(box, QCheckBox):
             box.setStyleSheet(
                 "QCheckBox {"
-                f" color: {_SELECTED_FG};"
+                f" color: {scheme.dialog_selected_fg};"
                 " background-color: transparent;"
                 " font-weight: 600;"
                 "}"

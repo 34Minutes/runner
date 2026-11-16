@@ -27,6 +27,7 @@ from ..config import AppConfig, Launcher
 from ..moves import container_token, launcher_token, merge_visible_order
 from .launch_button import LaunchButton
 from .stay_on_top import mark_stay_on_top
+from .theme import frame_qss, ghost_qss, heading_qss, hint_qss, scroll_qss, search_qss, submenu_qss
 
 
 class SubmenuButton(QPushButton):
@@ -43,32 +44,11 @@ class SubmenuButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(28)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setStyleSheet(
-            """
-            QPushButton {
-                background-color: rgba(48, 52, 64, 210);
-                color: #eee;
-                border: 1px solid rgba(90, 100, 120, 180);
-                border-radius: 5px;
-                padding: 4px 10px;
-                text-align: left;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: rgba(70, 110, 170, 210);
-                border: 1px solid rgba(100, 140, 200, 220);
-            }
-            QPushButton[dragging="true"],
-            QPushButton[dragging="true"]:hover,
-            QPushButton[dragging="true"]:pressed {
-                background-color: rgba(70, 110, 170, 235);
-                border: 4px solid rgba(255, 220, 70, 240);
-                border-radius: 6px;
-                padding: 1px 7px;
-            }
-            """
-        )
+        self.apply_theme()
         self.setToolTip("Hover to open\nDrag up or down to reorder\nRight-click to edit or delete")
+
+    def apply_theme(self) -> None:
+        self.setStyleSheet(submenu_qss())
 
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
         self.hovered.emit(self.item_id)
@@ -109,16 +89,7 @@ class _RowGhost(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self._label = QLabel(self)
-        self._label.setStyleSheet(
-            "QLabel {"
-            " background-color: rgba(80, 120, 180, 235);"
-            " color: #eee;"
-            " border: 4px solid rgba(255, 220, 70, 240);"
-            " border-radius: 6px;"
-            " padding: 1px 7px;"
-            " font-size: 13px;"
-            "}"
-        )
+        self.apply_theme()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._label)
@@ -126,6 +97,9 @@ class _RowGhost(QWidget):
 
     def set_text(self, text: str) -> None:
         self._label.setText(text)
+
+    def apply_theme(self) -> None:
+        self._label.setStyleSheet(ghost_qss())
 
 
 class DropdownPanel(QWidget):
@@ -233,15 +207,7 @@ class DropdownPanel(QWidget):
         self._frame = QFrame(self)
         self._frame.setFrameShape(QFrame.Shape.StyledPanel)
         self._frame.setFrameShadow(QFrame.Shadow.Raised)
-        self._frame.setStyleSheet(
-            """
-            QFrame {
-                background-color: rgba(35, 35, 38, 245);
-                border: 1px solid rgba(80, 80, 85, 200);
-                border-radius: 8px;
-            }
-            """
-        )
+        self._frame.setStyleSheet(frame_qss())
 
         self._layout = QVBoxLayout(self._frame)
         self._layout.setContentsMargins(6, 6, 6, 6)
@@ -250,23 +216,12 @@ class DropdownPanel(QWidget):
         self._heading = QLabel(self._frame)
         self._heading.setObjectName("listHeading")
         self._heading.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._heading.setStyleSheet(
-            "QLabel#listHeading {"
-            " color: #b4b4ba;"
-            " font-size: 11px;"
-            " background: transparent;"
-            " border: none;"
-            " padding: 0px 2px 0px 2px;"
-            "}"
-        )
+        self._heading.setStyleSheet(heading_qss())
         self._heading.hide()
 
         self._search_edit = QLineEdit(self._frame)
         self._search_edit.setPlaceholderText("Filter launchers...")
-        self._search_edit.setStyleSheet(
-            "QLineEdit { background: rgba(25,25,28,200); color: #ddd; border: 1px solid rgba(70,70,75,180); border-radius: 4px; padding: 3px 6px; font-size: 12px; }"
-            "QLineEdit:focus { border: 1px solid rgba(90,120,180,200); }"
-        )
+        self._search_edit.setStyleSheet(search_qss())
         self._search_edit.textChanged.connect(self._apply_filter)
         self._search_edit.installEventFilter(self)
 
@@ -275,11 +230,7 @@ class DropdownPanel(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self._scroll.setStyleSheet(
-            "QScrollArea { background: transparent; border: none; }"
-            "QScrollBar:vertical { width: 6px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: rgba(120,120,125,160); border-radius: 3px; }"
-        )
+        self._scroll.setStyleSheet(scroll_qss())
 
         self._button_container = QWidget()
         self._button_container.setStyleSheet("background: transparent;")
@@ -479,6 +430,21 @@ class DropdownPanel(QWidget):
         """Recompute and apply the correct height for the current buttons (public)."""
         self._update_height_for_content()
 
+    def apply_theme(self) -> None:
+        """Restyle this list from the active color scheme. Open rows keep their state."""
+        self._frame.setStyleSheet(frame_qss())
+        self._heading.setStyleSheet(heading_qss())
+        self._search_edit.setStyleSheet(search_qss())
+        self._scroll.setStyleSheet(scroll_qss())
+        for widget in self._buttons:
+            restyle = getattr(widget, "apply_theme", None)
+            if restyle is not None:
+                restyle()
+            elif isinstance(widget, QLabel):
+                widget.setStyleSheet(hint_qss())
+        if self._ghost is not None:
+            self._ghost.apply_theme()
+
     def rebuild_buttons(self, launchers: list[Launcher]) -> None:
         """Replace all buttons with current enabled launchers."""
         self._cancel_drag()
@@ -519,7 +485,7 @@ class DropdownPanel(QWidget):
         # A blank hint means show nothing when the list is empty.
         if not launchers and not self._submenu_items and self._empty_hint.strip():
             hint = QLabel(self._empty_hint)
-            hint.setStyleSheet("color: #888; font-size: 11px; padding: 8px;")
+            hint.setStyleSheet(hint_qss())
             hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._button_layout.addWidget(hint)
             self._buttons.append(hint)  # type: ignore  # for cleanup
