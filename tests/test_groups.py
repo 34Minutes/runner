@@ -16,7 +16,7 @@ from runner.groups import (
     unselect_member,
 )
 from runner.ui.add_dialog import AddEditDialog
-from runner.ui.dropdown import DropdownPanel
+from runner.ui.dropdown import DropdownPanel, _HIDE_DECAY_MS
 from runner.ui.group_dialog import GroupDialog, _NOTE, _SELECTED_BG
 from runner.ui.group_manager import GroupManagerDialog
 from runner.ui.launch_button import LaunchButton
@@ -527,6 +527,34 @@ def test_showing_again_cancels_a_hide_that_is_already_running(qapp, qtbot):
     qtbot.wait(500)
     assert panel.isVisible() is True
     assert closed == []
+
+
+def test_close_decays_for_a_quarter_second_and_can_be_restored(qapp, qtbot):
+    cfg = AppConfig()
+    cfg.settings.animation_duration_ms = 180
+    panel = DropdownPanel(cfg, honor_pin=False)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new("Alpha", "a")])
+    panel.resize(220, 160)
+    panel.show()
+    qtbot.waitExposed(panel)
+    closed = []
+    panel.closed.connect(lambda: closed.append("closed"))
+
+    panel.start_show_animation()
+    assert panel._anims
+    assert {anim.duration() for anim in panel._anims} == {180}
+
+    panel.start_hide_animation()
+    assert panel.is_closing() is True
+    assert {anim.duration() for anim in panel._anims} == {_HIDE_DECAY_MS}
+    panel.cancel_close()
+    assert panel.is_closing() is False
+    assert panel.isVisible() is True
+    assert panel.windowOpacity() == 1.0
+    qtbot.wait(_HIDE_DECAY_MS + 80)
+    assert closed == []
+    assert panel.isVisible() is True
 
 
 def test_group_list_matches_the_main_view_and_reorders_groups_only(qapp, qtbot):

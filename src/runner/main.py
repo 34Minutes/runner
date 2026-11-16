@@ -405,9 +405,22 @@ def main() -> int:
         if execute_member_panel.isVisible():
             execute_member_panel.force_hide()
 
+    def _decay_submenu(panel: DropdownPanel) -> None:
+        """Fade a side list out. An instant hide is too fast to move onto."""
+        if panel.isVisible() and not panel.is_closing():
+            panel.start_hide_animation()
+
     def do_hide():
-        _hide_container_menu()
-        _hide_execute_menu()
+        if (
+            _pointer_over(dropdown)
+            or _pointer_over(group_panel)
+            or _pointer_over(container_panel)
+            or _pointer_over(execute_member_panel)
+            or _pointer_over(trigger)
+        ):
+            return
+        _decay_submenu(container_panel)
+        _decay_submenu(execute_member_panel)
         if showing_groups:
             group_panel.start_hide_animation()
             return
@@ -537,9 +550,15 @@ def main() -> int:
 
     def on_dropdown_enter():
         cancel_hide()
+        if dropdown.is_closing():
+            dropdown.cancel_close()
 
     def on_dropdown_leave():
-        if _pointer_over(container_panel) or _pointer_over(execute_member_panel):
+        if (
+            _pointer_over(group_panel)
+            or _pointer_over(container_panel)
+            or _pointer_over(execute_member_panel)
+        ):
             return
         _schedule_container_hide()
         if not cfg_mgr.config.settings.pinned_open:
@@ -548,10 +567,8 @@ def main() -> int:
     def on_group_enter():
         cancel_hide()
         execute_hide_timer.stop()
-        if showing_groups and group_panel.is_closing():
-            group_panel.start_show_animation()
-        elif not showing_groups and _show_groups_enabled() and group_panel.is_closing():
-            _show_groups_beside()
+        if group_panel.is_closing() and (showing_groups or _show_groups_enabled()):
+            group_panel.cancel_close()
 
     def on_group_leave():
         if _pointer_over(execute_member_panel):
@@ -653,11 +670,13 @@ def main() -> int:
                 and button.rect().contains(button.mapFromGlobal(QCursor.pos()))
             ):
                 return
-        _hide_container_menu()
+        _decay_submenu(container_panel)
 
     def on_container_enter():
         cancel_hide()
         container_hide_timer.stop()
+        if container_panel.is_closing():
+            container_panel.cancel_close()
 
     def on_container_leave():
         _schedule_container_hide()
@@ -756,11 +775,13 @@ def main() -> int:
                 and button.rect().contains(button.mapFromGlobal(QCursor.pos()))
             ):
                 return
-        _hide_execute_menu()
+        _decay_submenu(execute_member_panel)
 
     def on_execute_enter():
         cancel_hide()
         execute_hide_timer.stop()
+        if execute_member_panel.is_closing():
+            execute_member_panel.cancel_close()
 
     def on_execute_leave():
         _schedule_execute_hide()

@@ -85,6 +85,9 @@ _DRAG_THRESHOLD_PX = 10
 # that the row still feels under the pointer.
 _DRAG_LIFT_X = 8
 _DRAG_SLIDE_MS = 150
+# Close eases away for about a quarter second so the pointer can reach a
+# neighbouring list. Opening still uses Settings.animation_duration_ms.
+_HIDE_DECAY_MS = 250
 
 
 class _RowGhost(QWidget):
@@ -1445,6 +1448,23 @@ class DropdownPanel(QWidget):
         """True while a hide animation is committed to emitting closed."""
         return self._close_motion != 0 and self._close_motion == self._motion
 
+    def cancel_close(self) -> None:
+        """Stop a close already in progress and leave this list fully open.
+
+        Replaying the open animation would collapse the list under the pointer.
+        """
+        self._cancel_hide()
+        if not self.is_closing():
+            return
+        self._invalidate_motion()
+        self._close_motion = 0
+        self.setWindowOpacity(1.0)
+        self._frame.setMinimumHeight(0)
+        self._frame.setMaximumHeight(16777215)
+        self._update_height_for_content()
+        if self.isVisible():
+            self._place()
+
     def _invalidate_motion(self) -> int:
         """Stop show/hide animations. Their finish handlers then do nothing."""
         self._motion += 1
@@ -1561,13 +1581,13 @@ class DropdownPanel(QWidget):
         start_op = self.windowOpacity()
 
         anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(int(self._config.settings.animation_duration_ms * 0.7))
+        anim.setDuration(_HIDE_DECAY_MS)
         anim.setStartValue(start_op)
         anim.setEndValue(0.0)
         anim.setEasingCurve(QEasingCurve.Type.InCubic)
 
         height_anim = QPropertyAnimation(self._frame, b"minimumHeight", self)
-        height_anim.setDuration(int(self._config.settings.animation_duration_ms * 0.75))
+        height_anim.setDuration(_HIDE_DECAY_MS)
         height_anim.setStartValue(current_h)
         height_anim.setEndValue(6)
         height_anim.setEasingCurve(QEasingCurve.Type.InCubic)
@@ -1579,7 +1599,7 @@ class DropdownPanel(QWidget):
             curr_y = self.y()
             end_y = fixed_bottom - 6
             pos_anim = QPropertyAnimation(self, b"pos", self)
-            pos_anim.setDuration(int(self._config.settings.animation_duration_ms * 0.7))
+            pos_anim.setDuration(_HIDE_DECAY_MS)
             pos_anim.setStartValue(QPoint(self.x(), curr_y))
             pos_anim.setEndValue(QPoint(self.x(), end_y))
             pos_anim.setEasingCurve(QEasingCurve.Type.InCubic)

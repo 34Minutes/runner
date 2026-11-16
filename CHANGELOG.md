@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.7] - 2026-11-16
+
+### Changed
+- The main popup, the groups list, and a group's side list fade out over a quarter of a second when the pointer leaves. Moving onto a list while it is fading brings it back open. Opening is unchanged.
+
 ## [1.0.6] - 2026-11-13
 
 ### Added
