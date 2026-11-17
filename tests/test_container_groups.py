@@ -354,7 +354,7 @@ def test_manage_container_groups_deletes_the_group_and_keeps_its_launchers(
     assert dialog.windowTitle() == "Manage Container Groups"
     assert dialog._list.item(0).text() == "Folder  (1 launcher)"
     dialog._list.setCurrentRow(0)
-    with patch("runner.ui.container_manager.question", return_value=QMessageBox.StandardButton.Yes):
+    with patch("runner.ui.group_list_manager.question", return_value=QMessageBox.StandardButton.Yes):
         dialog._on_delete()
     assert dialog._list.count() == 0
     assert [item.name for item in mgr.config.launchers] == ["Alpha"]

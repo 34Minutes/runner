@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QActionGroup, QCursor, QMouseEvent, QPaintEve
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QWidget, QWidgetAction, QApplication
 import sys
 
-from ..config import AppConfig, Launcher
+from ..config import AppConfig
 from .opacity_dialog import OpacityDialog
 from .theme import SCHEMES, current, resolve, with_opacity
 from .toggle_switch import ToggleSwitch
@@ -204,6 +204,9 @@ class TriggerWidget(QWidget):
 
     hover_enter = Signal()
     hover_leave = Signal()
+    # While dragging, so the lists can follow the arrow. Not saved.
+    dragged = Signal(int, int)  # x, y
+    # Once, when a drag ends. This is the one to save.
     position_changed = Signal(int, int)  # x, y
     size_changed = Signal(int, int)  # w, h
     request_add = Signal()
@@ -232,6 +235,7 @@ class TriggerWidget(QWidget):
         super().__init__(parent)
         self._config = config
         self._dragging = False
+        self._drag_moved = False
         self._drag_offset = QPoint()
 
         self.setWindowFlags(
@@ -593,6 +597,7 @@ class TriggerWidget(QWidget):
                 event.accept()
             else:
                 self._dragging = True
+                self._drag_moved = False
                 self._drag_offset = event.globalPosition().toPoint() - self.pos()
                 event.accept()
         else:
@@ -603,15 +608,18 @@ class TriggerWidget(QWidget):
             self._perform_resize(event)
             event.accept()
         elif self._dragging and event.buttons() & Qt.MouseButton.LeftButton:
-            new_pos = event.globalPosition().toPoint() - self._drag_offset
-            # Optional: keep on screen (simple version, full multi-monitor later)
-            screen = QApplication.primaryScreen()
+            pointer = event.globalPosition().toPoint()
+            new_pos = pointer - self._drag_offset
+            # Keep the arrow on whichever screen the pointer is on.
+            screen = QApplication.screenAt(pointer) or self.screen() or QApplication.primaryScreen()
             if screen:
                 geo = screen.availableGeometry()
                 new_pos.setX(max(geo.left(), min(new_pos.x(), geo.right() - self.width())))
                 new_pos.setY(max(geo.top(), min(new_pos.y(), geo.bottom() - self.height())))
-            self.move(new_pos)
-            self.position_changed.emit(new_pos.x(), new_pos.y())
+            if new_pos != self.pos():
+                self.move(new_pos)
+                self._drag_moved = True
+                self.dragged.emit(new_pos.x(), new_pos.y())
             event.accept()
         else:
             self._update_resize_cursor(event.pos())
@@ -627,6 +635,9 @@ class TriggerWidget(QWidget):
                 event.accept()
             elif self._dragging:
                 self._dragging = False
+                if self._drag_moved:
+                    self._drag_moved = False
+                    self.position_changed.emit(self.x(), self.y())
                 event.accept()
             else:
                 super().mouseReleaseEvent(event)

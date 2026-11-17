@@ -6,8 +6,9 @@ Stores launchers and UI settings in a JSON file under the platform user config d
 from __future__ import annotations
 
 import json
-import os
+import shutil
 from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -91,10 +92,102 @@ class ContainerGroup:
         return cls(id=str(uuid4()), name=name, members=list(members or []))
 
 
-def _from_fields(cls, data: dict[str, Any]):
-    """Build a dataclass from JSON, ignoring keys this version does not know."""
-    known = {item.name for item in fields(cls)}
-    return cls(**{key: value for key, value in data.items() if key in known})
+class ConfigFormatError(ValueError):
+    """The config file is not a JSON object Runner can read at all."""
+
+
+# Field annotations are strings under `from __future__ import annotations`.
+_SCALAR_TYPES: dict[str, tuple[type, ...]] = {
+    "str": (str,),
+    "bool": (bool,),
+    "int": (int,),
+    "str | None": (str, type(None)),
+}
+
+
+def _type_ok(annotation: str, value: Any) -> bool:
+    allowed = _SCALAR_TYPES.get(annotation)
+    if allowed is None:
+        return True
+    # bool is a subclass of int. A JSON true must not pass as an int field.
+    if annotation == "int" and isinstance(value, bool):
+        return False
+    return isinstance(value, allowed)
+
+
+def _from_fields(
+    cls,
+    data: Any,
+    *,
+    label: str,
+    problems: list[str],
+    required: tuple[str, ...] = (),
+    skip: tuple[str, ...] = (),
+):
+    """Build a dataclass from JSON, ignoring keys this version does not know.
+
+    A required field that is missing or has the wrong type drops the whole
+    entry and returns None. Any other field with the wrong type falls back to
+    its default. Each problem is described in problems.
+    """
+    if not isinstance(data, dict):
+        problems.append(f"{label} is not an object and was skipped.")
+        return None
+    kwargs: dict[str, Any] = {}
+    for item in fields(cls):
+        if item.name in skip:
+            continue
+        if item.name not in data:
+            if item.name in required:
+                problems.append(f"{label} has no {item.name} and was skipped.")
+                return None
+            continue
+        value = data[item.name]
+        if _type_ok(str(item.type), value):
+            kwargs[item.name] = value
+        elif item.name in required:
+            problems.append(f"{label} has an invalid {item.name} and was skipped.")
+            return None
+        else:
+            problems.append(f"{label}: {item.name} had an invalid value and was reset.")
+    return cls(**kwargs)
+
+
+def _members_from(cls, raw: Any, *, label: str, problems: list[str]) -> list:
+    if not isinstance(raw, list):
+        if raw is not None:
+            problems.append(f"{label}: members was not a list and was cleared.")
+        return []
+    members = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw, start=1):
+        member = _from_fields(
+            cls,
+            entry,
+            label=f"{label}, member {index}",
+            problems=problems,
+            required=("launcher_id",),
+        )
+        if member is None or member.launcher_id in seen:
+            continue
+        seen.add(member.launcher_id)
+        members.append(member)
+    return members
+
+
+def _entry_label(kind: str, index: int, entry: Any) -> str:
+    name = entry.get("name") if isinstance(entry, dict) else None
+    if isinstance(name, str) and name:
+        return f"{kind} '{name}'"
+    return f"{kind} #{index}"
+
+
+def _list_of(data: dict[str, Any], key: str, problems: list[str]) -> list:
+    raw = data.get(key, [])
+    if isinstance(raw, list):
+        return raw
+    problems.append(f"'{key}' was not a list and was ignored.")
+    return []
 
 
 def _unique_known(ids: list[str], known: set[str]) -> set[str]:
@@ -169,31 +262,85 @@ class AppConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> AppConfig:
+    def from_dict(cls, data: Any, problems: list[str] | None = None) -> AppConfig:
+        """Build a config from parsed JSON.
+
+        Bad entries are skipped, not fatal. Each one is described in problems
+        when a list is passed. Raises ConfigFormatError only when data is not
+        a JSON object at all.
+        """
+        if problems is None:
+            problems = []
+        if not isinstance(data, dict):
+            raise ConfigFormatError("The config file does not contain a JSON object.")
         version = data.get("version", 1)
-        settings = _from_fields(Settings, data.get("settings", {}))
-        launchers = [_from_fields(Launcher, item) for item in data.get("launchers", [])]
-        groups = []
-        for item in data.get("groups", []):
-            members = [_from_fields(GroupMember, member) for member in item.get("members", [])]
-            show_contents = item.get("show_contents", False)
-            groups.append(
-                Group(
-                    id=item["id"],
-                    name=item.get("name", ""),
-                    members=members,
-                    show_contents=show_contents if isinstance(show_contents, bool) else False,
-                )
+        if not _type_ok("int", version):
+            version = 1
+        settings = _from_fields(
+            Settings, data.get("settings", {}), label="Settings", problems=problems
+        ) or Settings()
+
+        launchers: list[Launcher] = []
+        launcher_ids: set[str] = set()
+        for index, item in enumerate(_list_of(data, "launchers", problems), start=1):
+            label = _entry_label("Launcher", index, item)
+            launcher = _from_fields(
+                Launcher,
+                item,
+                label=label,
+                problems=problems,
+                required=("id", "name", "command"),
             )
-        container_groups = []
-        for item in data.get("container_groups", []):
-            members = [
-                _from_fields(ContainerMember, member) for member in item.get("members", [])
-            ]
-            container_groups.append(
-                ContainerGroup(id=item["id"], name=item.get("name", ""), members=members)
+            if launcher is None:
+                continue
+            if launcher.id in launcher_ids:
+                problems.append(f"{label} repeats an id that is already used and was skipped.")
+                continue
+            launcher_ids.add(launcher.id)
+            launchers.append(launcher)
+
+        groups: list[Group] = []
+        group_ids: set[str] = set()
+        for index, item in enumerate(_list_of(data, "groups", problems), start=1):
+            label = _entry_label("Execute group", index, item)
+            if isinstance(item, dict):
+                item = {"name": "", **item}
+            group = _from_fields(
+                Group, item, label=label, problems=problems, required=("id",), skip=("members",)
             )
-        main_order = [item for item in data.get("main_order", []) if isinstance(item, str)]
+            if group is None or group.id in group_ids:
+                continue
+            group_ids.add(group.id)
+            group.members = _members_from(
+                GroupMember, item.get("members"), label=label, problems=problems
+            )
+            groups.append(group)
+
+        container_groups: list[ContainerGroup] = []
+        container_ids: set[str] = set()
+        for index, item in enumerate(_list_of(data, "container_groups", problems), start=1):
+            label = _entry_label("Container group", index, item)
+            if isinstance(item, dict):
+                item = {"name": "", **item}
+            group = _from_fields(
+                ContainerGroup,
+                item,
+                label=label,
+                problems=problems,
+                required=("id",),
+                skip=("members",),
+            )
+            if group is None or group.id in container_ids:
+                continue
+            container_ids.add(group.id)
+            group.members = _members_from(
+                ContainerMember, item.get("members"), label=label, problems=problems
+            )
+            container_groups.append(group)
+
+        main_order = [
+            item for item in _list_of(data, "main_order", problems) if isinstance(item, str)
+        ]
         return cls(
             launchers=launchers,
             settings=settings,
@@ -215,6 +362,9 @@ class ConfigManager:
         self._config: AppConfig | None = None
         # True when this process loaded a config file that was already on disk.
         self.had_saved_config = False
+        # What the last load had to skip or reset, in words for the user.
+        # Empty when the file loaded cleanly.
+        self.load_problems: list[str] = []
 
     @property
     def config(self) -> AppConfig:
@@ -223,6 +373,7 @@ class ConfigManager:
         return self._config
 
     def load(self) -> AppConfig:
+        self.load_problems = []
         if not self.config_path.exists():
             self.had_saved_config = False
             cfg = self._create_default()
@@ -232,15 +383,29 @@ class ConfigManager:
         try:
             with self.config_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.had_saved_config = True
-            return AppConfig.from_dict(data)
-        except Exception:
-            # Corrupt or unreadable -> backup and recreate
-            self._backup_corrupt()
+            problems: list[str] = []
+            cfg = AppConfig.from_dict(data, problems)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            # json.JSONDecodeError and ConfigFormatError are ValueErrors.
+            # Nothing usable: keep the file aside and start fresh.
+            backup = self._backup(move=True)
+            where = f" It was moved to {backup}." if backup else ""
+            self.load_problems = [
+                f"The config file could not be read ({exc}).{where} Runner started with a new config."
+            ]
             self.had_saved_config = False
             cfg = self._create_default()
             self.save(cfg)
             return cfg
+
+        self.had_saved_config = True
+        if problems:
+            # The next save drops what was skipped. Keep the original first.
+            backup = self._backup(move=False)
+            if backup:
+                problems.append(f"The original file was copied to {backup}.")
+            self.load_problems = problems
+        return cfg
 
     def save(self, config: AppConfig | None = None) -> None:
         if config is None:
@@ -256,13 +421,26 @@ class ConfigManager:
         # Will be populated with seed data by the app on first run if empty
         return AppConfig()
 
-    def _backup_corrupt(self) -> None:
-        if self.config_path.exists():
-            backup = self.config_path.with_suffix(".json.bak")
-            try:
+    def _backup(self, *, move: bool) -> Path | None:
+        """Keep a dated copy of the config file. An earlier backup is never overwritten."""
+        if not self.config_path.exists():
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = self.config_path.with_name(f"{self.config_path.stem}.{stamp}.bak.json")
+        counter = 1
+        while backup.exists():
+            backup = self.config_path.with_name(
+                f"{self.config_path.stem}.{stamp}-{counter}.bak.json"
+            )
+            counter += 1
+        try:
+            if move:
                 self.config_path.replace(backup)
-            except Exception:
-                pass
+            else:
+                shutil.copy2(self.config_path, backup)
+        except OSError:
+            return None
+        return backup
 
     def get_enabled_launchers(self) -> list[Launcher]:
         return [l for l in self.config.launchers if l.enabled]
@@ -278,9 +456,21 @@ class ConfigManager:
         ]
 
     def reload(self) -> AppConfig:
-        """Force re-read from disk (useful after external edit)."""
-        self._config = None
-        return self.config
+        """Re-read the file from disk, after an external edit.
+
+        The widgets hold the AppConfig object itself. The new values are copied
+        into that same object so every holder sees them, not a stale copy.
+        """
+        current = self._config
+        fresh = self.load()
+        if current is None:
+            self._config = fresh
+            return fresh
+        for item in fields(AppConfig):
+            setattr(current, item.name, getattr(fresh, item.name))
+        # load() may have saved a default config, which points _config at it.
+        self._config = current
+        return current
 
     def add_launcher(self, launcher: Launcher) -> None:
         self.config.launchers.append(launcher)

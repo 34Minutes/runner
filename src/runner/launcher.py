@@ -1,10 +1,12 @@
 """Launching logic for configured items.
 
 Supports:
-- Plain executables / commands ("calc", "notepad")
-- Full paths to .exe / .bat / etc.
-- Python scripts (.py) - uses Windows 'py' launcher when appropriate
-- URLs / protocols (http, mailto, ms-*, etc.) via shell
+- Plain executables / commands ("calc", "notepad", "python3 tool.py")
+- Full paths to .exe / .bat / scripts, including paths with spaces
+- Python scripts (.py) - Windows 'py' launcher, otherwise a real Python
+  interpreter (never the frozen Runner binary)
+- URLs / protocols (http, mailto, ms-*, etc.) via the OS
+- macOS apps by .app path or by display name ("Brave Browser")
 - Working directory
 - Arguments
 - (Windows) Run as administrator
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,13 +35,110 @@ def _is_url_or_protocol(cmd: str) -> bool:
 
 
 def _is_python_script(cmd: str) -> bool:
-    p = Path(cmd).expanduser()
-    return p.suffix.lower() == ".py" or (not p.is_absolute() and cmd.lower().endswith(".py"))
+    return Path(cmd).suffix.lower() == ".py"
 
 
 def _expand_command(command: str) -> str:
     """Expand ~ and environment variables in the command portion."""
     return os.path.expandvars(os.path.expanduser(command))
+
+
+def _expand_arg(arg: str) -> str:
+    """A leading ~ means the home folder, as it would in a shell."""
+    return os.path.expanduser(arg) if arg.startswith("~") else arg
+
+
+def _split(text: str) -> list[str]:
+    """Split a command line into words.
+
+    Windows paths use backslashes, which POSIX splitting treats as escapes.
+    There, split without escapes and drop the quotes around each word.
+    """
+    if sys.platform == "win32":
+        parts = shlex.split(text, posix=False)
+        return [
+            part[1:-1] if len(part) >= 2 and part[0] == part[-1] == '"' else part
+            for part in parts
+        ]
+    return shlex.split(text)
+
+
+def _command_words(command: str) -> list[str]:
+    """The program and any words typed after it in the Command field.
+
+    A command that names an existing file is one word, spaces included, so a
+    path chosen with Browse... always works. Otherwise the field is split like
+    a shell would, so "python3 tool.py" runs python3 with tool.py.
+    """
+    if Path(command).exists():
+        return [command]
+    try:
+        words = _split(command)
+    except ValueError:
+        # Unbalanced quotes. Treat the whole field as the program.
+        return [command]
+    return words or [command]
+
+
+# Set inside the packaged app so Runner finds its own bundled Qt. A program
+# Runner starts must not inherit them: another Qt program would load Runner's
+# Qt next to its own and abort.
+_BUNDLE_ONLY_VARS = ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH")
+# PyInstaller replaces these and keeps the user's value in <NAME>_ORIG.
+_PYINSTALLER_RESTORED_VARS = ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH")
+
+
+def _child_env() -> dict[str, str] | None:
+    """The environment for a launched program. None means inherit as is.
+
+    From source, Runner's environment is the user's, so it is passed on
+    unchanged. From the packaged app, the bundle's own settings are removed.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    env = dict(os.environ)
+    for name in _BUNDLE_ONLY_VARS:
+        env.pop(name, None)
+    for name in _PYINSTALLER_RESTORED_VARS:
+        original = env.pop(f"{name}_ORIG", None)
+        if original is not None:
+            env[name] = original
+        else:
+            env.pop(name, None)
+    return env
+
+
+def _python_interpreter() -> list[str]:
+    """A Python that can run a user script.
+
+    Inside a PyInstaller build sys.executable is the Runner binary itself,
+    so look for a Python on PATH instead.
+    """
+    if sys.platform == "win32":
+        return ["py", "-3"]
+    if not getattr(sys, "frozen", False):
+        return [sys.executable]
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if found:
+            return [found]
+    raise FileNotFoundError(
+        "No Python interpreter was found on PATH to run this script. "
+        "Install Python 3, or set the command to the full path of python3."
+    )
+
+
+def _is_mac_app(command: str, words: Sequence[str]) -> bool:
+    """True when the command names a macOS app rather than a program.
+
+    A .app bundle path counts. So does a name like "Calculator" or
+    "Brave Browser" whose first word is not a command on PATH.
+    """
+    if command.rstrip("/").lower().endswith(".app"):
+        return True
+    if Path(command).exists() or "/" in command:
+        return False
+    return shutil.which(words[0]) is None
 
 
 def launch(launcher: Launcher) -> subprocess.Popen | None:
@@ -52,149 +152,83 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
         raise ValueError("Empty command")
 
     args_str = launcher.args.strip() if launcher.args else ""
-    args_list: list[str] = shlex.split(args_str) if args_str else []
+    args_list = [_expand_arg(arg) for arg in _split(args_str)] if args_str else []
 
     cwd = None
     if launcher.working_dir:
         cwd = os.path.expandvars(os.path.expanduser(launcher.working_dir))
         if cwd and not Path(cwd).exists():
             cwd = None  # fall back
+    env = _child_env()
 
     # URL / protocol / registered shell command -> let the OS handle it
     if _is_url_or_protocol(command):
-        # os.startfile works great on Windows for this; on other OS use xdg-open/open
         if sys.platform == "win32":
             os.startfile(command)  # type: ignore[attr-defined]
             return None
-        else:
-            opener = "open" if sys.platform == "darwin" else "xdg-open"
-            return subprocess.Popen([opener, command], cwd=cwd)
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        return subprocess.Popen([opener, command], cwd=cwd, env=env)
 
-    # macOS: support launching apps by .app bundle path or by name (e.g. "Brave Browser")
-    # This is the standard/reliable way to open macOS GUI apps with arguments.
-    if sys.platform == "darwin":
-        cmd_lower = command.lower()
-        is_app = (
-            cmd_lower.endswith(".app") or
-            " " in command or  # typical for app display names like "Brave Browser"
-            ("/" not in command and not Path(command).exists())
-        )
-        if is_app:
-            # Standard macOS way to open an app (by name or .app path) with arguments/URLs.
-            # For plain URLs: open -a "Brave Browser" https://x.com
-            # For command-line flags: open -a "Brave Browser" --args --incognito https://x.com
-            open_args = ["open", "-a", command]
-            if args_list:
-                if any(a.startswith("--") for a in args_list):
-                    open_args.append("--args")
-                open_args.extend(args_list)
-            return subprocess.Popen(open_args, cwd=cwd)
+    words = _command_words(command)
 
-    # Build the argv
-    if _is_python_script(command) and not command.lower().startswith(("python", "py ")):
-        # Try to use the Windows Python launcher if available, else fall back to sys.executable
-        if sys.platform == "win32":
-            # 'py' is the preferred PEP 397 launcher on Windows
-            argv: list[str] = ["py", "-3", command] + args_list
-        else:
-            argv = [sys.executable, command] + args_list
+    if _is_python_script(words[0]):
+        argv = _python_interpreter() + words + args_list
+    elif sys.platform == "darwin" and _is_mac_app(command, words):
+        # open -a "Brave Browser" https://x.com
+        # open -a "Brave Browser" --args --incognito https://x.com
+        open_args = ["open", "-a", command]
+        if args_list:
+            if any(arg.startswith("-") for arg in args_list):
+                open_args.append("--args")
+            open_args.extend(args_list)
+        return subprocess.Popen(open_args, cwd=cwd, env=env)
     else:
-        # Command is the program/executable (can contain spaces, e.g. "C:\Program Files\Brave...\brave.exe"
-        # from the Browse button). Additional arguments come from the Parameters field.
-        argv = [command] + args_list
+        argv = words + args_list
 
-    # Creation flags for console visibility (Windows)
-    creationflags = 0
-    if sys.platform == "win32":
-        if launcher.show_console:
-            creationflags = subprocess.CREATE_NEW_CONSOLE
-        else:
-            creationflags = subprocess.CREATE_NO_WINDOW
+    if sys.platform != "win32":
+        return subprocess.Popen(argv, cwd=cwd, env=env)
 
-    popen_kwargs: dict = {
-        "cwd": cwd,
-        "env": os.environ.copy(),
-    }
-
-    if sys.platform == "win32":
-        popen_kwargs["creationflags"] = creationflags
-
-    # Run as admin (Windows only)
-    if launcher.run_as_admin and sys.platform == "win32":
+    if launcher.run_as_admin:
         return _launch_as_admin_windows(argv, cwd)
 
-    # Normal launch on Windows: use shell=True so that bare commands like "calc", "brave", "explorer"
-    # and commands with args (including URLs for browsers) resolve the same way as the Run dialog
-    # via App Paths / shell associations.
-    if sys.platform == "win32":
-        is_python_wrapped = bool(argv) and argv[0].lower() in ("py", "python", "pythonw")
-        if launcher.show_console and is_python_wrapped:
-            # For python scripts with show_console, use Popen + CREATE_NEW_CONSOLE so output console appears
-            cmdline = subprocess.list2cmdline(argv)
-            return subprocess.Popen(
-                cmdline, shell=True, cwd=cwd,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-                env=os.environ.copy()
-            )
-        cmdline = subprocess.list2cmdline(argv)
-        popen_kwargs = {
-            "shell": True,
-            "cwd": cwd,
-            "env": os.environ.copy(),
-        }
-        if launcher.show_console:
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-        else:
-            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        return subprocess.Popen(cmdline, **popen_kwargs)
-    else:
-        return subprocess.Popen(argv, **popen_kwargs)
+    # Normal launch on Windows: shell=True so that bare commands like "calc",
+    # "brave", "explorer" resolve the same way as the Run dialog, via App
+    # Paths and shell associations.
+    creationflags = (
+        subprocess.CREATE_NEW_CONSOLE if launcher.show_console else subprocess.CREATE_NO_WINDOW
+    )
+    return subprocess.Popen(
+        subprocess.list2cmdline(argv),
+        shell=True,
+        cwd=cwd,
+        env=env,
+        creationflags=creationflags,
+    )
 
 
-def _shell_execute(command: str, params: str | None = None, cwd: str | None = None, show: int = 1) -> None:
-    """Launch using ShellExecuteW. Used for "Run as administrator" and as fallback.
-    For normal launches we use subprocess + shell=True to reliably support
-    user-specified executables (with spaces) + arguments (e.g. browser + URL).
+def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> None:
+    """Use ShellExecute with the runas verb, which shows the UAC prompt.
+
+    There is no process handle on this path. A failure, including a declined
+    UAC prompt, raises OSError so the caller can report it.
     """
     import ctypes
 
-    ctypes.windll.shell32.ShellExecuteW(
-        None,           # hwnd
-        "open",         # verb
-        command,
-        params,
-        cwd,
-        show,           # nShowCmd: 1=SW_SHOWNORMAL, 3=SW_MAXIMIZE, etc.
-    )
-
-
-def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> subprocess.Popen | None:
-    """Use ShellExecute to launch elevated. Returns None (no Popen handle in this path)."""
-    import ctypes
-    from ctypes import wintypes
-
-    # Join argv for ShellExecute (it takes a single command line string better for runas)
-    # We quote arguments properly
-    cmd_line = " ".join(
-        f'"{a}"' if " " in a and not (a.startswith('"') and a.endswith('"')) else a for a in argv
-    )
-
-    # ShellExecuteW(hwnd, verb, file, params, dir, show)
-    # verb="runas" triggers UAC
-    ctypes.windll.shell32.ShellExecuteW(
+    params = subprocess.list2cmdline(list(argv[1:])) if len(argv) > 1 else None
+    result = ctypes.windll.shell32.ShellExecuteW(
         None,
         "runas",
         argv[0],
-        " ".join(argv[1:]) if len(argv) > 1 else None,
+        params,
         cwd or None,
         1,  # SW_SHOWNORMAL
     )
-    # We don't get a handle back easily; success is indicated if no error dialog appeared.
-    # For now we treat it as fire-and-forget.
+    # ShellExecuteW returns a value greater than 32 on success.
+    if int(result) <= 32:
+        raise OSError(f"Could not start '{argv[0]}' as administrator (error {int(result)}).")
     return None
 
 
 def get_default_icon_for_launcher(launcher: Launcher) -> str | None:
     """Placeholder for future platform-specific icon extraction (Windows .exe icons etc.)."""
-    # On Windows we can later use win32com or Qt's QFileIconProvider
     return None

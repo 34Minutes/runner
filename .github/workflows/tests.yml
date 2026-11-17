@@ -1,0 +1,31 @@
+name: Tests
+
+# Runs the test suite on every push and pull request, on the two supported
+# platforms. The build workflows stay manual (workflow_dispatch).
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        # Only what the tests need; the bundlers in .[dev] are not.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . "pytest>=8.0" "pytest-qt>=4.4"
+
+      - name: Run tests
+        run: python -m pytest -q --capture=sys

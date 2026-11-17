@@ -78,11 +78,11 @@ Give clients a bundled app. PyInstaller is the supported bundler. `runner.spec` 
 **macOS**
 
 ```bash
-source .venv/bin/activate
-./scripts/build-mac.sh
+./scripts/build-mac.sh            # test, then build
+./scripts/build-mac.sh --deploy   # also install to /Applications and start it
 ```
 
-That writes `dist/Runner.app` and `dist/Runner.dmg`. `dist/` is gitignored. An unsigned build will warn in Gatekeeper on first open. Right-click the app and choose Open, or approve it in System Settings → Privacy & Security.
+It runs the tests first (`--skip-tests` to skip them), then writes `dist/Runner.app` and `dist/Runner.dmg`. It works from any folder. `--deploy` quits a running installed Runner, replaces `/Applications/Runner.app`, and opens the new one. The version comes from `pyproject.toml`; the build stops if `src/runner/__init__.py` disagrees. `dist/` is gitignored. An unsigned build will warn in Gatekeeper on first open. Right-click the app and choose Open, or approve it in System Settings → Privacy & Security.
 
 **Windows**
 
@@ -126,7 +126,7 @@ The bundled app still stores config in the user config directory above.
 
 ## Development notes
 
-The interface is PySide6. Hover, pin, and list layout are the fragile parts. Windows-only launch behavior (run as administrator, show a console, the startup registry entry, and the single-instance mutex) lives in `launcher.py` and `src/runner/utils/windows.py`.
+The interface is PySide6. `main.py` starts Qt and the single-instance check, then `RunnerController` in `controller.py` owns the arrow, the four lists, the dialogs, and the tray. Hover, pin, and list layout are the fragile parts. Windows-only launch behavior (run as administrator, show a console, the startup registry entry, and the single-instance mutex) lives in `launcher.py` and `src/runner/utils/windows.py`.
 
 ## Roadmap
 

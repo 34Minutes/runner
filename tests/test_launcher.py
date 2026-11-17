@@ -184,6 +184,8 @@ def test_launch_run_as_admin_windows_body_covered():
          patch.dict("sys.modules", {"ctypes": fake_ctypes}):
         mock_sub.CREATE_NEW_CONSOLE = 0x10
         mock_sub.CREATE_NO_WINDOW = 0x08000000
+        # ShellExecuteW returns a value above 32 on success.
+        fake_ctypes.windll.shell32.ShellExecuteW.return_value = 42
         l = Launcher.new("AdminTask", "cmd.exe", run_as_admin=True)
         res = launcher_mod.launch(l)
         assert res is None
@@ -191,9 +193,115 @@ def test_launch_run_as_admin_windows_body_covered():
         assert fake_ctypes.windll.shell32.ShellExecuteW.called
 
 
-def test_shell_execute_helper_body():
-    """Directly hit _shell_execute lines (used by admin fallback path). Inner import mocked via sys.modules."""
+def test_run_as_admin_failure_raises():
+    """A declined UAC prompt or a missing file is reported, not silently dropped."""
     fake_ctypes = MagicMock()
+    fake_ctypes.windll.shell32.ShellExecuteW.return_value = 5  # SE_ERR_ACCESSDENIED
     with patch.dict("sys.modules", {"ctypes": fake_ctypes}):
-        launcher_mod._shell_execute("notepad", "--foo", cwd=None, show=1)
-        assert fake_ctypes.windll.shell32.ShellExecuteW.called
+        with pytest.raises(OSError):
+            launcher_mod._launch_as_admin_windows(["tool.exe"], None)
+
+
+def test_run_as_admin_quotes_arguments_with_spaces():
+    fake_ctypes = MagicMock()
+    fake_ctypes.windll.shell32.ShellExecuteW.return_value = 42
+    with patch.dict("sys.modules", {"ctypes": fake_ctypes}):
+        launcher_mod._launch_as_admin_windows(["tool.exe", "C:\\My Files\\a.txt", "-v"], None)
+    params = fake_ctypes.windll.shell32.ShellExecuteW.call_args[0][3]
+    assert params == '"C:\\My Files\\a.txt" -v'
+
+
+# --- Command routing on macOS and POSIX ---
+
+@patch("runner.launcher.subprocess.Popen")
+def test_darwin_cli_command_on_path_runs_directly(mock_popen):
+    """A command found on PATH is a program, not an app name for open -a."""
+    with patch("sys.platform", "darwin"), \
+         patch("runner.launcher.shutil.which", return_value="/usr/bin/say"):
+        launcher_mod.launch(Launcher.new("Say", "say", args="hello"))
+    assert mock_popen.call_args[0][0] == ["say", "hello"]
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_darwin_app_name_uses_open_a(mock_popen):
+    with patch("sys.platform", "darwin"), \
+         patch("runner.launcher.shutil.which", return_value=None):
+        launcher_mod.launch(Launcher.new("Brave", "Brave Browser", args="https://x.com"))
+    assert mock_popen.call_args[0][0] == ["open", "-a", "Brave Browser", "https://x.com"]
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_darwin_app_bundle_path_uses_open_a(mock_popen):
+    with patch("sys.platform", "darwin"):
+        launcher_mod.launch(Launcher.new("Brave", "/Applications/Brave Browser.app"))
+    assert mock_popen.call_args[0][0] == ["open", "-a", "/Applications/Brave Browser.app"]
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_existing_path_with_spaces_is_one_word(mock_popen, tmp_path):
+    script = tmp_path / "My Scripts" / "run.sh"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\n")
+    with patch("sys.platform", "darwin"):
+        launcher_mod.launch(Launcher.new("Run", str(script), args="--fast"))
+    assert mock_popen.call_args[0][0] == [str(script), "--fast"]
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_command_field_is_split_into_words(mock_popen):
+    """'python3 tool.py' runs python3 with tool.py, not a program named 'python3 tool.py'."""
+    with patch("sys.platform", "linux"):
+        launcher_mod.launch(Launcher.new("Tool", "python3 tool.py", args="-x"))
+    argv = mock_popen.call_args[0][0]
+    assert argv[0] == "python3"
+    assert argv[-2:] == ["tool.py", "-x"]
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_frozen_build_runs_scripts_with_python_from_path(mock_popen):
+    """In the packaged app sys.executable is Runner itself, so it must not run the script."""
+    with patch("sys.platform", "darwin"), \
+         patch("runner.launcher.sys.frozen", True, create=True), \
+         patch("runner.launcher.shutil.which", return_value="/usr/local/bin/python3"):
+        launcher_mod.launch(Launcher.new("Script", "/tmp/tool.py"))
+    assert mock_popen.call_args[0][0] == ["/usr/local/bin/python3", "/tmp/tool.py"]
+
+
+def test_frozen_build_without_python_raises():
+    with patch("sys.platform", "darwin"), \
+         patch("runner.launcher.sys.frozen", True, create=True), \
+         patch("runner.launcher.shutil.which", return_value=None):
+        with pytest.raises(FileNotFoundError):
+            launcher_mod.launch(Launcher.new("Script", "/tmp/tool.py"))
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_packaged_app_does_not_pass_its_qt_paths_on(mock_popen, monkeypatch):
+    """A Qt program started from Runner.app must not load Runner's bundled Qt."""
+    monkeypatch.setenv("QT_PLUGIN_PATH", "/Applications/Runner.app/Contents/Frameworks/PySide6/Qt/plugins")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEIxyz")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/local/lib")
+    monkeypatch.setenv("HOME_MARKER", "kept")
+    with patch("sys.platform", "linux"), \
+         patch("runner.launcher.sys.frozen", True, create=True):
+        launcher_mod.launch(Launcher.new("Tool", "echo"))
+    env = mock_popen.call_args[1]["env"]
+    assert "QT_PLUGIN_PATH" not in env
+    assert env["LD_LIBRARY_PATH"] == "/usr/local/lib"
+    assert "LD_LIBRARY_PATH_ORIG" not in env
+    assert env["HOME_MARKER"] == "kept"
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_source_run_passes_environment_unchanged(mock_popen):
+    with patch("sys.platform", "linux"):
+        launcher_mod.launch(Launcher.new("Tool", "echo"))
+    assert mock_popen.call_args[1]["env"] is None
+
+
+@patch("runner.launcher.subprocess.Popen")
+def test_tilde_in_args_is_expanded(mock_popen):
+    with patch("sys.platform", "darwin"), \
+         patch("runner.launcher.shutil.which", return_value=None):
+        launcher_mod.launch(Launcher.new("Finder", "Finder", args="~"))
+    assert mock_popen.call_args[0][0][-1] == os.path.expanduser("~")

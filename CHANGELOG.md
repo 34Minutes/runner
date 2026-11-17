@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.10] - 2026-11-17
+
+### Changed
+- A config file with a bad entry no longer resets everything. Bad launchers and groups are skipped, a setting with the wrong type goes back to its default, and Runner lists what it skipped. The original file is copied to `config.<date>.bak.json` first. A file that cannot be read at all is moved to a dated backup, and earlier backups are never overwritten.
+- The arrow's position is saved when a drag ends, not on every mouse move.
+- `scripts/build-mac.sh` works from any folder, runs the tests first, takes its version from `pyproject.toml`, and installs to `/Applications` with `--deploy`. A test workflow runs the suite on macOS and Windows on every push.
+- Internal: the window wiring moved from one long `main()` function into `RunnerController` (`controller.py`). The execute-group and container-group screens share one base dialog, and so do their manager screens.
+
+### Fixed
+- **Reload config** applies everything in the file. The arrow and the lists were still reading the settings from before the reload, so Pin and the menu switches stopped matching.
+- On macOS, a command on PATH (`say`, `python3`, `code`) runs as a program. It was sent to `open -a` as an app name. A path with spaces is no longer mistaken for an app name either.
+- The Command field can hold a program and its arguments, such as `python3 tool.py`.
+- A `.py` launcher in the packaged app runs with Python. It started a second copy of Runner instead.
+- **Run as administrator** quotes arguments that contain spaces, and reports a failure or a declined UAC prompt.
+- A `~` argument, such as the Finder sample's, opens the home folder.
+- The arrow can be dragged onto any monitor. It was held to the primary screen.
+- Programs started from the packaged Runner no longer inherit its internal `QT_PLUGIN_PATH`. A terminal opened from Runner passed that on, and any Qt program run from it crashed while loading two copies of Qt.
+
 ## [1.0.9] - 2026-11-17
 
 ### Changed

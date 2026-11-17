@@ -362,7 +362,7 @@ def test_manage_groups_deletes_the_group_and_keeps_its_launchers(qapp, qtbot, tm
     assert dialog.windowTitle() == "Manage Execute Groups"
     assert dialog._list.item(0).text() == "Class  (1 launcher)"
     dialog._list.setCurrentRow(0)
-    with patch("runner.ui.group_manager.question", return_value=QMessageBox.StandardButton.Yes):
+    with patch("runner.ui.group_list_manager.question", return_value=QMessageBox.StandardButton.Yes):
         dialog._on_delete()
     assert dialog._list.count() == 0
     assert [item.name for item in mgr.config.launchers] == ["Alpha"]
@@ -544,7 +544,7 @@ def test_add_new_launcher_appears_unchecked_for_the_group(qapp, tmp_path, monkey
         def exec(self):
             return True
 
-    with patch("runner.ui.group_dialog.AddEditDialog", return_value=_FakeDialog()):
+    with patch("runner.ui.member_dialog.AddEditDialog", return_value=_FakeDialog()):
         dialog._on_add_launcher()
     assert dialog.display_ids() == [existing.id, created.id]
     assert dialog._selected == []

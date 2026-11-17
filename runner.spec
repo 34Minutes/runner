@@ -208,6 +208,18 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 APP_NAME = "Runner"
 
+
+def _project_version() -> str:
+    """The one version number, from pyproject.toml."""
+    text = Path("pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if match is None:
+        raise SystemExit("runner.spec: no version found in pyproject.toml")
+    return match.group(1)
+
+
+VERSION = _project_version()
+
 exe_kwargs = dict(
     debug=False,
     bootloader_ignore_signals=False,
@@ -263,13 +275,13 @@ else:
             coll,
             name="Runner.app",
             icon=None,
-            bundle_identifier="com.douglie.runner",
+            bundle_identifier="com.dougie.runner",
             info_plist={
                 "LSUIElement": True,
                 "CFBundleName": "Runner",
                 "CFBundleDisplayName": "Runner",
-                "CFBundleShortVersionString": "1.0.9",
-                "CFBundleVersion": "1.0.9",
+                "CFBundleShortVersionString": VERSION,
+                "CFBundleVersion": VERSION,
                 "NSHighResolutionCapable": True,
             },
         )
