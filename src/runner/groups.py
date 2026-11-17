@@ -9,7 +9,8 @@ Example: item 1 unmarked, items 2-5 concurrent, items 6-10 unmarked.
     [1] then [2, 3, 4, 5] together, then [6], [7], [8], [9], [10]
 
 Steps are separated by GROUP_STEP_GAP_MS. Members inside one step start
-immediately, in list order. Disabled launchers and missing ids are skipped.
+immediately, in list order. Missing ids are skipped. A launcher hidden from
+the main popup still runs.
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ def execution_steps(group: Group, launchers: Sequence[Launcher]) -> list[list[La
 
     for member in group.members:
         launcher = by_id.get(member.launcher_id)
-        if launcher is None or not launcher.enabled:
+        if launcher is None:
             continue
         if member.concurrent:
             batch.append(launcher)

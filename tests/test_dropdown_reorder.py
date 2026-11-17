@@ -10,7 +10,7 @@ from runner.ui.launch_button import LaunchButton
 
 
 def test_merge_keeps_disabled_and_filtered_rows():
-    # A and C are the visible rows. B is disabled. D is enabled but filtered out.
+    # A and C are the visible rows. B is off the main list. D is on it but filtered out.
     entries = [("A", True), ("B", False), ("D", False), ("C", True)]
     assert merge_visible_order(entries, ["C", "A"]) == ["C", "B", "D", "A"]
     assert merge_visible_order(entries, ["A", "C"]) == ["A", "B", "D", "C"]
@@ -51,7 +51,7 @@ def test_drag_reorders_without_launching(qapp, qtbot):
     panel = DropdownPanel(cfg)
     qtbot.addWidget(panel)
     alpha = Launcher.new("Alpha", "a")
-    hidden = Launcher.new("Hidden", "h", enabled=False)
+    hidden = Launcher.new("Hidden", "h", show_in_main=False)
     beta = Launcher.new("Beta", "b")
     gamma = Launcher.new("Gamma", "g")
     cfg.launchers = [alpha, hidden, beta, gamma]

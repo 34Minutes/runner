@@ -34,10 +34,9 @@ from .config import (
     Group,
     Launcher,
 )
-from .containers import submenu_launchers
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .launcher import launch
-from .moves import enabled_member_launchers, visible_main_tokens
+from .moves import member_launchers, visible_main_tokens
 from .ui.add_dialog import AddEditDialog
 from .ui.container_dialog import ContainerDialog
 from .ui.container_manager import ContainerManagerDialog
@@ -778,7 +777,7 @@ class RunnerController:
         panel.cancel_hide()
         if already:
             return
-        panel.rebuild_buttons(submenu_launchers(group, self.cfg.config.launchers))
+        panel.rebuild_buttons(member_launchers(group.members, self.cfg.config.launchers))
         if panel.isVisible() and not panel.is_closing():
             panel.ensure_visible_and_sized()
         else:
@@ -811,7 +810,7 @@ class RunnerController:
         panel.cancel_hide()
         if already:
             return
-        panel.rebuild_buttons(enabled_member_launchers(group.members, self.cfg.config.launchers))
+        panel.rebuild_buttons(member_launchers(group.members, self.cfg.config.launchers))
         if panel.isVisible() and not panel.is_closing():
             panel.ensure_visible_and_sized()
         else:
@@ -990,7 +989,7 @@ class RunnerController:
             stay_on_top_warning(
                 self.trigger,
                 "Nothing to launch",
-                f"'{group.name}' has no enabled launchers.",
+                f"'{group.name}' has no launchers.",
             )
             return
         errors: list[str] = []

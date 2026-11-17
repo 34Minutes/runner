@@ -3,14 +3,13 @@
 Dragging inside one menu only reorders that menu. Dragging onto a different
 menu takes the launcher out of the source menu and inserts it in the destination.
 A launcher that leaves the main popup is hidden from it. A launcher dropped on
-the main popup is shown there. That choice is the same one Include in dropdown
-list writes, so every container membership agrees.
+the main popup is shown there. That is the launcher's show_in_main flag, the
+same one Include in dropdown list writes.
 """
 
 from __future__ import annotations
 
 from .config import AppConfig, ContainerMember, GroupMember, Launcher
-from .containers import set_shown_in_main_menu, shown_in_main_menu
 
 MAIN = "main"
 
@@ -89,7 +88,7 @@ def visible_main_tokens(config: AppConfig) -> list[str]:
     shown = missing_containers + shown
     for launcher in config.launchers:
         token = launcher_token(launcher.id)
-        if token not in seen_shown and shown_in_main_menu(launcher, config.container_groups):
+        if token not in seen_shown and launcher.show_in_main:
             shown.append(token)
     return shown
 
@@ -125,15 +124,13 @@ def reorder_members(members: list, ordered_ids: list[str]) -> list:
     return ordered
 
 
-def enabled_member_launchers(members: list, launchers: list[Launcher]) -> list[Launcher]:
-    """Enabled launchers in member order."""
+def member_launchers(members: list, launchers: list[Launcher]) -> list[Launcher]:
+    """The launchers of a container or execute group, in member order.
+
+    Launchers hidden from the main popup are included. Missing ids are skipped.
+    """
     by_id = {launcher.id: launcher for launcher in launchers}
-    found: list[Launcher] = []
-    for member in members:
-        launcher = by_id.get(member.launcher_id)
-        if launcher is not None and launcher.enabled:
-            found.append(launcher)
-    return found
+    return [by_id[member.launcher_id] for member in members if member.launcher_id in by_id]
 
 
 def move_launcher(
@@ -174,7 +171,7 @@ def move_launcher(
         source_member = _member(source_group.members if source_group else [], launcher.id)
         source_concurrent = bool(source_member and source_member.concurrent)
 
-    was_hidden = not shown_in_main_menu(launcher, config.container_groups)
+    was_hidden = not launcher.show_in_main
     _remove_source_membership(config, launcher.id, source_kind, source_id)
     if dest_kind == MAIN:
         show = True
@@ -190,7 +187,6 @@ def move_launcher(
             dest_id or "",
             launcher.id,
             dest_index,
-            not show,
             dest_visible_ids,
         )
     else:
@@ -202,7 +198,7 @@ def move_launcher(
             dest_visible_ids,
             concurrent=source_concurrent if source_kind == "execute" else False,
         )
-    set_shown_in_main_menu(launcher, config.container_groups, show)
+    launcher.show_in_main = show
     return True
 
 
@@ -230,20 +226,14 @@ def _place_in_container(
     group_id: str,
     launcher_id: str,
     index: int,
-    only_in_container: bool,
     visible_ids: list[str] | None,
 ) -> None:
     container = _find_container(config, group_id)
     if container is None:
         return
-
-    def make() -> ContainerMember:
-        return ContainerMember(launcher_id, only_in_container=only_in_container)
-
-    container.members = _insert_member(container.members, launcher_id, index, visible_ids, make)
-    for member in container.members:
-        if member.launcher_id == launcher_id:
-            member.only_in_container = only_in_container
+    container.members = _insert_member(
+        container.members, launcher_id, index, visible_ids, lambda: ContainerMember(launcher_id)
+    )
 
 
 def _place_in_execute(
@@ -346,7 +336,7 @@ def _token_visible(token: str, config: AppConfig, containers: dict, launchers: d
         return ident in containers
     if kind == "launcher":
         launcher = launchers.get(ident)
-        return launcher is not None and shown_in_main_menu(launcher, config.container_groups)
+        return launcher is not None and launcher.show_in_main
     return False
 
 

@@ -75,20 +75,18 @@ def test_execution_steps_match_the_preschool_example():
     ]
 
 
-def test_execution_skips_disabled_and_keeps_only_in_groups():
+def test_execution_runs_launchers_hidden_from_the_main_list_and_skips_missing_ids():
     shown = Launcher.new("Shown", "shown")
-    hidden = Launcher.new("Hidden", "hidden", only_in_groups=True)
-    disabled = Launcher.new("Off", "off", enabled=False)
+    hidden = Launcher.new("Hidden", "hidden", show_in_main=False)
     group = Group.new(
         "Mix",
         [
             GroupMember(shown.id),
             GroupMember("missing"),
-            GroupMember(disabled.id, concurrent=True),
             GroupMember(hidden.id, concurrent=True),
         ],
     )
-    steps = execution_steps(group, [shown, hidden, disabled])
+    steps = execution_steps(group, [shown, hidden])
     assert [[item.name for item in step] for step in steps] == [["Shown"], ["Hidden"]]
 
 
@@ -136,22 +134,19 @@ def test_step_timer_can_be_tied_to_a_widget(qapp, qtbot):
 
 def test_config_roundtrip_and_removing_a_launcher_strips_group_members(tmp_path, monkeypatch):
     mgr = _isolate_config(monkeypatch, tmp_path)
-    alpha = Launcher.new("Alpha", "a", only_in_groups=True)
+    alpha = Launcher.new("Alpha", "a", show_in_main=False)
     beta = Launcher.new("Beta", "b")
-    disabled = Launcher.new("Off", "off", enabled=False)
     mgr.add_launcher(alpha)
     mgr.add_launcher(beta)
-    mgr.add_launcher(disabled)
     group = Group.new("Class", [GroupMember(alpha.id, concurrent=True), GroupMember(beta.id)])
     mgr.add_group(group)
 
     loaded = ConfigManager()
-    assert loaded.config.version == 1
+    assert loaded.config.version == 2
     assert loaded.config.groups[0].name == "Class"
     assert loaded.config.groups[0].members[0].concurrent is True
-    assert loaded.config.launchers[0].only_in_groups is True
+    assert loaded.config.launchers[0].show_in_main is False
     assert [item.name for item in loaded.get_main_view_launchers()] == ["Beta"]
-    assert [item.name for item in loaded.get_enabled_launchers()] == ["Alpha", "Beta"]
 
     loaded.remove_launcher(alpha.id)
     assert loaded.config.groups[0].members == [GroupMember(beta.id)]
@@ -159,8 +154,8 @@ def test_config_roundtrip_and_removing_a_launcher_strips_group_members(tmp_path,
     old = {"version": 1, "settings": {"dropdown_width": 200}, "launchers": [{"id": "x", "name": "X", "command": "x"}]}
     restored = AppConfig.from_dict(old)
     assert restored.groups == []
-    assert restored.launchers[0].only_in_groups is False
-    assert restored.version == 1
+    assert restored.launchers[0].show_in_main is True
+    assert restored.version == 2
 
 
 def test_show_group_contents_defaults_off_and_saves_with_the_group(qapp, qtbot, tmp_path, monkeypatch):
@@ -282,9 +277,9 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     assert dialog.display_ids() == [beta.id, alpha.id, gamma.id]
 
     qtbot.mouseClick(dialog.only_in_groups_checkbox(alpha.id), Qt.MouseButton.LeftButton)
-    assert alpha.only_in_groups is True
+    assert alpha.show_in_main is False
     reloaded = ConfigManager()
-    assert reloaded.config.launchers[0].only_in_groups is True
+    assert reloaded.config.launchers[0].show_in_main is False
     edit = AddEditDialog(reloaded.config.launchers[0])
     qtbot.addWidget(edit)
     assert edit._enabled_cb.text() == "Include in dropdown list"

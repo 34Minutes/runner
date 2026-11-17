@@ -32,22 +32,22 @@ def seed_test_data_if_needed(cfg: ConfigManager) -> None:
 
     if sys.platform == "darwin":
         seeds: list[Launcher] = [
-            Launcher.new(name="Calculator", command="Calculator", enabled=True),
-            Launcher.new(name="Calendar", command="Calendar", enabled=True),
-            Launcher.new(name="Web Browser", command="https://www.google.com", enabled=True),
-            Launcher.new(name="TextEdit", command="TextEdit", enabled=True),
-            Launcher.new(name="Finder", command="Finder", args="~", enabled=True),
-            Launcher.new(name="Terminal", command="Terminal", enabled=True),
+            Launcher.new(name="Calculator", command="Calculator"),
+            Launcher.new(name="Calendar", command="Calendar"),
+            Launcher.new(name="Web Browser", command="https://www.google.com"),
+            Launcher.new(name="TextEdit", command="TextEdit"),
+            Launcher.new(name="Finder", command="Finder", args="~"),
+            Launcher.new(name="Terminal", command="Terminal"),
         ]
     else:
         seeds = [
-            Launcher.new(name="Calculator", command="calc", enabled=True),
+            Launcher.new(name="Calculator", command="calc"),
             # Windows Calendar app via protocol.
-            Launcher.new(name="Calendar", command="ms-calendar:", enabled=True),
-            Launcher.new(name="Web Browser", command="https://www.google.com", enabled=True),
-            Launcher.new(name="Notepad", command="notepad", enabled=True),
-            Launcher.new(name="File Explorer", command="explorer", args=".", enabled=True),
-            Launcher.new(name="Command Prompt", command="cmd", enabled=True),
+            Launcher.new(name="Calendar", command="ms-calendar:"),
+            Launcher.new(name="Web Browser", command="https://www.google.com"),
+            Launcher.new(name="Notepad", command="notepad"),
+            Launcher.new(name="File Explorer", command="explorer", args="."),
+            Launcher.new(name="Command Prompt", command="cmd"),
         ]
 
     for seed in seeds:

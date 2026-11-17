@@ -1107,7 +1107,7 @@ class DropdownPanel(QWidget):
         else:
             current_ids = [launcher.id for launcher in self._config.launchers]
             entries = [
-                (launcher.id, launcher.enabled and launcher.id in visible_set)
+                (launcher.id, launcher.show_in_main and launcher.id in visible_set)
                 for launcher in self._config.launchers
             ]
         new_ids = merge_visible_order(entries, visible_ids)

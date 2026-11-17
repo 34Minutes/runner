@@ -10,12 +10,12 @@ from runner.config import AppConfig, ConfigManager, Launcher, Settings
 
 
 def test_launcher_new_and_fields():
-    l = Launcher.new(name="Test", command="calc", args="--foo", enabled=True, run_as_admin=True)
+    l = Launcher.new(name="Test", command="calc", args="--foo", run_as_admin=True)
     assert l.id
     assert l.name == "Test"
     assert l.command == "calc"
     assert l.args == "--foo"
-    assert l.enabled is True
+    assert l.show_in_main is True
     assert l.run_as_admin is True
     assert l.show_console is False
     assert l.working_dir is None
@@ -30,7 +30,7 @@ def test_appconfig_roundtrip():
     cfg.settings.pinned_open = True
 
     d = cfg.to_dict()
-    assert d["version"] == 1
+    assert d["version"] == 2
     assert len(d["launchers"]) == 2
     assert d["settings"]["pinned_open"] is True
     assert d["settings"]["dropdown_width"] == 300
@@ -185,7 +185,7 @@ def test_bad_entries_are_skipped_not_fatal():
 
     assert [l.name for l in cfg.launchers] == ["Good"]
     # A wrong type falls back to the default instead of being truthy.
-    assert cfg.launchers[0].enabled is True
+    assert cfg.launchers[0].show_in_main is True
     assert cfg.settings.pinned_open is False
     assert cfg.settings.trigger_width == 150
     assert [g.id for g in cfg.groups] == ["g1"]

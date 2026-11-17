@@ -15,7 +15,7 @@ from runner.config import (
     GroupMember,
     Launcher,
 )
-from runner.containers import set_shown_in_main_menu, shown_in_main_menu, submenu_launchers
+from runner.moves import member_launchers
 from runner.ui.add_dialog import AddEditDialog
 from runner.ui.container_dialog import ContainerDialog, _NOTE
 from runner.ui.container_manager import ContainerManagerDialog
@@ -33,61 +33,71 @@ def _isolate_config(monkeypatch, tmp_path):
     return ConfigManager()
 
 
-def test_showing_a_launcher_enables_it_and_hiding_leaves_a_disabled_one_off():
-    off = Launcher.new("Off", "off", enabled=False)
-    folder = ContainerGroup.new("Folder", [ContainerMember(off.id, only_in_container=False)])
-    set_shown_in_main_menu(off, [folder], False)
-    assert off.enabled is False
-    assert off.only_in_groups is True
-    assert folder.members[0].only_in_container is True
-    set_shown_in_main_menu(off, [folder], True)
-    assert off.enabled is True
-    assert off.only_in_groups is False
-    assert folder.members[0].only_in_container is False
-    assert shown_in_main_menu(off, [folder]) is True
+def _v1_launcher(launcher_id, **flags):
+    return {"id": launcher_id, "name": launcher_id.title(), "command": launcher_id, **flags}
 
 
-def test_main_list_hides_a_launcher_when_any_container_switch_is_on():
-    alpha = Launcher.new("Alpha", "alpha")
-    beta = Launcher.new("Beta", "beta")
-    reserved = Launcher.new("Reserved", "reserved", only_in_groups=True)
-    disabled = Launcher.new("Off", "off", enabled=False)
-    quiet = ContainerGroup.new(
-        "Quiet",
-        [ContainerMember(alpha.id, only_in_container=False), ContainerMember(beta.id)],
+def test_version_1_flags_fold_into_show_in_main():
+    """A v1 launcher was on the main list only when all three old flags agreed."""
+    data = {
+        "version": 1,
+        "launchers": [
+            _v1_launcher("alpha"),
+            _v1_launcher("beta"),
+            _v1_launcher("reserved", only_in_groups=True),
+            _v1_launcher("off", enabled=False),
+            _v1_launcher("boxed"),
+            _v1_launcher("alone"),
+        ],
+        "container_groups": [
+            {"id": "quiet", "name": "Quiet", "members": [
+                {"launcher_id": "alpha", "only_in_container": False},
+                {"launcher_id": "beta"},
+            ]},
+            {"id": "loud", "name": "Loud", "members": [
+                {"launcher_id": "alpha", "only_in_container": False},
+                {"launcher_id": "boxed", "only_in_container": True},
+            ]},
+        ],
+    }
+    cfg = AppConfig.from_dict(data)
+    shown = {launcher.id: launcher.show_in_main for launcher in cfg.launchers}
+    assert shown == {
+        "alpha": True,
+        "beta": True,
+        "reserved": False,
+        "off": False,
+        # One container switch was enough to hide it.
+        "boxed": False,
+        # A launcher in no container group stays on the main list.
+        "alone": True,
+    }
+    assert cfg.version == 2
+    saved = cfg.to_dict()
+    assert all(
+        set(item) >= {"show_in_main"} and not {"enabled", "only_in_groups"} & set(item)
+        for item in saved["launchers"]
     )
-    loud = ContainerGroup.new(
-        "Loud",
-        [ContainerMember(alpha.id, only_in_container=False)],
+    assert all(
+        set(member) == {"launcher_id"}
+        for group in saved["container_groups"]
+        for member in group["members"]
     )
-    assert shown_in_main_menu(alpha, [quiet, loud]) is True
-    assert shown_in_main_menu(beta, [quiet, loud]) is True
-    assert shown_in_main_menu(reserved, [quiet]) is False
-    assert shown_in_main_menu(disabled, []) is False
-
-    loud.members[0].only_in_container = True
-    assert shown_in_main_menu(alpha, [quiet, loud]) is False
-    assert shown_in_main_menu(beta, [quiet, loud]) is True
-
-    # A launcher in no container group stays on the main list.
-    alone = Launcher.new("Alone", "alone")
-    assert shown_in_main_menu(alone, [quiet, loud]) is True
 
 
-def test_submenu_lists_enabled_members_in_container_order():
-    first = Launcher.new("First", "first", only_in_groups=True)
+def test_a_saved_show_in_main_wins_over_old_flags():
+    data = {"version": 2, "launchers": [_v1_launcher("alpha", show_in_main=True, only_in_groups=True)]}
+    assert AppConfig.from_dict(data).launchers[0].show_in_main is True
+
+
+def test_container_lists_every_member_in_order_including_hidden_ones():
+    first = Launcher.new("First", "first", show_in_main=False)
     second = Launcher.new("Second", "second")
-    disabled = Launcher.new("Off", "off", enabled=False)
     group = ContainerGroup.new(
         "Apps",
-        [
-            ContainerMember(second.id),
-            ContainerMember("missing"),
-            ContainerMember(disabled.id, only_in_container=True),
-            ContainerMember(first.id, only_in_container=True),
-        ],
+        [ContainerMember(second.id), ContainerMember("missing"), ContainerMember(first.id)],
     )
-    assert [item.name for item in submenu_launchers(group, [first, second, disabled])] == [
+    assert [item.name for item in member_launchers(group.members, [first, second])] == [
         "Second",
         "First",
     ]
@@ -95,31 +105,25 @@ def test_submenu_lists_enabled_members_in_container_order():
 
 def test_container_groups_roundtrip_and_follow_a_deleted_launcher(tmp_path, monkeypatch):
     mgr = _isolate_config(monkeypatch, tmp_path)
-    alpha = Launcher.new("Alpha", "a")
+    alpha = Launcher.new("Alpha", "a", show_in_main=False)
     beta = Launcher.new("Beta", "b")
     mgr.add_launcher(alpha)
     mgr.add_launcher(beta)
     mgr.add_container_group(
-        ContainerGroup.new(
-            "Folder",
-            [
-                ContainerMember(alpha.id, only_in_container=True),
-                ContainerMember(beta.id),
-            ],
-        )
+        ContainerGroup.new("Folder", [ContainerMember(alpha.id), ContainerMember(beta.id)])
     )
     mgr.add_group(Group.new("Run", [GroupMember(alpha.id, concurrent=True)]))
 
     loaded = ConfigManager()
-    assert loaded.config.version == 1
+    assert loaded.config.version == 2
     assert loaded.config.container_groups[0].name == "Folder"
-    assert loaded.config.container_groups[0].members[0].only_in_container is True
+    assert [m.launcher_id for m in loaded.config.container_groups[0].members] == [alpha.id, beta.id]
     assert [item.name for item in loaded.get_main_view_launchers()] == ["Beta"]
 
     # An old file with no container groups still loads, and those launchers stay visible.
     restored = AppConfig.from_dict({"version": 1, "launchers": [{"id": beta.id, "name": "Beta", "command": "b"}]})
     assert restored.container_groups == []
-    assert shown_in_main_menu(restored.launchers[0], restored.container_groups) is True
+    assert restored.launchers[0].show_in_main is True
 
     loaded.remove_launcher(alpha.id)
     assert loaded.config.container_groups[0].members == [ContainerMember(beta.id)]
@@ -141,7 +145,7 @@ def test_membership_edit_keeps_flags_and_order(tmp_path, monkeypatch):
     mgr.add_group(later)
     folder = ContainerGroup.new(
         "Folder",
-        [ContainerMember(beta.id), ContainerMember(alpha.id, only_in_container=True)],
+        [ContainerMember(beta.id), ContainerMember(alpha.id)],
     )
     mgr.add_container_group(folder)
 
@@ -153,7 +157,6 @@ def test_membership_edit_keeps_flags_and_order(tmp_path, monkeypatch):
     assert mgr.config.groups[1].members[0].concurrent is False
     folder_members = mgr.config.container_groups[0].members
     assert [member.launcher_id for member in folder_members] == [beta.id, alpha.id]
-    assert folder_members[1].only_in_container is True
 
     mgr.set_launcher_membership(alpha.id, [], [later.id])
     assert mgr.config.container_groups[0].members == [ContainerMember(beta.id)]
@@ -163,7 +166,7 @@ def test_membership_edit_keeps_flags_and_order(tmp_path, monkeypatch):
 
 def test_container_dialog_saves_click_order_and_the_switch(qapp, qtbot, tmp_path, monkeypatch):
     mgr = _isolate_config(monkeypatch, tmp_path)
-    alpha = Launcher.new("Alpha", "a", only_in_groups=True)
+    alpha = Launcher.new("Alpha", "a", show_in_main=False)
     beta = Launcher.new("Beta", "b")
     mgr.add_launcher(alpha)
     mgr.add_launcher(beta)
@@ -195,7 +198,7 @@ def test_container_dialog_saves_click_order_and_the_switch(qapp, qtbot, tmp_path
     qtbot.mouseClick(dialog.only_switch(alpha.id), Qt.MouseButton.LeftButton)
     qapp.processEvents()
     assert dialog.only_switch(alpha.id).box.isChecked() is False
-    assert alpha.only_in_groups is False
+    assert alpha.show_in_main is True
 
     click_name(alpha.id)
     assert dialog.only_switch(alpha.id).box.isChecked() is False
@@ -214,10 +217,10 @@ def test_container_dialog_saves_click_order_and_the_switch(qapp, qtbot, tmp_path
     result = dialog.result_group
     assert result is not None
     assert result.name == "Folder"
-    assert [(member.launcher_id, member.only_in_container) for member in result.members] == [
-        (beta.id, False),
-        (alpha.id, True),
-    ]
+    assert [member.launcher_id for member in result.members] == [beta.id, alpha.id]
+    # The switch is the launcher's own setting, not stored per container.
+    assert alpha.show_in_main is False
+    assert beta.show_in_main is True
 
 
 def test_include_in_dropdown_and_the_group_switches_are_one_setting(
@@ -237,14 +240,8 @@ def test_include_in_dropdown_and_the_group_switches_are_one_setting(
     assert edit._enabled_cb.isChecked() is True
     edit._enabled_cb.setChecked(False)
     edit.accept()
-    assert alpha.enabled is True
-    assert alpha.only_in_groups is True
-    assert all(
-        member.only_in_container
-        for group in mgr.config.container_groups
-        for member in group.members
-    )
-    assert shown_in_main_menu(alpha, mgr.config.container_groups) is False
+    assert alpha.show_in_main is False
+    assert mgr.get_main_view_launchers() == []
 
     groups = GroupDialog(mgr, mgr.config.groups[0])
     qtbot.addWidget(groups)
@@ -252,12 +249,7 @@ def test_include_in_dropdown_and_the_group_switches_are_one_setting(
     qtbot.waitExposed(groups)
     assert groups.only_in_groups_checkbox(alpha.id).box.isChecked() is True
     qtbot.mouseClick(groups.only_in_groups_checkbox(alpha.id), Qt.MouseButton.LeftButton)
-    assert alpha.only_in_groups is False
-    assert all(
-        not member.only_in_container
-        for group in mgr.config.container_groups
-        for member in group.members
-    )
+    assert alpha.show_in_main is True
 
     again = AddEditDialog(alpha, cfg=mgr)
     qtbot.addWidget(again)
@@ -270,8 +262,7 @@ def test_include_in_dropdown_and_the_group_switches_are_one_setting(
     assert container.only_switch(alpha.id).box.isChecked() is False
     qtbot.mouseClick(container.only_switch(alpha.id), Qt.MouseButton.LeftButton)
     qapp.processEvents()
-    assert alpha.only_in_groups is True
-    assert mgr.config.container_groups[1].members[0].only_in_container is True
+    assert alpha.show_in_main is False
     final = AddEditDialog(alpha, cfg=mgr)
     qtbot.addWidget(final)
     assert final._enabled_cb.isChecked() is False
@@ -283,11 +274,9 @@ def test_container_and_execute_dialogs_list_launchers_hidden_from_the_main_popup
     qapp, qtbot, tmp_path, monkeypatch
 ):
     mgr = _isolate_config(monkeypatch, tmp_path)
-    hidden = Launcher.new("Hidden", "hidden")
+    hidden = Launcher.new("Hidden", "hidden", show_in_main=False)
     mgr.add_launcher(hidden)
-    mgr.add_container_group(
-        ContainerGroup.new("Folder", [ContainerMember(hidden.id, only_in_container=True)])
-    )
+    mgr.add_container_group(ContainerGroup.new("Folder", [ContainerMember(hidden.id)]))
     assert mgr.get_main_view_launchers() == []
 
     container = ContainerDialog(mgr, None)
@@ -302,13 +291,13 @@ def test_container_and_execute_dialogs_list_launchers_hidden_from_the_main_popup
 
 def test_launcher_screen_adds_and_removes_both_kinds_of_group(qapp, qtbot, tmp_path, monkeypatch):
     mgr = _isolate_config(monkeypatch, tmp_path)
-    alpha = Launcher.new("Alpha", "a")
+    alpha = Launcher.new("Alpha", "a", show_in_main=False)
     mgr.add_launcher(alpha)
     run = Group.new("Run", [GroupMember(alpha.id, concurrent=True)])
     later = Group.new("Later")
     mgr.add_group(run)
     mgr.add_group(later)
-    folder = ContainerGroup.new("Folder", [ContainerMember(alpha.id, only_in_container=True)])
+    folder = ContainerGroup.new("Folder", [ContainerMember(alpha.id)])
     extra = ContainerGroup.new("Extra")
     mgr.add_container_group(folder)
     mgr.add_container_group(extra)
@@ -332,11 +321,9 @@ def test_launcher_screen_adds_and_removes_both_kinds_of_group(qapp, qtbot, tmp_p
 
     dialog.accept()
     assert [member.launcher_id for member in mgr.config.container_groups[0].members] == []
-    # Alpha was already off the main popup, so the new container keeps that choice.
-    assert mgr.config.container_groups[1].members == [
-        ContainerMember(alpha.id, only_in_container=True)
-    ]
-    assert alpha.only_in_groups is True
+    assert mgr.config.container_groups[1].members == [ContainerMember(alpha.id)]
+    # Alpha was already off the main popup, and joining a container keeps that choice.
+    assert alpha.show_in_main is False
     assert mgr.config.groups[0].members == [GroupMember(alpha.id, concurrent=True)]
     assert mgr.config.groups[1].members == [GroupMember(alpha.id)]
 

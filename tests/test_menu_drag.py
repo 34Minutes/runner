@@ -112,7 +112,7 @@ def test_member_reorder_keeps_a_hidden_launcher_in_its_slot(qapp, qtbot):
     panel = DropdownPanel(cfg)
     qtbot.addWidget(panel)
     alpha = Launcher.new("Alpha", "a")
-    hidden = Launcher.new("Hidden", "h", enabled=False)
+    hidden = Launcher.new("Hidden", "h", show_in_main=False)
     beta = Launcher.new("Beta", "b")
     cfg.launchers = [alpha, hidden, beta]
     panel.set_drag_source_key("container:box")

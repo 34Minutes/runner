@@ -213,10 +213,7 @@ class AddEditDialog(StayOnTopDialog):
         self._name_edit.setFocus()
 
     def _included_in_dropdown(self, launcher: Launcher) -> bool:
-        from ..containers import shown_in_main_menu
-
-        groups = self._cfg.config.container_groups if self._cfg is not None else []
-        return shown_in_main_menu(launcher, groups)
+        return launcher.show_in_main
 
     def _load_membership(self, launcher: Launcher | None) -> None:
         cfg = self._cfg
@@ -282,24 +279,19 @@ class AddEditDialog(StayOnTopDialog):
                 name=name,
                 command=command,
                 args=self._args_edit.text().strip(),
-                enabled=True,
                 working_dir=work_dir,
                 run_as_admin=run_admin,
                 show_console=show_console,
             )
 
         if self._result_launcher is not None:
-            from ..containers import set_shown_in_main_menu
-
-            groups = self._cfg.config.container_groups if self._cfg is not None else []
-            set_shown_in_main_menu(self._result_launcher, groups, included)
+            self._result_launcher.show_in_main = included
 
         if self._cfg is not None and self._result_launcher is not None:
             self._cfg.set_launcher_membership(
                 self._result_launcher.id,
                 self._container_membership.selected_ids(),
                 self._execute_membership.selected_ids(),
-                hidden_from_main=not included,
             )
 
         super().accept()

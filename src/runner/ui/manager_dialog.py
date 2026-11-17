@@ -89,14 +89,12 @@ class ManagerDialog(StayOnTopDialog):
         for launcher in self._launchers:
             text = launcher.name
             flags = []
-            if not launcher.enabled:
-                flags.append("disabled")
             if launcher.run_as_admin:
                 flags.append("admin")
             if launcher.show_console:
                 flags.append("console")
-            if launcher.only_in_groups:
-                flags.append("only in groups")
+            if not launcher.show_in_main:
+                flags.append("not in main list")
             if flags:
                 text += "  (" + ", ".join(flags) + ")"
             if launcher.working_dir:

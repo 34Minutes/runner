@@ -13,7 +13,6 @@ from __future__ import annotations
 from PySide6.QtWidgets import QCheckBox, QWidget
 
 from ..config import Group, GroupMember, Launcher
-from ..containers import shown_in_main_menu
 from .member_dialog import MemberPickerDialog, _ClickCell, _DragGhost, _NameCell  # noqa: F401
 from .stay_on_top import warning
 from .toggle_switch import ToggleSwitch
@@ -65,7 +64,7 @@ class GroupDialog(MemberPickerDialog):
         self._table.setCellWidget(row, 2, self._check_widget(
             launcher.id,
             "only",
-            not shown_in_main_menu(launcher, self._cfg.config.container_groups),
+            not launcher.show_in_main,
             member,
         ))
 

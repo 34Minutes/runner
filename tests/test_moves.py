@@ -9,7 +9,6 @@ from runner.config import (
     GroupMember,
     Launcher,
 )
-from runner.containers import shown_in_main_menu
 from runner.moves import (
     apply_visible_row_order,
     container_token,
@@ -35,7 +34,7 @@ def _config() -> tuple[AppConfig, Launcher, Launcher, ContainerGroup, Group, Gro
 
 def test_empty_main_order_lists_containers_then_launchers():
     config, alpha, beta, folder, _work, _play = _config()
-    hidden = _launcher("Hidden", enabled=False)
+    hidden = _launcher("Hidden", show_in_main=False)
     config.launchers.append(hidden)
     assert visible_main_tokens(config) == [
         container_token(folder.id),
@@ -46,7 +45,7 @@ def test_empty_main_order_lists_containers_then_launchers():
 
 def test_saved_main_order_interleaves_and_keeps_a_hidden_launcher_in_its_slot():
     config, alpha, beta, folder, _work, _play = _config()
-    hidden = _launcher("Hidden", only_in_groups=True)
+    hidden = _launcher("Hidden", show_in_main=False)
     config.launchers.append(hidden)
     config.main_order = [
         launcher_token(alpha.id),
@@ -93,7 +92,7 @@ def test_same_menu_and_unknown_ids_do_not_move():
 
 def test_main_to_container_hides_the_launcher_and_inserts_it():
     config, alpha, beta, folder, _work, _play = _config()
-    other = ContainerGroup.new("Other", [ContainerMember(beta.id, only_in_container=False)])
+    other = ContainerGroup.new("Other", [ContainerMember(beta.id)])
     config.container_groups.append(other)
     assert move_launcher(
         config,
@@ -104,21 +103,20 @@ def test_main_to_container_hides_the_launcher_and_inserts_it():
         [alpha.id],
     )
     assert [member.launcher_id for member in folder.members] == [beta.id, alpha.id]
-    assert folder.members[0].only_in_container is True
-    assert beta.only_in_groups is True
-    assert other.members[0].only_in_container is True
-    assert shown_in_main_menu(beta, config.container_groups) is False
-    # Already in the destination: the flag is still forced on, and the index accounts for the old slot.
+    assert beta.show_in_main is False
+    # Still in its other container.
+    assert other.members == [ContainerMember(beta.id)]
+    # Already in the destination: it is hidden too, and the index accounts for the old slot.
     assert move_launcher(config, alpha.id, "main", f"container:{folder.id}", 0, [beta.id, alpha.id])
     assert [member.launcher_id for member in folder.members] == [alpha.id, beta.id]
-    assert all(member.only_in_container for member in folder.members)
+    assert alpha.show_in_main is False
 
 
-def test_disabled_member_stays_in_its_slot_when_a_launcher_is_inserted():
+def test_filtered_out_member_stays_in_its_slot_when_a_launcher_is_inserted():
     config, alpha, beta, folder, _work, _play = _config()
-    disabled = _launcher("Disabled", enabled=False)
-    config.launchers.append(disabled)
-    folder.members = [ContainerMember(alpha.id), ContainerMember(disabled.id), ContainerMember(beta.id)]
+    filtered = _launcher("Filtered")
+    config.launchers.append(filtered)
+    folder.members = [ContainerMember(alpha.id), ContainerMember(filtered.id), ContainerMember(beta.id)]
     gamma = _launcher("Gamma")
     config.launchers.append(gamma)
     assert move_launcher(
@@ -131,7 +129,7 @@ def test_disabled_member_stays_in_its_slot_when_a_launcher_is_inserted():
     )
     assert [member.launcher_id for member in folder.members] == [
         alpha.id,
-        disabled.id,
+        filtered.id,
         gamma.id,
         beta.id,
     ]
@@ -139,12 +137,12 @@ def test_disabled_member_stays_in_its_slot_when_a_launcher_is_inserted():
 
 def test_container_to_main_shows_the_launcher_and_clears_hide_flags():
     config, alpha, beta, folder, work, _play = _config()
-    folder.members = [ContainerMember(alpha.id, only_in_container=True)]
-    other = ContainerGroup.new("Other", [ContainerMember(alpha.id, only_in_container=True)])
+    folder.members = [ContainerMember(alpha.id)]
+    other = ContainerGroup.new("Other", [ContainerMember(alpha.id)])
     config.container_groups.append(other)
-    beta.only_in_groups = True
+    beta.show_in_main = False
     work.members = [GroupMember(alpha.id)]
-    alpha.only_in_groups = True
+    alpha.show_in_main = False
     assert move_launcher(
         config,
         alpha.id,
@@ -154,60 +152,57 @@ def test_container_to_main_shows_the_launcher_and_clears_hide_flags():
         [container_token(folder.id), launcher_token(beta.id)],
     )
     assert folder.members == []
-    assert other.members[0].only_in_container is False
-    assert alpha.only_in_groups is False
+    assert other.members == [ContainerMember(alpha.id)]
+    assert alpha.show_in_main is True
     assert config.main_order[0] == launcher_token(alpha.id)
-    assert shown_in_main_menu(alpha, config.container_groups) is True
 
 
 def test_execute_to_main_removes_that_membership_and_shows_the_launcher():
     config, _alpha, beta, _folder, work, play = _config()
-    beta.only_in_groups = True
+    beta.show_in_main = False
     play.members = [GroupMember(beta.id, concurrent=True)]
     assert move_launcher(config, beta.id, f"execute:{work.id}", "main", 1, [launcher_token(_alpha.id)])
     assert work.members == []
     # It is still in Play, but landing on the main list shows it there.
     assert play.members == [GroupMember(beta.id, concurrent=True)]
-    assert beta.only_in_groups is False
+    assert beta.show_in_main is True
     assert launcher_token(beta.id) in config.main_order
 
 
-def test_container_to_execute_hides_from_main_only_when_the_container_did():
+def test_container_to_execute_keeps_the_main_list_choice():
     config, alpha, beta, folder, work, _play = _config()
-    folder.members = [
-        ContainerMember(alpha.id, only_in_container=True),
-        ContainerMember(beta.id, only_in_container=False),
-    ]
+    folder.members = [ContainerMember(alpha.id), ContainerMember(beta.id)]
+    alpha.show_in_main = False
     assert move_launcher(config, alpha.id, f"container:{folder.id}", f"execute:{work.id}", 0, [beta.id])
-    assert alpha.only_in_groups is True
+    assert alpha.show_in_main is False
     assert [member.launcher_id for member in work.members] == [alpha.id, beta.id]
-    assert folder.members == [ContainerMember(beta.id, only_in_container=False)]
+    assert folder.members == [ContainerMember(beta.id)]
 
     assert move_launcher(config, beta.id, f"container:{folder.id}", f"execute:{work.id}", -1)
-    assert beta.only_in_groups is False
+    assert beta.show_in_main is True
     assert [member.launcher_id for member in work.members] == [alpha.id, beta.id]
 
 
 def test_execute_to_container_keeps_the_same_off_main_choice():
     config, alpha, _beta, folder, work, _play = _config()
     work.members = [GroupMember(alpha.id, concurrent=True)]
-    alpha.only_in_groups = True
+    alpha.show_in_main = False
     folder.members = []
     assert move_launcher(config, alpha.id, f"execute:{work.id}", f"container:{folder.id}", 0)
     assert work.members == []
-    assert alpha.only_in_groups is True
-    assert folder.members == [ContainerMember(alpha.id, only_in_container=True)]
+    assert alpha.show_in_main is False
+    assert folder.members == [ContainerMember(alpha.id)]
 
 
-def test_execute_group_move_keeps_concurrent_and_only_in_groups():
+def test_execute_group_move_keeps_concurrent_and_the_main_list_choice():
     config, alpha, beta, _folder, work, play = _config()
     work.members = [GroupMember(alpha.id, concurrent=True)]
-    alpha.only_in_groups = True
+    alpha.show_in_main = False
     play.members = [GroupMember(beta.id, concurrent=False)]
     assert move_launcher(config, alpha.id, f"execute:{work.id}", f"execute:{play.id}", 0, [beta.id])
     assert work.members == []
     assert play.members[0] == GroupMember(alpha.id, concurrent=True)
-    assert alpha.only_in_groups is True
+    assert alpha.show_in_main is False
 
     # Already in the destination: that group's own concurrent flag stays.
     work.members = [GroupMember(beta.id, concurrent=True)]
@@ -215,14 +210,16 @@ def test_execute_group_move_keeps_concurrent_and_only_in_groups():
     assert play.members[0].concurrent is False
 
 
-def test_container_to_container_copies_the_hide_flag():
+def test_container_to_container_keeps_the_main_list_choice():
     config, alpha, _beta, folder, _work, _play = _config()
-    folder.members = [ContainerMember(alpha.id, only_in_container=True)]
-    other = ContainerGroup.new("Other", [ContainerMember(alpha.id, only_in_container=False)])
+    folder.members = [ContainerMember(alpha.id)]
+    alpha.show_in_main = False
+    other = ContainerGroup.new("Other", [ContainerMember(alpha.id)])
     config.container_groups.append(other)
     assert move_launcher(config, alpha.id, f"container:{folder.id}", f"container:{other.id}", 0)
     assert folder.members == []
-    assert other.members == [ContainerMember(alpha.id, only_in_container=True)]
+    assert other.members == [ContainerMember(alpha.id)]
+    assert alpha.show_in_main is False
 
 
 def test_config_manager_saves_a_move(tmp_path, monkeypatch):
@@ -237,9 +234,8 @@ def test_config_manager_saves_a_move(tmp_path, monkeypatch):
     manager.config.container_groups = [folder]
     assert manager.move_launcher(alpha.id, "main", f"container:{folder.id}", -1) is True
     reloaded = ConfigManager()
-    assert reloaded.config.container_groups[0].members == [
-        ContainerMember(alpha.id, only_in_container=True)
-    ]
+    assert reloaded.config.container_groups[0].members == [ContainerMember(alpha.id)]
+    assert reloaded.config.launchers[0].show_in_main is False
 
 
 def test_main_order_roundtrip_ignores_non_strings():

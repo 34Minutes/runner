@@ -49,7 +49,6 @@ def test_add_dialog_advanced_fields_roundtrip(qapp, qtbot):
         working_dir="/tmp/work",
         run_as_admin=True,
         show_console=True,
-        enabled=True,
     )
     dlg = AddEditDialog(orig)
     qtbot.addWidget(dlg)

@@ -21,23 +21,27 @@ CONFIG_FILENAME = "config.json"
 # Large enough to see on a big display. The old 36×28 arrow was easy to miss.
 # A saved arrow smaller than this is raised to it once, then the user's resize sticks.
 DEFAULT_TRIGGER_WIDTH = 120
+# 2: one show_in_main flag replaced enabled, only_in_groups, and each
+# container membership's only_in_container. Version 1 files are converted on load.
+CONFIG_VERSION = 2
 DEFAULT_TRIGGER_HEIGHT = 96
 
 
 @dataclass
 class Launcher:
-    """A single launchable item shown in the dropdown (when enabled)."""
+    """A single launchable item."""
 
     id: str
     name: str
     command: str  # exe path, "calc", url, "python script.py", etc.
     args: str = ""  # additional parameters / command line args
-    enabled: bool = True
+    # On the main hover list. Off, it is still in every execute group and
+    # container it belongs to. Include in dropdown list, Only In Groups, and
+    # Only in Container Group all read and write this one value.
+    show_in_main: bool = True
     working_dir: str | None = None
     run_as_admin: bool = False
     show_console: bool = False
-    # Hidden from the hover list. It still runs inside any group it belongs to.
-    only_in_groups: bool = False
 
     @classmethod
     def new(cls, name: str, command: str, **kwargs: Any) -> Launcher:
@@ -69,14 +73,9 @@ class Group:
 
 @dataclass
 class ContainerMember:
-    """One launcher inside a container group.
-
-    only_in_container matches the launcher's main-popup choice. It is on
-    when Include in dropdown list is off, and off when that switch is on.
-    """
+    """One launcher inside a container group."""
 
     launcher_id: str
-    only_in_container: bool = False
 
 
 @dataclass
@@ -175,6 +174,40 @@ def _members_from(cls, raw: Any, *, label: str, problems: list[str]) -> list:
     return members
 
 
+def _migrate_main_menu_flags(data: dict[str, Any], launchers: list[Launcher]) -> None:
+    """Version 1 kept the main-popup choice in three places. Fold them into show_in_main.
+
+    A launcher was on the main popup only when it was enabled, not Only In
+    Groups, and not Only in Container Group in any container. A launcher that
+    already has show_in_main is left alone.
+    """
+    raw_by_id = {
+        item["id"]: item
+        for item in data.get("launchers", []) or []
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    hidden_by_container: set[str] = set()
+    containers = data.get("container_groups", [])
+    for group in containers if isinstance(containers, list) else []:
+        members = group.get("members", []) if isinstance(group, dict) else []
+        for member in members if isinstance(members, list) else []:
+            if (
+                isinstance(member, dict)
+                and member.get("only_in_container") is True
+                and isinstance(member.get("launcher_id"), str)
+            ):
+                hidden_by_container.add(member["launcher_id"])
+    for launcher in launchers:
+        raw = raw_by_id.get(launcher.id, {})
+        if isinstance(raw.get("show_in_main"), bool):
+            continue
+        launcher.show_in_main = (
+            raw.get("enabled", True) is not False
+            and raw.get("only_in_groups", False) is not True
+            and launcher.id not in hidden_by_container
+        )
+
+
 def _entry_label(kind: str, index: int, entry: Any) -> str:
     name = entry.get("name") if isinstance(entry, dict) else None
     if isinstance(name, str) and name:
@@ -249,7 +282,7 @@ class AppConfig:
     # Empty means containers first, then launchers, which is the order before any drag.
     main_order: list[str] = field(default_factory=list)
     settings: Settings = field(default_factory=Settings)
-    version: int = 1
+    version: int = CONFIG_VERSION
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -273,9 +306,6 @@ class AppConfig:
             problems = []
         if not isinstance(data, dict):
             raise ConfigFormatError("The config file does not contain a JSON object.")
-        version = data.get("version", 1)
-        if not _type_ok("int", version):
-            version = 1
         settings = _from_fields(
             Settings, data.get("settings", {}), label="Settings", problems=problems
         ) or Settings()
@@ -341,13 +371,14 @@ class AppConfig:
         main_order = [
             item for item in _list_of(data, "main_order", problems) if isinstance(item, str)
         ]
+        _migrate_main_menu_flags(data, launchers)
         return cls(
             launchers=launchers,
             settings=settings,
             groups=groups,
             container_groups=container_groups,
             main_order=main_order,
-            version=version,
+            version=CONFIG_VERSION,
         )
 
 
@@ -442,18 +473,9 @@ class ConfigManager:
             return None
         return backup
 
-    def get_enabled_launchers(self) -> list[Launcher]:
-        return [l for l in self.config.launchers if l.enabled]
-
     def get_main_view_launchers(self) -> list[Launcher]:
-        """Enabled launchers that belong on the main hover list."""
-        from .containers import shown_in_main_menu
-
-        return [
-            launcher
-            for launcher in self.config.launchers
-            if shown_in_main_menu(launcher, self.config.container_groups)
-        ]
+        """Launchers that belong on the main hover list."""
+        return [launcher for launcher in self.config.launchers if launcher.show_in_main]
 
     def reload(self) -> AppConfig:
         """Re-read the file from disk, after an external edit.
@@ -601,29 +623,21 @@ class ConfigManager:
 
     def set_shown_in_main_menu(self, launcher_id: str, shown: bool) -> None:
         """Save the one main-popup choice for this launcher."""
-        from .containers import set_shown_in_main_menu
-
         for launcher in self.config.launchers:
-            if launcher.id != launcher_id:
-                continue
-            set_shown_in_main_menu(launcher, self.config.container_groups, shown)
-            self.save()
-            return
+            if launcher.id == launcher_id:
+                launcher.show_in_main = shown
+                self.save()
+                return
 
     def set_launcher_membership(
         self,
         launcher_id: str,
         container_ids: list[str],
         execute_ids: list[str],
-        *,
-        hidden_from_main: bool | None = None,
     ) -> None:
         """Put this launcher in exactly these container and execute groups.
 
-        A membership that stays keeps its Concurrent flag. When
-        hidden_from_main is set, every container membership uses that value.
-        Otherwise an existing Only in Container Group flag is kept, and a new
-        container membership starts off.
+        A membership that stays keeps its place and its Concurrent flag.
         """
         container_keep = _unique_known(
             container_ids, {group.id for group in self.config.container_groups}
@@ -631,19 +645,13 @@ class ConfigManager:
         execute_keep = _unique_known(
             execute_ids, {group.id for group in self.config.groups}
         )
-        hide = bool(hidden_from_main)
         for group in self.config.container_groups:
             group.members = _sync_members(
                 group.members,
                 launcher_id,
                 group.id in container_keep,
-                lambda: ContainerMember(launcher_id, only_in_container=hide),
+                lambda: ContainerMember(launcher_id),
             )
-        if hidden_from_main is not None:
-            for group in self.config.container_groups:
-                for member in group.members:
-                    if member.launcher_id == launcher_id:
-                        member.only_in_container = hide
         for group in self.config.groups:
             group.members = _sync_members(
                 group.members,
