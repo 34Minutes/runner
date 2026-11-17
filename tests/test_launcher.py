@@ -95,11 +95,6 @@ def test_launch_run_as_admin_calls_helper(mock_admin):
         mock_admin.assert_called_once()
 
 
-def test_get_default_icon_placeholder():
-    l = Launcher.new("Foo", "bar")
-    assert launcher_mod.get_default_icon_for_launcher(l) is None
-
-
 @patch("runner.launcher.subprocess.Popen")
 def test_launch_with_working_dir(mock_popen, tmp_path):
     with patch("sys.platform", "darwin"):

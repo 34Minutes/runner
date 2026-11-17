@@ -259,8 +259,3 @@ def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> None:
     """
     _shell_execute_windows("runas", argv, cwd)
     return None
-
-
-def get_default_icon_for_launcher(launcher: Launcher) -> str | None:
-    """Placeholder for future platform-specific icon extraction (Windows .exe icons etc.)."""
-    return None

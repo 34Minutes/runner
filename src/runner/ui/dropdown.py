@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QScrollArea,
-    QWidget as QW,
     QFrame,
     QLabel,
     QLineEdit,
@@ -408,7 +407,6 @@ class DropdownPanel(QWidget):
         self._position_hook: Callable[[], None] | None = None
         self._grow_from_top: bool = True
         self._fixed_edge_y: int = 0
-        self._grow_direction: str = "below"
 
         # Keyboard navigation state
         self._current_button: LaunchButton | None = None
@@ -680,9 +678,6 @@ class DropdownPanel(QWidget):
     def set_row_tooltip(self, provider: Callable[[Launcher], str] | None) -> None:
         """Replace the default launch tooltip. Used by the group list."""
         self._row_tooltip = provider
-
-    def set_width(self, width: int) -> None:
-        self.setFixedWidth(width)
 
     def refresh_filter_visibility(self) -> None:
         """Sync whether the filter search box is shown based on current settings.
@@ -1454,7 +1449,7 @@ class DropdownPanel(QWidget):
 
         Horizontally shift left/right as needed so the dropdown stays fully on-screen.
 
-        Sets internal flags (_grow_from_top, _fixed_edge_y, _grow_direction) so that
+        Sets internal flags (_grow_from_top, _fixed_edge_y) so that
         the show/hide animations grow/shrink *away* from the screen edge (attached to the arrow).
         """
         self._anchor_trigger = trigger
@@ -1529,7 +1524,6 @@ class DropdownPanel(QWidget):
             grow_from_top = False
 
         # Store for animations so they expand/contract away from the edge.
-        self._grow_direction = direction
         self._fixed_edge_y = fixed_edge_y
         self._grow_from_top = grow_from_top
 
@@ -1582,7 +1576,6 @@ class DropdownPanel(QWidget):
 
         self.move(rect.topLeft())
         self._grow_from_top = grow_from_top
-        self._grow_direction = "below" if grow_from_top else "above"
         self._fixed_edge_y = rect.top() if grow_from_top else rect.bottom()
 
     def position_next_to(self, host: QWidget, anchor: QWidget, *, prefer_right: bool = True) -> None:
@@ -1625,7 +1618,6 @@ class DropdownPanel(QWidget):
 
         self.move(rect.topLeft())
         self._grow_from_top = rect.top() <= anchor_top + 2
-        self._grow_direction = "below" if self._grow_from_top else "above"
         self._fixed_edge_y = rect.top() if self._grow_from_top else rect.bottom()
 
     # --- Hover handling (combined area: trigger + this panel) ---
@@ -1968,7 +1960,6 @@ class DropdownPanel(QWidget):
         self.setWindowOpacity(self._rest_opacity())
         self._grow_from_top = True
         self._fixed_edge_y = 0
-        self._grow_direction = "below"
         if was_visible:
             self.closed.emit()
 

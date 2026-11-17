@@ -23,25 +23,6 @@ def _get_executable_path() -> str:
     return os.path.abspath(sys.argv[0])
 
 
-def is_in_startup() -> bool:
-    """Return whether a Run entry for Runner exists for the current user."""
-    try:
-        import winreg  # type: ignore
-    except Exception:
-        return False
-
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
-            try:
-                winreg.QueryValueEx(key, "Runner")
-                return True
-            except FileNotFoundError:
-                return False
-    except Exception:
-        return False
-
-
 def add_to_startup() -> bool:
     """Create (or update) the current-user Run entry so Runner starts with Windows.
 
@@ -133,18 +114,3 @@ def acquire_single_instance_mutex() -> bool:
     except Exception:
         # Any failure (e.g. during cross-testing) -> allow running
         return True
-
-
-def release_single_instance_mutex() -> None:
-    global _single_instance_mutex_handle
-    if not _single_instance_mutex_handle:
-        return
-    if sys.platform != "win32":
-        _single_instance_mutex_handle = None
-        return
-    try:
-        import ctypes
-        ctypes.windll.kernel32.CloseHandle(_single_instance_mutex_handle)
-    except Exception:
-        pass
-    _single_instance_mutex_handle = None

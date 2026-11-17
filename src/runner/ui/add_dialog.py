@@ -36,7 +36,6 @@ class _MembershipList(QWidget):
 
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._title = title
         self._ids: list[str] = []
         self._names: dict[str, str] = {}
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QCheckBox, QWidget
 
 from ..config import Group, GroupMember, Launcher
-from .member_dialog import MemberPickerDialog, _ClickCell, _DragGhost, _NameCell  # noqa: F401
+from .member_dialog import MemberPickerDialog, _ClickCell
 from .stay_on_top import warning
 from .toggle_switch import ToggleSwitch
 
