@@ -135,42 +135,80 @@ def test_launch_url_windows():
             mock_start.assert_called_once_with("https://example.com")
 
 
+def _on_path(name):
+    """shutil.which stand-in: every program is found, as C:\\Tools\\<name>.exe."""
+    return f"C:\\Tools\\{name}.exe"
+
+
 @patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
 def test_launch_python_windows(mock_sub):
-    with patch("sys.platform", "win32"):
-        l = Launcher.new("Script", "myscript.py")
-        launcher_mod.launch(l)
-        # On win it uses "py -3" + shell? but the argv build line + creationflags are hit
-        assert mock_sub.Popen.called
+    with patch("sys.platform", "win32"), patch("runner.launcher.shutil.which", _on_path):
+        launcher_mod.launch(Launcher.new("Script", "myscript.py"))
+    argv = mock_sub.Popen.call_args[0][0]
+    assert argv == ["C:\\Tools\\py.exe", "-3", "myscript.py"]
 
 
 @patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
-def test_launch_win32_bare_command_shell(mock_sub):
-    with patch("sys.platform", "win32"):
-        l = Launcher.new("Calc", "calc")
-        # the code will do subprocess.Popen(...) which is our mock's Popen, and use the flags
-        launcher_mod.launch(l)
-        assert mock_sub.Popen.called
-        # shell=True path taken
-        call = mock_sub.Popen.call_args
-        assert call[1].get("shell") is True or "shell" in str(call)
+def test_launch_win32_program_on_path_starts_without_cmd(mock_sub):
+    """No cmd.exe in between, so & | % reach the program as typed."""
+    with patch("sys.platform", "win32"), patch("runner.launcher.shutil.which", _on_path):
+        launcher_mod.launch(Launcher.new("Tool", "tool", args='"a & b" 50% x|y'))
+    call = mock_sub.Popen.call_args
+    assert call[0][0] == ["C:\\Tools\\tool.exe", "a & b", "50%", "x|y"]
+    assert "shell" not in call[1]
+    assert call[1]["creationflags"] == mock_sub.CREATE_NO_WINDOW
 
 
 @patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
 def test_launch_win32_show_console(mock_sub):
-    with patch("sys.platform", "win32"):
-        l = Launcher.new("Cmd", "cmd", show_console=True)
-        launcher_mod.launch(l)
-        assert mock_sub.Popen.called
+    with patch("sys.platform", "win32"), patch("runner.launcher.shutil.which", _on_path):
+        launcher_mod.launch(Launcher.new("Cmd", "cmd", show_console=True))
+    assert mock_sub.Popen.call_args[1]["creationflags"] == mock_sub.CREATE_NEW_CONSOLE
 
 
-@patch("runner.launcher.subprocess", new_callable=_win32_subprocess_mock)
-def test_launch_win32_python_wrapped_console(mock_sub):
-    with patch("sys.platform", "win32"):
-        l = Launcher.new("PyScript", "python", args="myscript.py", show_console=True)
-        launcher_mod.launch(l)
-        assert mock_sub.Popen.called
+def test_launch_win32_name_not_on_path_uses_shell_execute():
+    """An App Paths name like 'brave', a shortcut, or a document opens like the Run dialog."""
+    fake_ctypes = MagicMock()
+    fake_ctypes.windll.shell32.ShellExecuteW.return_value = 42
+    with patch("sys.platform", "win32"), \
+         patch("runner.launcher.shutil.which", return_value=None), \
+         patch("runner.launcher.subprocess.Popen") as mock_popen, \
+         patch.dict("sys.modules", {"ctypes": fake_ctypes}):
+        result = launcher_mod.launch(Launcher.new("Brave", "brave", args="https://x.com"))
+    assert result is None
+    mock_popen.assert_not_called()
+    args = fake_ctypes.windll.shell32.ShellExecuteW.call_args[0]
+    assert args[1:4] == ("open", "brave", "https://x.com")
 
+
+def test_launch_win32_shell_execute_failure_is_reported():
+    """A typo used to vanish inside cmd.exe. Now Windows' refusal is an error."""
+    fake_ctypes = MagicMock()
+    fake_ctypes.windll.shell32.ShellExecuteW.return_value = 2  # ERROR_FILE_NOT_FOUND
+    with patch("sys.platform", "win32"), \
+         patch("runner.launcher.shutil.which", return_value=None), \
+         patch.dict("sys.modules", {"ctypes": fake_ctypes}):
+        with pytest.raises(OSError, match="could not start 'brav'"):
+            launcher_mod.launch(Launcher.new("Typo", "brav"))
+
+
+def test_shell_execute_child_does_not_get_bundle_qt_paths(monkeypatch):
+    """ShellExecute takes no environment, so the bundle's entries are removed for the call."""
+    monkeypatch.setenv("QT_PLUGIN_PATH", "C:\\Runner\\_internal\\PySide6\\plugins")
+    seen = {}
+    fake_ctypes = MagicMock()
+
+    def fake_shell_execute(*_args):
+        seen["qt"] = os.environ.get("QT_PLUGIN_PATH")
+        return 42
+
+    fake_ctypes.windll.shell32.ShellExecuteW.side_effect = fake_shell_execute
+    with patch("runner.launcher.sys.frozen", True, create=True), \
+         patch.dict("sys.modules", {"ctypes": fake_ctypes}):
+        launcher_mod._shell_execute_windows("open", ["brave"], None)
+    assert seen["qt"] is None
+    # Runner's own process keeps it.
+    assert os.environ["QT_PLUGIN_PATH"].endswith("plugins")
 
 
 def test_launch_run_as_admin_windows_body_covered():

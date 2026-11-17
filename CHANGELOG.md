@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Command field can hold a program and its arguments, such as `python3 tool.py`.
 - A `.py` launcher in the packaged app runs with Python. It started a second copy of Runner instead.
 - **Run as administrator** quotes arguments that contain spaces, and reports a failure or a declined UAC prompt.
+- Windows: launchers no longer run through `cmd.exe`, so arguments containing `&`, `|`, `^`, or `%` reach the program as typed. A program on PATH starts directly; any other name (an App Paths name such as `brave`, a shortcut, or a document) opens the way the Run dialog would, and a name Windows cannot find is reported instead of failing silently.
 - A `~` argument, such as the Finder sample's, opens the home folder.
 - The arrow can be dragged onto any monitor. It was held to the primary screen.
 - Add, Edit, and Manage dialogs are raised again when the arrow or a list comes to the front. The check that skips popup menus also skipped every Runner window, because Qt's Tool window type shares its bits with Popup, so this never ran. On Windows a dialog could end up behind the arrow.

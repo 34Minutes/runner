@@ -19,6 +19,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Sequence
 
@@ -191,41 +192,72 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
     if launcher.run_as_admin:
         return _launch_as_admin_windows(argv, cwd)
 
-    # Normal launch on Windows: shell=True so that bare commands like "calc",
-    # "brave", "explorer" resolve the same way as the Run dialog, via App
-    # Paths and shell associations.
+    # No cmd.exe in between, so & | ^ % in arguments reach the program as typed.
+    program = shutil.which(argv[0])
+    if program is None:
+        # Not a program on PATH: an App Paths name ("brave"), a shortcut, or a
+        # document. Open it the way the Run dialog would.
+        _shell_execute_windows("open", argv, cwd)
+        return None
     creationflags = (
         subprocess.CREATE_NEW_CONSOLE if launcher.show_console else subprocess.CREATE_NO_WINDOW
     )
     return subprocess.Popen(
-        subprocess.list2cmdline(argv),
-        shell=True,
+        [program, *argv[1:]],
         cwd=cwd,
         env=env,
         creationflags=creationflags,
     )
 
 
-def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> None:
-    """Use ShellExecute with the runas verb, which shows the UAC prompt.
+@contextmanager
+def _bundle_env_removed():
+    """Hide the packaged app's own variables from a ShellExecute child.
 
-    There is no process handle on this path. A failure, including a declined
-    UAC prompt, raises OSError so the caller can report it.
+    ShellExecute takes no environment of its own, so the child gets this
+    process's. Remove the bundle's entries for the call, then put them back.
     """
+    clean = _child_env()
+    if clean is None:
+        yield
+        return
+    saved = dict(os.environ)
+    try:
+        os.environ.clear()
+        os.environ.update(clean)
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def _shell_execute_windows(verb: str, argv: Sequence[str], cwd: str | None) -> None:
+    """ShellExecuteW with this verb. Raises OSError when Windows refuses."""
     import ctypes
 
     params = subprocess.list2cmdline(list(argv[1:])) if len(argv) > 1 else None
-    result = ctypes.windll.shell32.ShellExecuteW(
-        None,
-        "runas",
-        argv[0],
-        params,
-        cwd or None,
-        1,  # SW_SHOWNORMAL
-    )
+    with _bundle_env_removed():
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None,
+            verb,
+            argv[0],
+            params,
+            cwd or None,
+            1,  # SW_SHOWNORMAL
+        )
     # ShellExecuteW returns a value greater than 32 on success.
     if int(result) <= 32:
-        raise OSError(f"Could not start '{argv[0]}' as administrator (error {int(result)}).")
+        how = " as administrator" if verb == "runas" else ""
+        raise OSError(f"Windows could not start '{argv[0]}'{how} (error {int(result)}).")
+
+
+def _launch_as_admin_windows(argv: Sequence[str], cwd: str | None) -> None:
+    """The runas verb shows the UAC prompt. There is no process handle.
+
+    A failure, including a declined UAC prompt, raises OSError so the caller
+    can report it.
+    """
+    _shell_execute_windows("runas", argv, cwd)
     return None
 
 
