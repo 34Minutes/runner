@@ -260,3 +260,18 @@ def test_reload_updates_the_same_object(tmp_path, monkeypatch):
     assert held.settings.trigger_width == 222
     assert [l.name for l in held.launchers] == ["Edited"]
     assert held_launchers_before is not held.launchers
+
+
+def test_update_settings_can_defer_the_write(tmp_path, monkeypatch):
+    """Sliders change settings on every tick and write the file once at the end."""
+    test_dir = _isolated(tmp_path, monkeypatch, "RunnerDeferred")
+    mgr = ConfigManager()
+    mgr.config  # creates the file
+    before = (test_dir / "config.json").read_text()
+
+    mgr.update_settings(save=False, opacity_percent=55)
+    assert mgr.config.settings.opacity_percent == 55
+    assert (test_dir / "config.json").read_text() == before
+
+    mgr.save()
+    assert ConfigManager().config.settings.opacity_percent == 55

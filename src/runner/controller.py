@@ -58,6 +58,8 @@ else:
     win_utils = None  # type: ignore
 
 DEFAULT_POSITION = (100, 100)
+# A slider writes the config this long after it stops moving.
+SLIDER_SAVE_DELAY_MS = 400
 # Shown at most this many config problems in the warning. The rest are counted.
 _MAX_PROBLEMS_SHOWN = 12
 
@@ -296,6 +298,11 @@ class RunnerController:
         self.hide_timer.setSingleShot(True)
         self.hide_timer.setInterval(self.settings.hover_delay_ms)
         self.hide_timer.timeout.connect(self._do_hide)
+        # One config write after a slider stops moving, not one per tick.
+        self.save_timer = QTimer()
+        self.save_timer.setSingleShot(True)
+        self.save_timer.setInterval(SLIDER_SAVE_DELAY_MS)
+        self.save_timer.timeout.connect(self.cfg.save)
 
     def _connect_hover(self) -> None:
         self.trigger.hover_enter.connect(self._on_trigger_enter)
@@ -358,12 +365,13 @@ class RunnerController:
         trigger.filter_toggled.connect(self._on_filter_toggled)
         trigger.greeting_toggled.connect(self._on_greeting_toggled)
         trigger.groups_toggled.connect(self._on_show_groups_toggled)
+        # Sliders apply every tick but write the file once they settle.
         trigger.window_opacity_changed.connect(self._on_opacity_changed)
         trigger.decay_changed.connect(
-            lambda ms: self.cfg.update_settings(decay_ms=clamp_decay_ms(ms))
+            lambda ms: self._update_settings_soon(decay_ms=clamp_decay_ms(ms))
         )
         trigger.color_scheme_selected.connect(self._on_color_scheme)
-        trigger.opacity_changed.connect(lambda box: self.cfg.update_settings(box_opacity=box))
+        trigger.opacity_changed.connect(lambda box: self._update_settings_soon(box_opacity=box))
 
     def _connect_windows_startup(self) -> None:
         if sys.platform != "win32" or win_utils is None:
@@ -384,6 +392,7 @@ class RunnerController:
         self.trigger.position_changed.connect(self._save_position)
         self.trigger.size_changed.connect(self._save_size)
         self.app.aboutToQuit.connect(self._save_trigger_geometry)
+        self.app.aboutToQuit.connect(self.flush_pending_save)
 
     def start(self) -> None:
         """Show the arrow. Positioning waits until the window is realized."""
@@ -1170,8 +1179,18 @@ class RunnerController:
                 panel.setWindowOpacity(value)
 
     def _on_opacity_changed(self, percent: int) -> None:
-        self.cfg.update_settings(opacity_percent=percent)
+        self._update_settings_soon(opacity_percent=percent)
         self._apply_opacity(percent)
+
+    def _update_settings_soon(self, **changes) -> None:
+        """Apply now, write the config file once the changes stop."""
+        self.cfg.update_settings(save=False, **changes)
+        self.save_timer.start()
+
+    def flush_pending_save(self) -> None:
+        if self.save_timer.isActive():
+            self.save_timer.stop()
+            self.cfg.save()
 
     def _apply_color_scheme(self) -> None:
         self.trigger.update()
@@ -1247,6 +1266,7 @@ class RunnerController:
 
     def reload_config(self) -> None:
         """Re-read config.json after an outside edit and redraw everything from it."""
+        self.flush_pending_save()
         self.cfg.reload()
         use(self.settings.color_scheme)
         self.hide_timer.setInterval(self.settings.hover_delay_ms)

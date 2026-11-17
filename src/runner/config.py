@@ -663,8 +663,10 @@ class ConfigManager:
         self.config.launchers = new_order
         self.save()
 
-    def update_settings(self, **kwargs: Any) -> None:
+    def update_settings(self, *, save: bool = True, **kwargs: Any) -> None:
+        """Change settings. save=False leaves the write to the caller, for slider drags."""
         for k, v in kwargs.items():
             if hasattr(self.config.settings, k):
                 setattr(self.config.settings, k, v)
-        self.save()
+        if save:
+            self.save()
