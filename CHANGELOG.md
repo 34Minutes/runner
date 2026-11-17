@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The arrow's position is saved when a drag ends, not on every mouse move.
 - `scripts/build-mac.sh` works from any folder, runs the tests first, takes its version from `pyproject.toml`, and installs to `/Applications` with `--deploy`. A test workflow runs the suite on macOS and Windows on every push.
 - Internal: the window wiring moved from one long `main()` function into `RunnerController` (`controller.py`). The execute-group and container-group screens share one base dialog, and so do their manager screens.
+- Whether a launcher is on the main popup is stored once, as `show_in_main`. Include in dropdown list, Only In Groups, and Only in Container Group all show that one setting, so they can no longer disagree. The config version is now 2, and a version 1 file is converted on load with the same result it had before. A launcher hidden from the main popup now always runs in its execute groups and appears in its containers; an old hand-edited `"enabled": false` used to drop it from them silently.
+- The Opacity, Decay rate, and box Opacity sliders write the config once they stop moving, not on every tick.
+- Tests can no longer read or write the real config file. Some did, and replaced the user's launchers during a test run.
 
 ### Fixed
 - **Reload config** applies everything in the file. The arrow and the lists were still reading the settings from before the reload, so Pin and the menu switches stopped matching.
