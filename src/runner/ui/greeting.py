@@ -386,15 +386,16 @@ class StartupGreeting(QObject):
         trigger.set_greeting_highlight(True, True, 1.0)
         self._border.set_opacity(1.0)
         self._border.set_flash_on(True)
-        self._border.place_around(trigger)
         self._border.show()
         if self._show_bubble:
             self._bubble.set_opacity(1.0)
             self._bubble.set_flash_on(True)
-            self._bubble.place_near(trigger)
             self._bubble.show()
         else:
             self._bubble.hide()
+        # Place after show. Moving a frameless tool window before it exists
+        # lands short by the macOS title bar, so the rim and bubble sit above the arrow.
+        self._place(trigger)
         self._border.stackUnder(trigger)
         trigger.raise_()
         if not self._timer.isActive():
@@ -503,14 +504,21 @@ class StartupGreeting(QObject):
             self.dismiss_for_session()
             return False
         if kind in (QEvent.Type.Move, QEvent.Type.Resize):
-            self._border.place_around(trigger)
-            if visible:
-                bubble.place_near(trigger)
+            self._place(trigger)
         elif kind == QEvent.Type.Hide:
             self._border.hide()
             if visible:
                 bubble.hide()
         return False
+
+    def _place(self, trigger: QWidget) -> None:
+        self._border.place_around(trigger)
+        try:
+            show_bubble = self._bubble.isVisible()
+        except RuntimeError:
+            show_bubble = False
+        if show_bubble:
+            self._bubble.place_near(trigger)
 
     def _attach(self, trigger: QWidget) -> None:
         if self._trigger is trigger:

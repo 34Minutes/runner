@@ -11,13 +11,54 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QEvent, QPoint, QRect, Signal, QPointF, QTimer, QObject
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QMouseEvent, QPaintEvent, QPainter, QPen, QColor, QPolygonF
-from PySide6.QtWidgets import QWidget, QMenu, QApplication, QWidgetAction
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QWidget, QWidgetAction, QApplication
 import sys
 
 from ..config import AppConfig, Launcher
 from .opacity_dialog import OpacityDialog
 from .theme import SCHEMES, current, resolve, with_opacity
 from .toggle_switch import ToggleSwitch
+
+# The arrow has to stay visible enough to drag the slider back up.
+OPACITY_MIN_PERCENT = 20
+OPACITY_MAX_PERCENT = 100
+DECAY_MAX_MS = 1000
+
+
+def clamp_opacity_percent(value: int) -> int:
+    return max(OPACITY_MIN_PERCENT, min(OPACITY_MAX_PERCENT, int(value)))
+
+
+def clamp_decay_ms(value: int) -> int:
+    return max(0, min(DECAY_MAX_MS, int(value)))
+
+
+class MenuSlider(QWidget):
+    """A labeled horizontal slider used as a row in the arrow menu."""
+
+    changed = Signal(int)
+
+    def __init__(self, label: str, minimum: int, maximum: int, value: int, *, invert: bool = False, parent=None):
+        super().__init__(parent)
+        self.setObjectName(label)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 2, 10, 2)
+        layout.setSpacing(8)
+        name = QLabel(label, self)
+        name.setMinimumWidth(name.fontMetrics().horizontalAdvance("Decay rate") + 4)
+        self._slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._slider.setRange(minimum, maximum)
+        self._slider.setValue(value)
+        self._slider.setInvertedAppearance(invert)
+        self._slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._slider.setFixedWidth(120)
+        self._slider.valueChanged.connect(self.changed.emit)
+        layout.addWidget(name)
+        layout.addWidget(self._slider)
+        self.setFixedHeight(28)
+
+    def slider(self) -> QSlider:
+        return self._slider
 
 
 class ArrowContextMenu(QMenu):
@@ -176,11 +217,15 @@ class TriggerWidget(QWidget):
     request_reset = Signal()
     request_exit = Signal()
     color_scheme_selected = Signal(str)
+    # The Opacity row under Color Schemes. This is the arrow box, not the lists.
     opacity_changed = Signal(int)
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
     greeting_toggled = Signal(bool)
     groups_toggled = Signal(bool)
+    # The Opacity slider above Decay rate. This is the arrow and the lists.
+    window_opacity_changed = Signal(int)
+    decay_changed = Signal(int)
     startup_toggled = Signal(bool)  # Windows only
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
@@ -228,6 +273,7 @@ class TriggerWidget(QWidget):
 
         # Move to saved position (clamped later by caller if needed)
         self.move(config.settings.position_x, config.settings.position_y)
+        self.setWindowOpacity(clamp_opacity_percent(config.settings.opacity_percent) / 100)
 
         # Optional: slight tooltip
         self.setToolTip(
@@ -335,7 +381,33 @@ class TriggerWidget(QWidget):
         menu.addAction(self._action_manage_groups)
         menu.addAction(self._action_manage_containers)
         menu.addSeparator()
-        menu.addAction(self._action_exit)
+        opacity = MenuSlider(
+            "Opacity",
+            OPACITY_MIN_PERCENT,
+            OPACITY_MAX_PERCENT,
+            clamp_opacity_percent(self._config.settings.opacity_percent),
+        )
+        opacity.setPalette(menu.palette())
+        opacity.changed.connect(self.window_opacity_changed.emit)
+        opacity_action = QWidgetAction(menu)
+        opacity_action.setText("Opacity")
+        opacity_action.setDefaultWidget(opacity)
+        menu.addAction(opacity_action)
+
+        decay = MenuSlider(
+            "Decay rate",
+            0,
+            DECAY_MAX_MS,
+            clamp_decay_ms(self._config.settings.decay_ms),
+            invert=True,
+        )
+        decay.setPalette(menu.palette())
+        decay.changed.connect(self.decay_changed.emit)
+        decay_action = QWidgetAction(menu)
+        decay_action.setText("Decay rate")
+        decay_action.setDefaultWidget(decay)
+        menu.addAction(decay_action)
+
         menu.addSeparator()
         scheme_menu = QMenu("Color Schemes", menu)
         active_id = resolve(getattr(self._config.settings, "color_scheme", "dark")).id
@@ -369,6 +441,8 @@ class TriggerWidget(QWidget):
 
         opacity_action.triggered.connect(_open_opacity)
         menu.addAction(opacity_action)
+        menu.addSeparator()
+        menu.addAction(self._action_exit)
 
         # Auto-hide the entire menu when the mouse moves away from it (no click required to dismiss).
         # This makes the right-click menu feel lighter for the floating arrow widget.
@@ -403,7 +477,18 @@ class TriggerWidget(QWidget):
                 return False
 
         mouse_filter = MenuMouseFilter(menu, hide_timer)
-        watched = [menu, scheme_menu, pin_switch, filter_switch, greeting_switch, groups_switch]
+        watched = [
+            menu,
+            scheme_menu,
+            pin_switch,
+            filter_switch,
+            greeting_switch,
+            groups_switch,
+            opacity,
+            opacity.slider(),
+            decay,
+            decay.slider(),
+        ]
         if sys.platform == "win32":
             watched.append(startup_switch)
         for widget in watched:

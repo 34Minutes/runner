@@ -77,8 +77,9 @@ _DRAG_THRESHOLD_PX = 10
 # that the row still feels under the pointer.
 _DRAG_LIFT_X = 8
 _DRAG_SLIDE_MS = 150
-# Close eases away for about a quarter second so the pointer can reach a
-# neighbouring list. Opening still uses Settings.animation_duration_ms.
+# Close fades in place for about a quarter second so the pointer can reach a
+# neighbouring list. The list does not slide or shrink. Opening still uses
+# Settings.animation_duration_ms.
 _HIDE_DECAY_MS = 250
 
 
@@ -93,7 +94,7 @@ class LockedPairMotion(QObject):
         self,
         parent: QObject,
         open_duration_ms: Callable[[], int],
-        hide_duration_ms: int = _HIDE_DECAY_MS,
+        hide_duration_ms: int | Callable[[], int] = _HIDE_DECAY_MS,
     ) -> None:
         super().__init__(parent)
         self._open_duration_ms = open_duration_ms
@@ -153,7 +154,8 @@ class LockedPairMotion(QObject):
         if len(visible) < 2:
             return False
         if not self._presented:
-            fraction = min(float(panel.windowOpacity()) for panel in visible)
+            rest = visible[0]._rest_opacity() or 1.0
+            fraction = min(float(panel.windowOpacity()) / rest for panel in visible)
             self._progress = max(0.0, min(1.0, fraction))
             self._presented = True
         self.close(visible)
@@ -174,7 +176,7 @@ class LockedPairMotion(QObject):
         self._closing = True
         for panel in self._panels:
             panel.mark_linked_closing()
-        self._retarget(0.0, QEasingCurve.Type.InCubic, self._hide_duration_ms)
+        self._retarget(0.0, QEasingCurve.Type.InCubic, self._hide_ms())
 
     def snap_open(self) -> None:
         """Stop a close and leave both lists fully open together."""
@@ -213,7 +215,7 @@ class LockedPairMotion(QObject):
                 if target < fraction
                 else QEasingCurve.Type.OutCubic
             )
-            duration_ms = self._hide_duration_ms if target < fraction else self._open_duration_ms()
+            duration_ms = self._hide_ms() if target < fraction else self._open_duration_ms()
             self._retarget(target, easing, duration_ms)
             return
         if fraction >= 0.999:
@@ -245,6 +247,14 @@ class LockedPairMotion(QObject):
         self._panels = list(panels)
         for index, panel in enumerate(self._panels):
             panel.capture_open_pose(focus=focus_first and index == 0)
+
+    def _hide_ms(self) -> int:
+        raw = self._hide_duration_ms() if callable(self._hide_duration_ms) else self._hide_duration_ms
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = _HIDE_DECAY_MS
+        return max(0, min(1000, value))
 
     def _halt_clock(self) -> None:
         self._generation += 1
@@ -501,6 +511,23 @@ class DropdownPanel(QWidget):
 
     def _pinned(self) -> bool:
         return self._honor_pin and self._config.settings.pinned_open
+
+    def _rest_opacity(self) -> float:
+        percent = getattr(self._config.settings, "opacity_percent", 100)
+        try:
+            percent = int(percent)
+        except (TypeError, ValueError):
+            percent = 100
+        return max(20, min(100, percent)) / 100.0
+
+    def _decay_ms(self) -> int:
+        """How long the close fade lasts. The Decay rate slider stores this."""
+        value = getattr(self._config.settings, "decay_ms", _HIDE_DECAY_MS)
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = _HIDE_DECAY_MS
+        return max(0, min(1000, value))
 
     def set_heading(self, text: str) -> None:
         """Small corner label above the rows. Empty text hides it."""
@@ -839,12 +866,11 @@ class DropdownPanel(QWidget):
         self._frame.setFixedHeight(target_h)
         self.setFixedHeight(target_h)
 
-        # Give the inner content a minimumHeight so that when the QScrollArea (resizable)
-        # is constrained by the frame's fixed height (or during/after anims), the
-        # button_layout still receives enough vertical space to place children with
-        # their full minHeight *and* the declared spacing(2).
+        # The rows need their full height inside the scroll area. The scroll area
+        # itself must stay shorter than that content, or the list clips at the
+        # frame and the scrollbar never appears.
         self._button_container.setMinimumHeight(inner_h)
-        self._scroll.setMinimumHeight(inner_h)
+        self._scroll.setMinimumHeight(0)
 
         # Force layout to adopt the size so child layouts (button spacing) get the correct allocation now
         self._frame.updateGeometry()
@@ -1640,7 +1666,7 @@ class DropdownPanel(QWidget):
             self.raise_()  # bring list forward (caller will raise trigger after to keep arrow on top)
             self._place()
             self.raise_()
-            self.setWindowOpacity(1.0)
+            self.setWindowOpacity(self._rest_opacity())
         else:
             self._place()
             # Clear anim constraints so our fixed target from _update rules
@@ -1720,13 +1746,13 @@ class DropdownPanel(QWidget):
             y = self._linked_edge - frame_h
         self.move(self._linked_x, y)
         self._linked_fraction = fraction
-        self.setWindowOpacity(fraction)
+        self.setWindowOpacity(fraction * self._rest_opacity())
 
     def release_open_pose(self) -> None:
         """The locked open finished. Restore normal resizing."""
         self._linked_closing = False
         self._linked_fraction = 1.0
-        self.setWindowOpacity(1.0)
+        self.setWindowOpacity(self._rest_opacity())
         self._frame.setMinimumHeight(0)
         self._frame.setMaximumHeight(16777215)
         self._update_height_for_content()
@@ -1741,7 +1767,7 @@ class DropdownPanel(QWidget):
         self._clear_keyboard_selection()
         self._visible_buttons.clear()
         self.hide()
-        self.setWindowOpacity(1.0)
+        self.setWindowOpacity(self._rest_opacity())
         self._frame.setMinimumHeight(0)
         self._frame.setMaximumHeight(16777215)
         self._frame.setFixedHeight(self._frame.sizeHint().height() or 120)
@@ -1767,7 +1793,7 @@ class DropdownPanel(QWidget):
             return
         self._invalidate_motion()
         self._close_motion = 0
-        self.setWindowOpacity(1.0)
+        self.setWindowOpacity(self._rest_opacity())
         self._frame.setMinimumHeight(0)
         self._frame.setMaximumHeight(16777215)
         self._update_height_for_content()
@@ -1844,7 +1870,7 @@ class DropdownPanel(QWidget):
         anim = QPropertyAnimation(self, b"windowOpacity", self)
         anim.setDuration(self._config.settings.animation_duration_ms)
         anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
+        anim.setEndValue(self._rest_opacity())
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         height_anim = QPropertyAnimation(self._frame, b"minimumHeight", self)
@@ -1859,7 +1885,7 @@ class DropdownPanel(QWidget):
             self._frame.setMinimumHeight(0)
             self._frame.setMaximumHeight(16777215)
             self._frame.setFixedHeight(end_h)
-            self.setWindowOpacity(1.0)
+            self.setWindowOpacity(self._rest_opacity())
             # Restore proper mins for the content now that we are at full open height.
             # This re-enables the "don't squish my spacings" protection.
             self._update_height_for_content()
@@ -1876,6 +1902,10 @@ class DropdownPanel(QWidget):
             pos_anim.start()
 
     def start_hide_animation(self) -> None:
+        """Fade this list out where it is, then close it.
+
+        The opacity still eases to nothing. The list does not slide or shrink.
+        """
         if self._pinned():
             return
         if self._locked_pair is not None:
@@ -1886,38 +1916,19 @@ class DropdownPanel(QWidget):
         if not self.isVisible():
             return
 
+        decay_ms = self._decay_ms()
+        if decay_ms <= 0:
+            self.force_hide()
+            return
+
         motion = self._invalidate_motion()
         self._close_motion = motion
 
-        self._button_container.setMinimumHeight(0)
-        self._scroll.setMinimumHeight(0)
-
-        current_h = self._frame.height()
-        start_op = self.windowOpacity()
-
         anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(_HIDE_DECAY_MS)
-        anim.setStartValue(start_op)
+        anim.setDuration(decay_ms)
+        anim.setStartValue(self.windowOpacity())
         anim.setEndValue(0.0)
         anim.setEasingCurve(QEasingCurve.Type.InCubic)
-
-        height_anim = QPropertyAnimation(self._frame, b"minimumHeight", self)
-        height_anim.setDuration(_HIDE_DECAY_MS)
-        height_anim.setStartValue(current_h)
-        height_anim.setEndValue(6)
-        height_anim.setEasingCurve(QEasingCurve.Type.InCubic)
-
-        pos_anim = None
-        grow_from_top = getattr(self, "_grow_from_top", True)
-        if not grow_from_top:
-            fixed_bottom = getattr(self, "_fixed_edge_y", self.y() + current_h)
-            curr_y = self.y()
-            end_y = fixed_bottom - 6
-            pos_anim = QPropertyAnimation(self, b"pos", self)
-            pos_anim.setDuration(_HIDE_DECAY_MS)
-            pos_anim.setStartValue(QPoint(self.x(), curr_y))
-            pos_anim.setEndValue(QPoint(self.x(), end_y))
-            pos_anim.setEasingCurve(QEasingCurve.Type.InCubic)
 
         def on_finished(motion: int = motion) -> None:
             if motion != self._motion:
@@ -1927,22 +1938,15 @@ class DropdownPanel(QWidget):
             self._clear_keyboard_selection()
             self._visible_buttons.clear()
             self.hide()
-            self.setWindowOpacity(1.0)
+            self.setWindowOpacity(self._rest_opacity())
             self._frame.setMinimumHeight(0)
             self._frame.setMaximumHeight(16777215)
-            self._frame.setFixedHeight(self._frame.sizeHint().height() or 120)
             self.closed.emit()
 
-        height_anim.finished.connect(on_finished)
-
+        anim.finished.connect(on_finished)
         self._animation = anim
         self._track_anim(anim)
-        self._track_anim(height_anim)
         anim.start()
-        height_anim.start()
-        if pos_anim is not None:
-            self._track_anim(pos_anim)
-            pos_anim.start()
 
     def force_hide(self) -> None:
         """Immediate hide (used on launch or escape)."""
@@ -1961,7 +1965,7 @@ class DropdownPanel(QWidget):
         self._clear_keyboard_selection()
         self._visible_buttons.clear()
         self.hide()
-        self.setWindowOpacity(1.0)
+        self.setWindowOpacity(self._rest_opacity())
         self._grow_from_top = True
         self._fixed_edge_y = 0
         self._grow_direction = "below"

@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.9] - 2026-11-17
+
+### Changed
+- A list that is closing on its own fades in place. It no longer slides or shrinks while the opacity changes. Moving the pointer off the list still closes it. With **Show execute groups** on, the main popup and the execute-groups list still open and close together.
+- **Exit** is the last item on the arrow menu, under its own separator.
+- The arrow menu has an **Opacity** slider and a **Decay rate** slider above **Color Schemes**. That Opacity is how solid the arrow and the lists are. Decay rate is how fast a list fades after the pointer leaves. Dragging the slider to the right makes the fade faster. **Opacity** under **Color Schemes** is unchanged: it opens the slider for the arrow's box.
+
+### Fixed
+- Clicking a launcher in the main popup also closes the execute groups list. The two lists close together.
+- A long list scrolls inside its frame. The scrollbar was missing because the list grew to the full content height and then got clipped.
+- The greeting bubble and flashing border line up with the arrow. The first placement of those windows was a title bar too high.
+- Choosing a launcher or an execute group closes the open lists immediately. A fade was cancelled when the pointer was still over the list, which happened when the launched app was already focused.
+
 ## [1.0.8] - 2026-11-17
 
 ### Added

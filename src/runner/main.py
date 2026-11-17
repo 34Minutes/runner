@@ -20,9 +20,9 @@ from PySide6.QtGui import QCursor, QIcon, QAction, QPainter, QPen, QColor, QPixm
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
-    QSystemTrayIcon,
     QMenu,
     QMessageBox,
+    QSystemTrayIcon,
 )
 
 from .config import (
@@ -40,7 +40,7 @@ from .moves import enabled_member_launchers, visible_main_tokens
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .ui.theme import current, use
 from .launcher import launch
-from .ui.trigger import TriggerWidget
+from .ui.trigger import TriggerWidget, clamp_decay_ms, clamp_opacity_percent
 from .ui.dropdown import DropdownPanel, LockedPairMotion, SubmenuButton
 from .ui.launch_button import LaunchButton
 from .ui.add_dialog import AddEditDialog
@@ -378,6 +378,7 @@ def main() -> int:
     locked_pair = LockedPairMotion(
         dropdown,
         lambda: cfg_mgr.config.settings.animation_duration_ms,
+        hide_duration_ms=lambda: clamp_decay_ms(cfg_mgr.config.settings.decay_ms),
     )
     dropdown.set_locked_pair(locked_pair)
     group_panel.set_locked_pair(locked_pair)
@@ -425,9 +426,25 @@ def main() -> int:
             execute_member_panel.force_hide()
 
     def _decay_submenu(panel: DropdownPanel) -> None:
-        """Fade a side list out. An instant hide is too fast to move onto."""
+        """Fade a side list out in place. An instant hide is too fast to move onto."""
         if panel.isVisible() and not panel.is_closing():
             panel.start_hide_animation()
+
+    def _collapse_open_lists() -> None:
+        """Close every open list now.
+
+        A fade stays under the pointer, and the hover that is already there
+        cancels it. That happens when the launched app was already focused, so
+        the pointer never leaves. A selection hides the lists outright.
+        """
+        if cfg_mgr.config.settings.pinned_open:
+            return
+        _hide_container_menu()
+        _hide_execute_menu()
+        if dropdown.isVisible():
+            dropdown.force_hide()
+        if group_panel.isVisible():
+            group_panel.force_hide()
 
     def do_hide():
         if (
@@ -938,12 +955,11 @@ def main() -> int:
                 f"Could not launch '{launcher.name}':\n{exc}",
             )
         finally:
-            _hide_container_menu()
-            _hide_execute_menu()
             if not cfg_mgr.config.settings.pinned_open:
-                # short delay for click visual feedback, then hide (unless pinned)
-                QTimer.singleShot(80, dropdown.start_hide_animation)
+                _collapse_open_lists()
             else:
+                _hide_container_menu()
+                _hide_execute_menu()
                 # ensure it stays fully expanded/sized even after click (in case events caused partial state)
                 QTimer.singleShot(50, dropdown.ensure_visible_and_sized)
                 QTimer.singleShot(55, trigger.raise_)  # re-assert arrow on top after list re-ensure
@@ -1157,11 +1173,12 @@ def main() -> int:
         if group is None:
             return
         steps = execution_steps(group, cfg_mgr.config.launchers)
-        group_panel.force_hide()
-        _hide_container_menu()
-        _hide_execute_menu()
-        if not cfg_mgr.config.settings.pinned_open:
-            dropdown.start_hide_animation()
+        if cfg_mgr.config.settings.pinned_open:
+            group_panel.force_hide()
+            _hide_container_menu()
+            _hide_execute_menu()
+        else:
+            _collapse_open_lists()
         if not steps:
             stay_on_top_warning(
                 trigger,
@@ -1320,6 +1337,26 @@ def main() -> int:
             _hide_groups_beside()
 
     trigger.groups_toggled.connect(on_show_groups_toggled)
+
+    def _apply_opacity(percent: int | None = None) -> None:
+        if percent is None:
+            percent = cfg_mgr.config.settings.opacity_percent
+        value = clamp_opacity_percent(percent) / 100
+        trigger.setWindowOpacity(value)
+        for panel in (dropdown, group_panel, container_panel, execute_member_panel):
+            if panel.isVisible() and not panel.is_closing():
+                panel.setWindowOpacity(value)
+
+    def on_opacity_changed(percent: int) -> None:
+        cfg_mgr.update_settings(opacity_percent=percent)
+        _apply_opacity(percent)
+
+    def on_decay_changed(milliseconds: int) -> None:
+        cfg_mgr.update_settings(decay_ms=clamp_decay_ms(milliseconds))
+
+    trigger.window_opacity_changed.connect(on_opacity_changed)
+    trigger.decay_changed.connect(on_decay_changed)
+    _apply_opacity()
 
     # Windows startup integration
     if sys.platform == "win32" and win_utils is not None:

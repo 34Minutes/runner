@@ -1,3 +1,3 @@
 """Runner - Always-on-top script and app launcher."""
 
-__version__ = "1.0.6"
+__version__ = "1.0.9"

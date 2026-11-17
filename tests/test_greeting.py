@@ -168,7 +168,10 @@ def test_greeting_shows_border_and_bubble_until_resize_or_click(qapp, qtbot):
         assert trigger.width() == 53 and trigger.height() == 53
         assert greeting.border.isVisible()
         assert greeting.border.width() == trigger.width() + 16
-        assert greeting.border.x() == trigger.x() - 8
+        assert greeting.border.height() == trigger.height() + 16
+        assert greeting.border.pos() == trigger.pos() - QPoint(8, 8)
+        if greeting.bubble._tail_side in ("left", "right"):
+            assert abs(greeting.bubble.frameGeometry().center().y() - trigger.frameGeometry().center().y()) <= 1
         trigger.repaint()
         greeting.border.repaint()
         edge = trigger.grab().toImage().pixelColor(2, trigger.height() // 2)

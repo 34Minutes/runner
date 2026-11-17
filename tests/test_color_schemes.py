@@ -9,7 +9,7 @@ from runner.config import AppConfig, ConfigManager, Launcher
 from runner.ui.dropdown import DropdownPanel
 from runner.ui.group_dialog import _DRAG_BORDER, _SELECTED_BG, _SELECTED_FG
 from runner.ui.theme import DARK, SCHEMES, current, launch_button_qss, resolve, use
-from runner.ui.trigger import TriggerWidget
+from runner.ui.trigger import MenuSlider, TriggerWidget
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +54,31 @@ def test_missing_scheme_in_an_old_config_stays_dark(monkeypatch, tmp_path):
     assert ConfigManager().config.settings.color_scheme == "medium"
 
 
-def test_color_schemes_item_sits_at_the_bottom_of_the_arrow_menu(qapp, qtbot):
+def test_opacity_and_decay_sliders_report_the_new_value(qapp, qtbot):
+    cfg = AppConfig()
+    cfg.settings.opacity_percent = 80
+    cfg.settings.decay_ms = 400
+    trigger = TriggerWidget(cfg)
+    qtbot.addWidget(trigger)
+    opacity_seen = []
+    decay_seen = []
+    trigger.window_opacity_changed.connect(opacity_seen.append)
+    trigger.decay_changed.connect(decay_seen.append)
+    trigger._show_context_menu(QPoint(8, 8))
+    menu = _arrow_menu(trigger)
+    qtbot.addWidget(menu)
+    rows = {slider.objectName(): slider for slider in menu.findChildren(MenuSlider)}
+    assert rows["Opacity"].slider().value() == 80
+    assert rows["Decay rate"].slider().value() == 400
+    assert rows["Decay rate"].slider().invertedAppearance() is True
+    rows["Opacity"].slider().setValue(45)
+    rows["Decay rate"].slider().setValue(1000)
+    assert opacity_seen == [45]
+    assert decay_seen == [1000]
+    menu.close()
+
+
+def test_color_schemes_item_sits_above_exit_on_the_arrow_menu(qapp, qtbot):
     cfg = AppConfig()
     cfg.settings.color_scheme = "bright"
     use("bright")
@@ -68,9 +92,18 @@ def test_color_schemes_item_sits_at_the_bottom_of_the_arrow_menu(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-4:] == ["Exit", "---", "Color Schemes", "Opacity"]
-    scheme = next(action for action in menu.actions() if action.text() == "Color Schemes")
-    choices = scheme.menu().actions()
+    assert labels[-8:] == [
+        "---",
+        "Opacity",
+        "Decay rate",
+        "---",
+        "Color Schemes",
+        "Opacity",
+        "---",
+        "Exit",
+    ]
+    scheme_action = next(action for action in menu.actions() if action.text() == "Color Schemes")
+    choices = scheme_action.menu().actions()
     assert [action.text() for action in choices] == ["Dark", "Medium", "Bright"]
     assert [action.isChecked() for action in choices] == [False, False, True]
     menu.close()
@@ -104,8 +137,7 @@ def test_picking_a_scheme_restyles_open_lists_and_does_not_reopen(qapp, qtbot, m
     menu = _arrow_menu(trigger)
     inside = menu.frameGeometry().center()
     monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: inside)
-    scheme = next(action for action in menu.actions() if action.text() == "Color Schemes")
-    scheme.menu().actions()[2].trigger()
+    next(action for action in menu.actions() if action.text() == "Color Schemes").menu().actions()[2].trigger()
     menu.close()
     qapp.processEvents()
 

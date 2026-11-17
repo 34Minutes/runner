@@ -75,12 +75,12 @@ def test_opacity_item_opens_a_box_rule(qapp, qtbot, monkeypatch):
     qtbot.addWidget(menu)
     inside = menu.frameGeometry().center()
     monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: inside)
-    action = next(item for item in menu.actions() if item.text() == "Opacity")
+    labeled = [item for item in menu.actions() if item.text()]
+    scheme_at = next(index for index, item in enumerate(labeled) if item.text() == "Color Schemes")
+    action = labeled[scheme_at + 1]
+    assert action.text() == "Opacity"
     assert action.menu() is None
-    above = next(item for item in menu.actions() if item.text() == "Color Schemes")
-    labels = [item.text() for item in menu.actions() if item.text()]
-    assert labels.index("Opacity") == labels.index("Color Schemes") + 1
-    assert above.menu() is not None
+    assert labeled[scheme_at].menu() is not None
 
     action.trigger()
     menu.close()
@@ -139,7 +139,9 @@ def test_untouched_box_rule_follows_a_scheme_change(qapp, qtbot):
     qapp.processEvents()
     menu = _arrow_menu(trigger)
     qtbot.addWidget(menu)
-    next(item for item in menu.actions() if item.text() == "Opacity").trigger()
+    labeled = [item for item in menu.actions() if item.text()]
+    scheme_at = next(index for index, item in enumerate(labeled) if item.text() == "Color Schemes")
+    labeled[scheme_at + 1].trigger()
     menu.close()
     qapp.processEvents()
     dialog = trigger.findChild(QDialog, "opacityDialog")

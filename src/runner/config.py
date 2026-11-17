@@ -136,6 +136,10 @@ class Settings:
     # Opacity of the arrow's rounded box.
     # -1 keeps the alpha designed into the color scheme. 0-100 replaces it.
     box_opacity: int = -1
+    # How solid the arrow and the lists are, from 20 to 100.
+    opacity_percent: int = 100
+    # How long a list takes to fade after the pointer leaves. 0 is immediate.
+    decay_ms: int = 250
     # False until the one-time enlarge below has been saved. Old config files
     # omit this, so they pick up the larger arrow once and then keep any resize.
     applied_visible_trigger_size: bool = False

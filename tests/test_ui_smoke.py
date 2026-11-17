@@ -428,6 +428,22 @@ def test_manager_dialog_list_and_add_flow(qapp, qtbot, tmp_path):
     assert dlg._list.count() >= 2  # may be 3 depending on how add merges
 
 
+def test_a_long_list_scrolls_inside_the_frame(qapp, qtbot):
+    cfg = AppConfig()
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new(f"Item {i}", f"cmd{i}") for i in range(40)])
+    panel.show()
+    qtbot.waitExposed(panel)
+    panel.ensure_visible_and_sized()
+
+    bar = panel._scroll.verticalScrollBar()
+    assert panel.height() == 420
+    assert panel._scroll.height() < panel._button_container.minimumHeight()
+    assert bar.isVisible()
+    assert bar.maximum() > 0
+
+
 def test_dropdown_filter_hint_keypress_force_ensure(qapp, qtbot):
     """Cover _apply_filter (hint label case), keyPress escape, force_hide, ensure_visible_and_sized, horizontal clamps."""
     from PySide6.QtGui import QKeyEvent

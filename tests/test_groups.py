@@ -395,7 +395,7 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-12:] == [
+    assert labels[-15:] == [
         "---",
         "Execute Groups",
         "Container Groups",
@@ -404,10 +404,13 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "Manage Execute Groups",
         "Manage Container Groups",
         "---",
-        "Exit",
+        "Opacity",
+        "Decay rate",
         "---",
         "Color Schemes",
         "Opacity",
+        "---",
+        "Exit",
     ]
 
     trigger._action_add_group.trigger()
@@ -561,6 +564,45 @@ def test_edit_drops_launchers_that_no_longer_exist(qapp, tmp_path, monkeypatch):
     assert [member.launcher_id for member in result.members] == [keep.id]
 
 
+def test_a_forced_hide_stays_hidden_when_hover_would_restore_a_fade(qapp, qtbot):
+    cfg = AppConfig()
+    panel = DropdownPanel(cfg, honor_pin=False)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new("Alpha", "a")])
+    panel.resize(220, 160)
+    panel.show()
+    qtbot.waitExposed(panel)
+
+    panel.start_hide_animation()
+    panel.force_hide()
+    panel.cancel_close()
+    assert panel.isVisible() is False
+    assert panel.is_closing() is False
+
+
+def test_decay_rate_is_how_long_the_close_fade_lasts(qapp, qtbot):
+    cfg = AppConfig()
+    cfg.settings.decay_ms = 80
+    panel = DropdownPanel(cfg, honor_pin=False)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new("Alpha", "a")])
+    panel.resize(220, 160)
+    panel.show()
+    qtbot.waitExposed(panel)
+    panel.start_hide_animation()
+    assert {anim.duration() for anim in panel._anims} == {80}
+
+    cfg.settings.decay_ms = 0
+    panel.force_hide()
+    panel.show()
+    qtbot.waitExposed(panel)
+    closed = []
+    panel.closed.connect(lambda: closed.append("closed"))
+    panel.start_hide_animation()
+    assert panel.isVisible() is False
+    assert closed == ["closed"]
+
+
 def test_showing_again_cancels_a_hide_that_is_already_running(qapp, qtbot):
     cfg = AppConfig()
     cfg.settings.animation_duration_ms = 400
@@ -597,10 +639,17 @@ def test_close_decays_for_a_quarter_second_and_can_be_restored(qapp, qtbot):
     panel.start_show_animation()
     assert panel._anims
     assert {anim.duration() for anim in panel._anims} == {180}
+    qtbot.wait(220)
 
+    height_before = panel._frame.height()
+    pos_before = panel.pos()
     panel.start_hide_animation()
     assert panel.is_closing() is True
+    assert [bytes(anim.propertyName()) for anim in panel._anims] == [b"windowOpacity"]
     assert {anim.duration() for anim in panel._anims} == {_HIDE_DECAY_MS}
+    qtbot.wait(40)
+    assert panel._frame.height() == height_before
+    assert panel.pos() == pos_before
     panel.cancel_close()
     assert panel.is_closing() is False
     assert panel.isVisible() is True

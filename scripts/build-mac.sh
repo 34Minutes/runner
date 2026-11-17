@@ -31,7 +31,7 @@ echo "==> Building Runner macOS bundle..."
 
 # Canonical spec excludes unused Qt modules/plugins/translations (PDF, QML,
 # Virtual Keyboard, SVG, extra image codecs) so the .app stays Widgets-only.
-pyinstaller --clean --noconfirm "$PROJECT_ROOT/runner.spec"
+python -m PyInstaller --clean --noconfirm "$PROJECT_ROOT/runner.spec"
 
 APP="dist/Runner.app"
 
@@ -41,8 +41,8 @@ echo "==> Making it a background/agent app (no Dock icon) and setting nice names
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :CFBundleName 'Runner'" "$APP/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.6" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.6" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.9" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.9" "$APP/Contents/Info.plist"
 
 # Use a stable bundle identifier (change if you want)
 BUNDLE_ID="com.douglie.runner"
