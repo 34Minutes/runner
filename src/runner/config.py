@@ -133,6 +133,9 @@ class Settings:
     show_groups: bool = False
     # dark, bright, or medium. Unknown values display as Dark.
     color_scheme: str = "dark"
+    # Opacity of the arrow's rounded box.
+    # -1 keeps the alpha designed into the color scheme. 0-100 replaces it.
+    box_opacity: int = -1
     # False until the one-time enlarge below has been saved. Old config files
     # omit this, so they pick up the larger arrow once and then keep any resize.
     applied_visible_trigger_size: bool = False

@@ -16,7 +16,7 @@ from runner.groups import (
     unselect_member,
 )
 from runner.ui.add_dialog import AddEditDialog
-from runner.ui.dropdown import DropdownPanel, _HIDE_DECAY_MS
+from runner.ui.dropdown import DropdownPanel, LockedPairMotion, _HIDE_DECAY_MS
 from runner.ui.group_dialog import GroupDialog, _NOTE, _SELECTED_BG
 from runner.ui.group_manager import GroupManagerDialog
 from runner.ui.launch_button import LaunchButton
@@ -395,7 +395,7 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-11:] == [
+    assert labels[-12:] == [
         "---",
         "Execute Groups",
         "Container Groups",
@@ -407,6 +407,7 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "Exit",
         "---",
         "Color Schemes",
+        "Opacity",
     ]
 
     trigger._action_add_group.trigger()
@@ -657,6 +658,118 @@ def test_group_list_matches_the_main_view_and_reorders_groups_only(qapp, qtbot):
     panel.start_hide_animation()
     qtbot.waitUntil(lambda: closed == ["closed"], timeout=2000)
     assert panel.isVisible() is False
+
+
+def test_arrow_hover_locks_main_popup_and_execute_groups(qapp, qtbot):
+    """The two lists share one opacity and one fraction of their full height."""
+    cfg = AppConfig()
+    main_panel = DropdownPanel(cfg)
+    groups = DropdownPanel(cfg, honor_pin=False)
+    qtbot.addWidget(main_panel)
+    qtbot.addWidget(groups)
+    main_panel.rebuild_buttons([Launcher.new(f"L{i}", "x") for i in range(12)])
+    groups.set_heading("Execute Groups")
+    groups.rebuild_buttons([Launcher.new("Class", "")])
+
+    def place_main() -> None:
+        main_panel.move(120, 80)
+        main_panel._grow_from_top = True
+        main_panel._fixed_edge_y = 80
+
+    def place_groups() -> None:
+        groups.move(main_panel.x() + main_panel.width() + 6, 80)
+        groups._grow_from_top = True
+        groups._fixed_edge_y = 80
+
+    main_panel.use_position_hook(place_main)
+    groups.use_position_hook(place_groups)
+    motion = LockedPairMotion(main_panel, lambda: 600, hide_duration_ms=600)
+    main_panel.set_locked_pair(motion)
+    groups.set_locked_pair(motion)
+    samples: list[tuple[float, float]] = []
+    motion._anim.valueChanged.connect(
+        lambda _value: samples.append((main_panel._linked_fraction, groups._linked_fraction))
+    )
+
+    motion.open([main_panel, groups])
+    assert main_panel._linked_full_h > groups._linked_full_h
+    assert main_panel._linked_fraction == groups._linked_fraction
+
+    def _locked_open() -> bool:
+        fraction = main_panel._linked_fraction
+        if fraction <= 0.08 or abs(fraction - groups._linked_fraction) > 0.001:
+            return False
+        if main_panel.y() != 80 or groups.y() != 80:
+            return False
+        left = main_panel._frame.height() / main_panel._linked_full_h
+        right = groups._frame.height() / groups._linked_full_h
+        return abs(left - fraction) < 0.02 and abs(right - fraction) < 0.02
+
+    qtbot.waitUntil(_locked_open, timeout=2000)
+    assert samples
+    for left, right in samples:
+        assert abs(left - right) < 0.001
+
+    seen = motion.progress()
+    motion.close([main_panel, groups])
+    assert main_panel.is_closing() is True
+    assert groups.is_closing() is True
+    assert abs(main_panel._linked_fraction - groups._linked_fraction) < 0.001
+    assert motion.progress() <= seen + 0.02
+
+    def _locked_close() -> bool:
+        fraction = main_panel._linked_fraction
+        if not motion.is_closing() or not (0.02 < motion.progress() < seen):
+            return False
+        if abs(fraction - groups._linked_fraction) > 0.001:
+            return False
+        left = main_panel._frame.height() / main_panel._linked_full_h
+        right = groups._frame.height() / groups._linked_full_h
+        return abs(left - fraction) < 0.02 and abs(right - fraction) < 0.02
+
+    qtbot.waitUntil(_locked_close, timeout=2000)
+    # Moving onto one list must restore both. One list must not finish closing alone.
+    main_panel.cancel_close()
+    assert motion.is_closing() is False
+    assert main_panel.is_closing() is False
+    assert groups.is_closing() is False
+    assert main_panel.isVisible() is True
+    assert groups.isVisible() is True
+    assert main_panel._linked_fraction == 1.0
+    assert groups._linked_fraction == 1.0
+
+
+def test_leave_locks_lists_that_opened_apart(qapp, qtbot):
+    """A hover close still matches the two lists if they were not opened together."""
+    cfg = AppConfig()
+    main_panel = DropdownPanel(cfg)
+    groups = DropdownPanel(cfg, honor_pin=False)
+    qtbot.addWidget(main_panel)
+    qtbot.addWidget(groups)
+    main_panel.rebuild_buttons([Launcher.new("Alpha", "a"), Launcher.new("Beta", "b")])
+    groups.rebuild_buttons([Launcher.new("Class", "")])
+    main_panel.use_position_hook(lambda: (main_panel.move(40, 40), setattr(main_panel, "_fixed_edge_y", 40)))
+    groups.use_position_hook(lambda: (groups.move(280, 40), setattr(groups, "_fixed_edge_y", 40)))
+    main_panel.show()
+    groups.show()
+    main_panel._update_height_for_content()
+    groups._update_height_for_content()
+    main_panel.setWindowOpacity(1.0)
+    groups.setWindowOpacity(0.4)
+    motion = LockedPairMotion(main_panel, lambda: 400, hide_duration_ms=400)
+    samples: list[tuple[float, float]] = []
+    motion._anim.valueChanged.connect(
+        lambda _value: samples.append((main_panel._linked_fraction, groups._linked_fraction))
+    )
+    assert motion.close_visible([main_panel, groups]) is True
+    assert abs(main_panel._linked_fraction - groups._linked_fraction) < 0.001
+    assert abs(main_panel._linked_fraction - 0.4) < 0.001
+    assert motion.is_closing() is True
+    qtbot.waitUntil(lambda: not motion.is_running() and not main_panel.isVisible(), timeout=2000)
+    assert samples
+    for left, right in samples:
+        assert abs(left - right) < 0.001
+    assert groups.isVisible() is False
 
 
 def _row_menu(panel: DropdownPanel, button: LaunchButton) -> QMenu:

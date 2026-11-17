@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+## [1.0.8] - 2026-11-17
+
+### Added
+- Color schemes. Right-click the arrow and choose **Color Schemes**, then **Dark**, **Medium**, or **Bright**. Dark is the original look and the default. The startup greeting stays yellow on every scheme.
+- **Show group contents** on an execute group. It stays off until turned on, and hovering that group stays collapsed until then.
+- **Opacity**, under **Color Schemes**. It opens a slider for how solid the arrow's box is. The chevron keeps the color scheme's own opacity.
+
+### Changed
+- With **Show execute groups** on, hovering the arrow opens and closes the main popup and the execute-groups list together. They share one fade and one height. A list that is already fully open stays open. Container submenus and an execute group's side list still move on their own.
+
 ## [1.0.7] - 2026-11-16
 
 ### Changed

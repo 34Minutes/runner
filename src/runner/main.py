@@ -41,7 +41,7 @@ from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visibl
 from .ui.theme import current, use
 from .launcher import launch
 from .ui.trigger import TriggerWidget
-from .ui.dropdown import DropdownPanel, SubmenuButton
+from .ui.dropdown import DropdownPanel, LockedPairMotion, SubmenuButton
 from .ui.launch_button import LaunchButton
 from .ui.add_dialog import AddEditDialog
 from .ui.container_dialog import ContainerDialog
@@ -373,6 +373,14 @@ def main() -> int:
     # We need to keep the dropdown visible while mouse is in *either* trigger or dropdown.
     # The widgets themselves emit hover_enter / hover_leave.
     # We use a small shared timer + state.
+    # With "Show execute groups" on, arrow hover opens and closes the main popup
+    # and that list on one clock so their opacity and scale stay matched.
+    locked_pair = LockedPairMotion(
+        dropdown,
+        lambda: cfg_mgr.config.settings.animation_duration_ms,
+    )
+    dropdown.set_locked_pair(locked_pair)
+    group_panel.set_locked_pair(locked_pair)
 
     hide_timer = QTimer()
     hide_timer.setSingleShot(True)
@@ -435,6 +443,12 @@ def main() -> int:
         if showing_groups:
             group_panel.start_hide_animation()
             return
+        if (
+            not cfg_mgr.config.settings.pinned_open
+            and _show_groups_enabled()
+            and locked_pair.close_visible([dropdown, group_panel])
+        ):
+            return
         if group_panel.isVisible():
             group_panel.start_hide_animation()
         if not cfg_mgr.config.settings.pinned_open:
@@ -466,6 +480,12 @@ def main() -> int:
             return
         _refresh_group_list()
         group_panel.use_position_hook(_place_groups_beside)
+        if locked_pair.is_presented():
+            locked_pair.reposition([dropdown, group_panel])
+            trigger.raise_()
+            dropdown.stackUnder(trigger)
+            group_panel.stackUnder(trigger)
+            return
         if group_panel.isVisible():
             group_panel.ensure_visible_and_sized()
         else:
@@ -512,23 +532,44 @@ def main() -> int:
         if cfg_mgr.config.settings.pinned_open:
             apply_pinned_state()
 
+    def _dropdown_settled_open() -> bool:
+        """True when the launcher list is already fully open on its own."""
+        return (
+            dropdown.isVisible()
+            and not dropdown.is_closing()
+            and dropdown.windowOpacity() >= 0.95
+            and not locked_pair.is_presented()
+        )
+
     def _show_main_popup() -> None:
-        """Open the launcher list, where container group rows live."""
+        """Open the launcher list, where container group rows live.
+
+        Arrow hover with execute groups showing drives both lists from one
+        clock. A list that is already fully open, such as while pinned, stays
+        put instead of collapsing back to the start of that clock.
+        """
         nonlocal showing_groups
         showing_groups = False
         cancel_hide()
         _hide_container_menu()
         _hide_execute_menu()
-        dropdown.position_adjacent(trigger)
         _fill_main_dropdown(dropdown, cfg_mgr)
-        if not dropdown.isVisible() or dropdown.is_closing():
-            dropdown.start_show_animation()
+        dropdown.position_adjacent(trigger)
+        groups_too = _show_groups_enabled() and bool(cfg_mgr.config.groups)
+        if groups_too and (locked_pair.is_presented() or not _dropdown_settled_open()):
+            _refresh_group_list()
+            group_panel.use_position_hook(_place_groups_beside)
+            locked_pair.open([dropdown, group_panel])
+        else:
+            if not dropdown.isVisible() or dropdown.is_closing():
+                dropdown.start_show_animation()
+            if groups_too:
+                _show_groups_beside()
+            else:
+                _hide_groups_beside()
         trigger.raise_()
         dropdown.stackUnder(trigger)
-        if _show_groups_enabled():
-            _show_groups_beside()
-        else:
-            _hide_groups_beside()
+        group_panel.stackUnder(trigger)
 
     def on_trigger_enter():
         cancel_hide()  # cancels both main timer and dropdown's internal timer
@@ -1044,6 +1085,13 @@ def main() -> int:
             trigger.raise_()
             group_panel.stackUnder(trigger)
             return
+        if locked_pair.is_presented():
+            if _show_groups_enabled() and cfg_mgr.config.groups:
+                _show_groups_beside()
+            trigger.raise_()
+            dropdown.stackUnder(trigger)
+            group_panel.stackUnder(trigger)
+            return
         if not dropdown.isVisible() and not cfg_mgr.config.settings.pinned_open:
             return
         dropdown.position_adjacent(trigger)
@@ -1396,6 +1444,11 @@ def main() -> int:
 
     scheme_refresh.append(_apply_color_scheme)
     trigger.color_scheme_selected.connect(on_color_scheme)
+
+    def on_opacity(box: int) -> None:
+        cfg_mgr.update_settings(box_opacity=box)
+
+    trigger.opacity_changed.connect(on_opacity)
 
     # Show the trigger (it starts at saved or default position)
     trigger.show()

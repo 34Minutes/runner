@@ -286,6 +286,21 @@ def resolve(scheme_id: str | None) -> ColorScheme:
     return _BY_ID.get(scheme_id, DARK)
 
 
+def with_opacity(color: tuple[int, int, int, int], percent: int) -> tuple[int, int, int, int]:
+    """`color` with its alpha replaced by a 0-100 percent. Below 0, the alpha stays."""
+    if percent < 0:
+        return color
+    clamped = max(0, min(100, int(percent)))
+    return (color[0], color[1], color[2], int(round(clamped * 255 / 100)))
+
+
+def opacity_percent(color: tuple[int, int, int, int], percent: int) -> int:
+    """Slider position for a stored percent. Below 0, that is the scheme alpha."""
+    if percent < 0:
+        return int(round(color[3] * 100 / 255))
+    return max(0, min(100, int(percent)))
+
+
 def current() -> ColorScheme:
     return _current
 

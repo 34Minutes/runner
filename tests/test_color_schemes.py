@@ -68,8 +68,9 @@ def test_color_schemes_item_sits_at_the_bottom_of_the_arrow_menu(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-3:] == ["Exit", "---", "Color Schemes"]
-    choices = menu.actions()[-1].menu().actions()
+    assert labels[-4:] == ["Exit", "---", "Color Schemes", "Opacity"]
+    scheme = next(action for action in menu.actions() if action.text() == "Color Schemes")
+    choices = scheme.menu().actions()
     assert [action.text() for action in choices] == ["Dark", "Medium", "Bright"]
     assert [action.isChecked() for action in choices] == [False, False, True]
     menu.close()
@@ -103,7 +104,8 @@ def test_picking_a_scheme_restyles_open_lists_and_does_not_reopen(qapp, qtbot, m
     menu = _arrow_menu(trigger)
     inside = menu.frameGeometry().center()
     monkeypatch.setattr("runner.ui.trigger.QCursor.pos", lambda: inside)
-    menu.actions()[-1].menu().actions()[2].trigger()
+    scheme = next(action for action in menu.actions() if action.text() == "Color Schemes")
+    scheme.menu().actions()[2].trigger()
     menu.close()
     qapp.processEvents()
 
