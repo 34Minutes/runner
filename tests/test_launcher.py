@@ -87,7 +87,6 @@ def test_launch_darwin_app_with_flags(mock_popen):
         mock_popen.assert_called()
 
 
-@pytest.mark.xfail(reason="win32 admin path not fully mockable on darwin without deeper patches")
 @patch("runner.launcher._launch_as_admin_windows")
 def test_launch_run_as_admin_calls_helper(mock_admin):
     with patch("sys.platform", "win32"):

@@ -89,21 +89,11 @@ def test_add_and_manage_dialogs_stay_above_arrow(qapp, qtbot):
     assert manage.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
 
 
-@pytest.mark.xfail(
-    sys.platform == "darwin",
-    reason=(
-        "Known issue, present in 1.0.9 and earlier: on the macOS display a "
-        "raise_() of another stay-on-top window does not reach the re-lift, so the "
-        "last step times out. Low impact on macOS, where the dialog already sits on "
-        "a higher window level than the arrow and lists."
-    ),
-    strict=False,
-)
 def test_editing_dialog_is_lifted_when_a_runner_surface_rises(qapp, qtbot, monkeypatch):
     from PySide6.QtWidgets import QWidget
 
     from runner.ui.group_dialog import GroupDialog
-    from runner.ui.stay_on_top import open_editing_dialogs
+    from runner.ui.stay_on_top import _is_runner_surface, open_editing_dialogs
 
     lifted = []
     monkeypatch.setattr("runner.ui.stay_on_top._lift_native", lambda widget: lifted.append(widget))
@@ -117,6 +107,9 @@ def test_editing_dialog_is_lifted_when_a_runner_surface_rises(qapp, qtbot, monke
     qtbot.addWidget(surface)
     surface.resize(80, 40)
     surface.show()
+    # The arrow and lists are Tool windows. Tool shares bits with Popup, which
+    # once made every Runner window look like a popup and never get watched.
+    assert _is_runner_surface(surface)
 
     dialog = AddEditDialog(None)
     qtbot.addWidget(dialog)

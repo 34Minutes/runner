@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Run as administrator** quotes arguments that contain spaces, and reports a failure or a declined UAC prompt.
 - A `~` argument, such as the Finder sample's, opens the home folder.
 - The arrow can be dragged onto any monitor. It was held to the primary screen.
+- Add, Edit, and Manage dialogs are raised again when the arrow or a list comes to the front. The check that skips popup menus also skipped every Runner window, because Qt's Tool window type shares its bits with Popup, so this never ran. On Windows a dialog could end up behind the arrow.
 - Programs started from the packaged Runner no longer inherit its internal `QT_PLUGIN_PATH`. A terminal opened from Runner passed that on, and any Qt program run from it crashed while loading two copies of Qt.
 
 ## [1.0.9] - 2026-11-17

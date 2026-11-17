@@ -1,7 +1,7 @@
 """Startup arrow size and the resize greeting."""
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QCursor, QFont, QFontMetrics
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QApplication, QMenu
 
 from runner.config import (
@@ -210,6 +210,17 @@ def _wait_until_faded(qtbot, greeting: StartupGreeting, trigger: TriggerWidget) 
     )
 
 
+def _pointer_at(monkeypatch, point: QPoint) -> None:
+    """Fix the pointer the greeting sees. A CI machine's real pointer can be anywhere."""
+
+    class _Cursor:
+        @staticmethod
+        def pos() -> QPoint:
+            return QPoint(point)
+
+    monkeypatch.setattr("runner.ui.greeting.QCursor", _Cursor)
+
+
 def _shown_trigger(qtbot, x: int, y: int) -> TriggerWidget:
     cfg = AppConfig()
     cfg.settings.trigger_width = 120
@@ -223,7 +234,9 @@ def _shown_trigger(qtbot, x: int, y: int) -> TriggerWidget:
     return trigger
 
 
-def test_hover_or_click_hides_the_border_until_restart(qapp, qtbot):
+def test_hover_or_click_hides_the_border_until_restart(qapp, qtbot, monkeypatch):
+    # Away from both arrows, or present() correctly skips the border.
+    _pointer_at(monkeypatch, QPoint(-5000, -5000))
     trigger = _shown_trigger(qtbot, 400, 300)
     greeting = StartupGreeting()
     try:
@@ -286,9 +299,10 @@ def test_dismiss_fades_the_warning_over_about_a_second(qapp, qtbot):
         greeting.shutdown()
 
 
-def test_arrow_already_under_the_pointer_skips_the_border(qapp, qtbot):
-    cursor = QCursor.pos()
-    trigger = _shown_trigger(qtbot, cursor.x(), cursor.y())
+def test_arrow_already_under_the_pointer_skips_the_border(qapp, qtbot, monkeypatch):
+    trigger = _shown_trigger(qtbot, 300, 300)
+    # The pointer is over the middle of the arrow wherever the window manager put it.
+    _pointer_at(monkeypatch, trigger.mapToGlobal(QPoint(trigger.width() // 2, trigger.height() // 2)))
     greeting = StartupGreeting()
     try:
         greeting.present(trigger)

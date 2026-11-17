@@ -100,7 +100,9 @@ def _is_runner_surface(widget: QWidget) -> bool:
     if widget.property(_MARK_PROP):
         return False
     flags = widget.windowFlags()
-    if flags & Qt.WindowType.Popup:
+    # Compare the window type, not single bits: Tool (0x0b) contains every bit
+    # of Popup (0x09), so a bit test treats the arrow and lists as popups.
+    if (flags & Qt.WindowType.WindowType_Mask) == Qt.WindowType.Popup:
         return False
     return bool(flags & Qt.WindowType.WindowStaysOnTopHint)
 
