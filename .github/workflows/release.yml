@@ -6,9 +6,13 @@ name: Release
 # and CHANGELOG.md must have a "## [1.0.11]" section. Lint, tests, and both
 # builds run from the tagged commit, then the release is created with the
 # changelog section as its notes and the Windows and Linux files attached.
+#
+# Starting it from the Actions tab is a dry run for the version in
+# pyproject.toml: everything runs except publishing.
 on:
   push:
     tags: ["[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,15 +20,20 @@ permissions:
 jobs:
   check-version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Tag, pyproject.toml, __init__.py, and CHANGELOG.md agree
+        id: check
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
         run: |
           project=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           package=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/runner/__init__.py)
+          # A dry run checks the version in pyproject.toml.
+          TAG=${TAG:-$project}
           echo "tag=$TAG pyproject=$project __init__=$package"
           if [ "$TAG" != "$project" ] || [ "$TAG" != "$package" ]; then
             echo "::error::Tag $TAG does not match pyproject.toml ($project) and __init__.py ($package)."
@@ -34,6 +43,7 @@ jobs:
             echo "::error::CHANGELOG.md has no '## [$TAG]' section."
             exit 1
           fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
   tests:
     needs: check-version
@@ -48,7 +58,7 @@ jobs:
     uses: ./.github/workflows/linux-x64.yml
 
   publish:
-    needs: [tests, windows, linux]
+    needs: [check-version, tests, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,7 +71,7 @@ jobs:
 
       - name: Name the files and write the notes
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.check-version.outputs.version }}
         run: |
           mkdir release
           cp artifacts/Runner-windows-x64/Runner.exe "release/Runner-$TAG-windows-x64.exe"
@@ -80,9 +90,10 @@ jobs:
           ls -l release
 
       - name: Publish the release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.check-version.outputs.version }}
         run: |
           gh release create "$TAG" release/* \
             --title "$TAG" \

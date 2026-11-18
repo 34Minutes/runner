@@ -120,7 +120,7 @@ python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-
   git tag -a 1.0.11 -m 1.0.11 && git push origin 1.0.11
   ```
 
-  The tag must match the version in `pyproject.toml` and `src/runner/__init__.py`, and `CHANGELOG.md` must have a `## [1.0.11]` section. It runs the tests, builds Windows and Linux from the tagged commit, and publishes the GitHub Release with that changelog section as its notes and `Runner-<version>-windows-x64.exe` and `Runner-<version>-linux-x64` attached.
+  The tag must match the version in `pyproject.toml` and `src/runner/__init__.py`, and `CHANGELOG.md` must have a `## [1.0.11]` section. It runs the tests, builds Windows and Linux from the tagged commit, and publishes the GitHub Release with that changelog section as its notes and `Runner-<version>-windows-x64.exe` and `Runner-<version>-linux-x64` attached. Starting **Release** from the Actions tab is a dry run for the version in `pyproject.toml`: it does everything except publish.
 - **Build Windows**, **Build Linux x64**, **Build Intel Mac**, and **Build Apple silicon Mac** can also be started from the Actions tab. Each uploads a build artifact (`Runner-windows-x64`, `Runner-linux-x64`, `Runner-intel.dmg`, `Runner-arm64.dmg`) without publishing anything.
 
 ### Downloads
