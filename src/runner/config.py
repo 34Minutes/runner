@@ -6,7 +6,9 @@ Stores launchers and UI settings in a JSON file under the platform user config d
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import sys
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -379,6 +381,16 @@ class AppConfig:
         )
 
 
+def _make_private(path: Path, mode: int) -> None:
+    """chmod on macOS and Linux. Windows keeps %APPDATA% private by itself."""
+    if sys.platform == "win32":
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
 class ConfigManager:
     """Handles loading, saving, and providing defaults for AppConfig."""
 
@@ -439,8 +451,13 @@ class ConfigManager:
         if config is None:
             config = self.config
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        _make_private(self.config_dir, 0o700)
         tmp_path = self.config_path.with_suffix(".json.tmp")
-        with tmp_path.open("w", encoding="utf-8") as f:
+        # Launcher arguments can hold tokens or passwords. Only this user can
+        # read the file, whatever the umask or the home folder's permissions.
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            _make_private(tmp_path, 0o600)  # in case an old .tmp file was there
             json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
         tmp_path.replace(self.config_path)
         self._config = config
@@ -468,6 +485,7 @@ class ConfigManager:
                 shutil.copy2(self.config_path, backup)
         except OSError:
             return None
+        _make_private(backup, 0o600)
         return backup
 
     def get_main_view_launchers(self) -> list[Launcher]:

@@ -6,8 +6,11 @@ windows to RunnerController.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -22,7 +25,46 @@ if sys.platform == "win32":
 else:
     win_utils = None  # type: ignore
 
-SINGLE_INSTANCE_SERVER = "Runner_SingleInstance_v1"
+def _single_instance_name() -> str:
+    """Where the single-instance socket lives. Private to this user.
+
+    The name carries a hash of the user name, so two people signed in to one
+    machine each get their own Runner. On Linux the socket goes in
+    XDG_RUNTIME_DIR, a folder only this user can open; the shared /tmp would
+    let another user claim the name first and stop Runner from starting.
+    macOS already puts it in the per-user TMPDIR. On Windows it is a named
+    pipe, and the session mutex decides which copy runs.
+    """
+    try:
+        import getpass
+
+        user = getpass.getuser()
+    except (ImportError, KeyError, OSError):
+        user = str(os.getuid()) if hasattr(os, "getuid") else "user"
+    digest = hashlib.sha256(user.encode("utf-8")).hexdigest()[:12]
+    name = f"Runner_SingleInstance_v2_{digest}"
+    if sys.platform.startswith("linux"):
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        if runtime and os.path.isdir(runtime):
+            return os.path.join(runtime, name)
+    return name
+
+
+SINGLE_INSTANCE_SERVER = _single_instance_name()
+
+
+def _start_in_home_folder() -> None:
+    """Work from the home folder, not the folder Runner was started from.
+
+    Windows looks for a bare program name ("notepad") in the current folder
+    before PATH. Double-clicking Runner.exe in Downloads makes Downloads the
+    current folder, so a downloaded notepad.exe would run in place of the real
+    one. Launchers with no working directory also start here.
+    """
+    try:
+        os.chdir(Path.home())
+    except OSError:
+        pass
 
 
 def seed_test_data_if_needed(cfg: ConfigManager) -> None:
@@ -69,6 +111,8 @@ def _signal_running_copy() -> bool:
 def _listen_for_other_copies(on_show: Callable[[], None]) -> QLocalServer:
     """Any later copy connects here. Any message means 'show yourself'."""
     server = QLocalServer()
+    # Only this user can connect.
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
     # Remove a stale socket file left by a crash (common on macOS).
     QLocalServer.removeServer(SINGLE_INSTANCE_SERVER)
     if not server.listen(SINGLE_INSTANCE_SERVER):
@@ -99,14 +143,17 @@ def _test_quit_ms(argv: list[str]) -> int:
 
 
 def main() -> int:
+    _start_in_home_folder()
     app = QApplication(sys.argv)
 
-    # Windows: a named mutex is reliable even across elevation differences.
     if sys.platform == "win32" and win_utils is not None:
+        # The session mutex decides. Named pipes are shared by every user on
+        # the machine, so a pipe answering is no proof that this user's
+        # Runner is running.
         if not win_utils.acquire_single_instance_mutex():
             _signal_running_copy()
             return 0
-    if _signal_running_copy():
+    elif _signal_running_copy():
         return 0
 
     controller: RunnerController | None = None

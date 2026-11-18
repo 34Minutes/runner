@@ -24,3 +24,11 @@ def _never_touch_the_real_config(tmp_path_factory, monkeypatch):
         "runner.config.platformdirs.user_config_dir",
         lambda *args, **kwargs: str(folder),
     )
+
+
+@pytest.fixture(autouse=True)
+def _keep_the_working_folder(monkeypatch):
+    """main() moves to the home folder. Put the test run back where it was."""
+    import os
+
+    monkeypatch.chdir(os.getcwd())

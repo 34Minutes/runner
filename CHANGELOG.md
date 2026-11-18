@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+### Security
+- Runner works from your home folder. Windows looks for a bare program name such as `notepad` in the current folder before PATH, and double-clicking `Runner.exe` in Downloads made Downloads that folder, so a downloaded `notepad.exe` could run in place of the real one. A launcher with no working directory now starts in the home folder.
+- The single-instance socket is per user and only its owner can connect. On Linux it lives in `XDG_RUNTIME_DIR` instead of the shared `/tmp`, where another user could claim the name first and stop Runner from starting. On Windows the sign-in session's mutex alone decides whether Runner is already running.
+- On macOS and Linux the config file and its backups are readable only by you (0600), and the config folder is 0700. Launcher arguments can hold tokens or passwords. An existing file is tightened the next time Runner saves.
+
 ### Changed
 - Dependencies are pinned to exact versions (PySide6-Essentials 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Runner depends on `PySide6-Essentials` instead of `PySide6`, which skips about 175 MB of Qt add-ons (WebEngine, Pdf, and others) Runner never used; the built app is unchanged. Python 3.11 or newer is required; the pinned Qt already needed it.
 - Pushing a version tag publishes the release: a new Release workflow checks the tag against the version, runs the tests, builds Windows and Linux from that commit, and attaches both files with the changelog notes.

@@ -53,6 +53,8 @@ Stored in the platform user config directory:
 - Windows: `%APPDATA%\Runner\config.json`
 - macOS: `~/Library/Application Support/Runner/config.json`
 
+On macOS and Linux only you can read the file (0600), because launcher arguments may hold tokens or passwords. Anything that can write this file decides what your launchers run, so treat a config file from someone else like a program from them. A launcher with no working directory starts in your home folder.
+
 You can edit the JSON or use the in-app dialogs. Launchers, execute groups, and container groups are in that file. The config version is 2; a version 1 file is converted when Runner loads it.
 
 ## Installation (development)

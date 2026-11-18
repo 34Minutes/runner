@@ -98,6 +98,7 @@ def acquire_single_instance_mutex() -> bool:
         return True
 
     try:
+        # Without a Global\ prefix the name is private to this sign-in session.
         mutex_name = "Runner_SingleInstance_Mutex_v1"
         handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if not handle:
