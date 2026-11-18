@@ -30,7 +30,7 @@ def add_to_startup() -> bool:
     """
     try:
         import winreg  # type: ignore
-    except Exception:
+    except ImportError:
         return False
 
     exe = _get_executable_path()
@@ -43,7 +43,7 @@ def add_to_startup() -> bool:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
             winreg.SetValueEx(key, "Runner", 0, winreg.REG_SZ, exe)
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -51,7 +51,7 @@ def remove_from_startup() -> bool:
     """Remove the Run entry if it exists. Returns True if removed or not present."""
     try:
         import winreg  # type: ignore
-    except Exception:
+    except ImportError:
         return False
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -62,18 +62,18 @@ def remove_from_startup() -> bool:
             except FileNotFoundError:
                 pass  # already gone
         return True
-    except Exception:
+    except OSError:
         return False
 
 
-def ensure_startup_entry(enabled: bool) -> None:
+def ensure_startup_entry(enabled: bool) -> bool:
     """Idempotent helper: create or remove the Run entry according to the desired state.
     Safe to call on every launch when the setting is True (handles the user moving the exe).
+    Returns False when Windows refused the registry change.
     """
     if enabled:
-        add_to_startup()
-    else:
-        remove_from_startup()
+        return add_to_startup()
+    return remove_from_startup()
 
 
 # --- Single instance (mutex) support ---
@@ -94,7 +94,7 @@ def acquire_single_instance_mutex() -> bool:
 
     try:
         import ctypes
-    except Exception:
+    except ImportError:
         return True
 
     try:
@@ -111,6 +111,6 @@ def acquire_single_instance_mutex() -> bool:
 
         _single_instance_mutex_handle = handle
         return True
-    except Exception:
-        # Any failure (e.g. during cross-testing) -> allow running
+    except (AttributeError, OSError):
+        # No usable kernel32 (e.g. during cross-testing) -> allow running
         return True

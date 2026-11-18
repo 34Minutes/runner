@@ -93,7 +93,7 @@ def run_group_steps(
         for launcher in steps[index]:
             try:
                 launch_one(launcher)
-            except Exception as exc:
+            except Exception as exc:  # any failure is reported; the group keeps going
                 if on_error is not None:
                     on_error(launcher, exc)
         if index + 1 < len(steps):

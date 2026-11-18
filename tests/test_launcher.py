@@ -337,3 +337,12 @@ def test_tilde_in_args_is_expanded(mock_popen):
          patch("runner.launcher.shutil.which", return_value=None):
         launcher_mod.launch(Launcher.new("Finder", "Finder", args="~"))
     assert mock_popen.call_args[0][0][-1] == os.path.expanduser("~")
+
+
+def test_startup_entry_reports_a_refused_registry_change(monkeypatch):
+    from runner.utils import windows as win_utils
+
+    monkeypatch.setattr(win_utils, "add_to_startup", lambda: False)
+    monkeypatch.setattr(win_utils, "remove_from_startup", lambda: True)
+    assert win_utils.ensure_startup_entry(True) is False
+    assert win_utils.ensure_startup_entry(False) is True

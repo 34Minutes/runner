@@ -118,15 +118,6 @@ def main() -> int:
     server = _listen_for_other_copies(show_running_copy)
     app._local_server = server  # keep the server alive with the app
 
-    # Set activation policy as early as possible on macOS so Runner stays out
-    # of the Dock. 1 == ActivationPolicyAccessory; the integer avoids enum
-    # lookup differences between PySide6 versions.
-    if sys.platform == "darwin":
-        try:
-            app.setActivationPolicy(1)
-        except Exception:
-            pass
-
     app.setApplicationName("Runner")
     # The arrow and the tray keep running with no regular window open.
     # Runner deliberately has no hidden main window: on macOS a hidden main

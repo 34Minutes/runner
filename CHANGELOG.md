@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+### Fixed
+- Windows: if Windows refuses to add or remove Runner from the startup list, **Launch at Windows startup** says so. It failed silently.
+- Errors that were caught and ignored everywhere are now caught only where they are expected (a row already deleted, a missing Windows API). An unexpected error is no longer hidden. A launch failure is still shown to the user and does not stop an execute group.
+
 ### Removed
 - The `box_opacity` setting. Its only control was the Opacity window removed in 1.0.10. The arrow's box uses the color scheme's own opacity; an old config that has the key still loads, and the key is dropped on the next save.
 

@@ -380,7 +380,14 @@ class RunnerController:
 
         def on_startup_toggled(checked: bool) -> None:
             self.cfg.update_settings(launch_at_startup=checked)
-            win_utils.ensure_startup_entry(checked)
+            if not win_utils.ensure_startup_entry(checked):
+                stay_on_top_warning(
+                    self.trigger,
+                    "Launch at Windows startup",
+                    "Windows did not allow Runner to "
+                    + ("add itself to" if checked else "remove itself from")
+                    + " the startup list.",
+                )
 
         self.trigger.startup_toggled.connect(on_startup_toggled)
 
@@ -957,7 +964,7 @@ class RunnerController:
         try:
             launch(launcher)
             self._notify("Launched", launcher.name)
-        except Exception as exc:
+        except Exception as exc:  # any failure is shown to the user
             stay_on_top_warning(
                 self.trigger,
                 "Launch failed",

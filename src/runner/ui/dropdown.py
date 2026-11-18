@@ -540,7 +540,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             if hasattr(w, 'sizeHint'):
                 try:
                     sh_h = w.sizeHint().height()
-                except Exception:
+                except RuntimeError:  # row already deleted
                     sh_h = 0
                 mh = getattr(w, 'minimumHeight', lambda: 0)()
                 inner_h += max(sh_h, mh, 20)
@@ -667,7 +667,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         if self._current_button is not None:
             try:
                 self._current_button.set_keyboard_selected(False)
-            except Exception:
+            except RuntimeError:  # row already deleted
                 pass
         self._current_button = None
 
@@ -682,7 +682,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             # Ensure it's scrolled into view (important for long lists)
             try:
                 self._scroll.ensureWidgetVisible(btn)
-            except Exception:
+            except RuntimeError:  # row already deleted
                 pass
 
     def _get_visible_launch_buttons(self) -> list[LaunchButton]:
@@ -1016,7 +1016,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
                         # Move focus so further arrows stay in our keyPress path if needed
                         try:
                             vis[0].setFocus(Qt.FocusReason.OtherFocusReason)
-                        except Exception:
+                        except RuntimeError:  # row already deleted
                             pass
                         return True  # consume so it doesn't insert text
                 if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
