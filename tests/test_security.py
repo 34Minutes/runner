@@ -102,3 +102,69 @@ def test_an_old_readable_config_becomes_private_on_save(tmp_path, monkeypatch):
     mgr = ConfigManager()
     mgr.save()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_root_counts_as_elevated_on_macos_and_linux(monkeypatch):
+    from runner import elevation
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
+    assert elevation.is_elevated() is True
+    monkeypatch.setattr(os, "geteuid", lambda: 501, raising=False)
+    assert elevation.is_elevated() is False
+
+
+def test_normal_rights_show_no_warning():
+    from runner.elevation import warn_if_elevated
+
+    asked, quit_calls = [], []
+    quit_now = warn_if_elevated(
+        None, lambda: quit_calls.append(1), elevated=lambda: False, ask=lambda *a: asked.append(a)
+    )
+    assert quit_now is False and asked == [] and quit_calls == []
+
+
+def test_elevated_runner_asks_and_quits_on_request():
+    from runner.elevation import warn_if_elevated
+
+    asked, quit_calls = [], []
+
+    def ask(parent, title, text, accept, reject):
+        asked.append((title, text, accept, reject))
+        return True
+
+    assert warn_if_elevated(None, lambda: quit_calls.append(1), elevated=lambda: True, ask=ask)
+    assert quit_calls == [1]
+    title, text, accept, reject = asked[0]
+    assert (accept, reject) == ("Quit Runner", "Keep Running")
+    assert "Every program it starts will also run as" in text
+
+
+def test_elevated_runner_keeps_running_when_asked_to():
+    from runner.elevation import warn_if_elevated
+
+    quit_calls = []
+    quit_now = warn_if_elevated(
+        None, lambda: quit_calls.append(1), elevated=lambda: True, ask=lambda *a: False
+    )
+    assert quit_now is False and quit_calls == []
+
+
+def test_choice_dialog_has_two_named_buttons(qapp, qtbot, monkeypatch):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from runner.ui.stay_on_top import choice
+
+    seen = {}
+
+    def answer():
+        box = next(w for w in QApplication.topLevelWidgets() if isinstance(w, QMessageBox) and w.isVisible())
+        seen["buttons"] = [b.text() for b in box.buttons()]
+        seen["default"] = box.defaultButton().text()
+        box.escapeButton().click()
+
+    QTimer.singleShot(50, answer)
+    assert choice(None, "T", "text", "Quit Runner", "Keep Running") is False
+    assert sorted(seen["buttons"]) == ["Keep Running", "Quit Runner"]
+    assert seen["default"] == "Quit Runner"

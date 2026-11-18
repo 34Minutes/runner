@@ -29,6 +29,7 @@ A lightweight floating launcher for scripts and applications. One arrow on the d
 - Add, Edit, Manage, group dialogs, and the file and message windows they open stay above the arrow and the lists on macOS and Windows.
 - The tray menu is **Add new launcher...**, **Manage launchers...**, **Reset position & size**, **Reload config**, and **Exit Runner**. A click on the tray icon opens the launcher list.
 - One instance runs at a time. Starting Runner again brings the running arrow forward.
+- Started as administrator (Windows) or root (macOS, Linux), Runner warns that every program it launches would get the same rights, and offers **Quit Runner** or **Keep Running**. Use **Run as administrator** on a launcher instead; it asks each time.
 - Launch executables, scripts, URLs, protocols, macOS app names, or any command the system can start.
 - Config is JSON in the platform user config directory, written atomically. Old files that have no groups still load.
 - macOS and Windows are the supported platforms. Linux can start basic commands.

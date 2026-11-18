@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Runner works from your home folder. Windows looks for a bare program name such as `notepad` in the current folder before PATH, and double-clicking `Runner.exe` in Downloads made Downloads that folder, so a downloaded `notepad.exe` could run in place of the real one. A launcher with no working directory now starts in the home folder.
 - The single-instance socket is per user and only its owner can connect. On Linux it lives in `XDG_RUNTIME_DIR` instead of the shared `/tmp`, where another user could claim the name first and stop Runner from starting. On Windows the sign-in session's mutex alone decides whether Runner is already running.
+- Runner warns when it is started as administrator (Windows) or root (macOS, Linux), because every program it launches would get the same rights without asking. **Quit Runner** is the default; **Keep Running** continues.
 - Releases include `SHA256SUMS.txt` and a signed build attestation for each file. `gh attestation verify <file> --repo 34Minutes/runner` confirms a download was built by the release workflow from this repository.
 - GitHub Actions are pinned to full commit IDs instead of tags such as `@v4`, which their owners can move. They are also updated to current releases that run on Node.js 24.
 - On macOS and Linux the config file and its backups are readable only by you (0600), and the config folder is 0700. Launcher arguments can hold tokens or passwords. An existing file is tightened the next time Runner saves.

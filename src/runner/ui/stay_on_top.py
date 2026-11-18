@@ -249,6 +249,31 @@ def question(
     return QMessageBox.StandardButton(box.exec())
 
 
+def choice(
+    parent: QWidget | None,
+    title: str,
+    text: str,
+    accept_label: str,
+    reject_label: str,
+) -> bool:
+    """A warning with two named buttons. True when the first one is chosen.
+
+    The first button is the default, so Enter picks it. Esc picks the second.
+    The text up to the first blank line is the headline; the rest is the detail.
+    """
+    headline, _, detail = text.partition("\n\n")
+    box = QMessageBox(QMessageBox.Icon.Warning, title, headline, QMessageBox.StandardButton.NoButton, parent)
+    if detail:
+        box.setInformativeText(detail)
+    accept = box.addButton(accept_label, QMessageBox.ButtonRole.AcceptRole)
+    reject = box.addButton(reject_label, QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(accept)
+    box.setEscapeButton(reject)
+    mark_stay_on_top(box)
+    box.exec()
+    return box.clickedButton() is accept
+
+
 def _is_selectable_app_bundle(path: str) -> bool:
     """True when path is a macOS application bundle the user means to launch."""
     if sys.platform != "darwin" or not path:

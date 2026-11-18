@@ -34,6 +34,7 @@ from .config import (
     Group,
     Launcher,
 )
+from .elevation import warn_if_elevated
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .launcher import launch
 from .moves import member_launchers, visible_main_tokens
@@ -406,6 +407,8 @@ class RunnerController:
         QTimer.singleShot(0, self._after_show)
 
     def _after_show(self) -> None:
+        if warn_if_elevated(self.trigger, self.app.quit):
+            return  # the user chose to quit
         if self.settings.show_startup_greeting:
             self.greeting.present(self.trigger)
         self._apply_pinned_state()
