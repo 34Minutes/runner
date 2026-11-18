@@ -4,9 +4,10 @@ version = "1.0.10"
 description = "A lightweight, always-on-top single launcher for scripts and applications (macOS + Windows)."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "LicenseRef-PolyForm-Strict-1.0.0"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.txt"]
 authors = [
-  {name = "Runner Contributors"}
+  {name = "34minutespast12"}
 ]
 # Exact versions, so every build gets the Qt that was tested. Update them on
 # purpose: change the number, run the tests, then build.

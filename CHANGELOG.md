@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **License.** Runner is now licensed under the PolyForm Strict License 1.0.0, with added permissions for use for any purpose (including at work) and for rebuilding with your own version of the LGPL libraries. You may use it free of charge, but not change it or redistribute it. Earlier metadata said MIT; this replaces it. See `LICENSE`.
+
 ### Added
 - (planning) Per-launcher icons (auto + custom).
+- `THIRD-PARTY-NOTICES.txt`, with the licenses of Qt, PySide6, and Shiboken6 (LGPL 3), Python and the libraries it includes, platformdirs, and the PyInstaller bootloader. It and `LICENSE` are inside every build, in the Mac disk image, and attached to every release. The Windows file properties and the Mac app name 34minutespast12 as the copyright holder.
 
 ### Security
 - Runner works from your home folder. Windows looks for a bare program name such as `notepad` in the current folder before PATH, and double-clicking `Runner.exe` in Downloads made Downloads that folder, so a downloaded `notepad.exe` could run in place of the real one. A launcher with no working directory now starts in the home folder.

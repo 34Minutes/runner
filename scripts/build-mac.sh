@@ -87,7 +87,13 @@ echo "==> Ad-hoc signing (lets the app run locally; not a Developer ID signature
 codesign --force --deep --sign - "$APP"
 
 echo "==> Creating $DMG..."
-hdiutil create -volname "Runner" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
+# The disk image holds the app, its license, and the third-party notices.
+DMG_DIR="$PROJECT_ROOT/build/dmg"
+rm -rf "$DMG_DIR"
+mkdir -p "$DMG_DIR"
+ditto "$APP" "$DMG_DIR/Runner.app"
+cp LICENSE THIRD-PARTY-NOTICES.txt "$DMG_DIR/"
+hdiutil create -volname "Runner" -srcfolder "$DMG_DIR" -ov -format UDZO "$DMG" >/dev/null
 
 echo "==> Built:"
 ls -lh "$DMG"

@@ -129,7 +129,7 @@ Every action is pinned to a full commit ID, with its version in a comment, so a 
 
 ### Downloads
 
-Each GitHub Release has the Windows executable and the Linux one-file program. There is no published Mac build. Mac users clone the repo and run `./scripts/build-mac.sh`. An Apple Developer ID signature is required before a Mac download can open without an extra approval, and this project does not have one.
+Each GitHub Release has the Windows executable, the Linux one-file program, `LICENSE`, and `THIRD-PARTY-NOTICES.txt`. There is no published Mac build. Mac users clone the repo and run `./scripts/build-mac.sh`. An Apple Developer ID signature is required before a Mac download can open without an extra approval, and this project does not have one.
 
 The bundled app still stores config in the user config directory above.
 
@@ -143,4 +143,12 @@ Per-launcher icons (automatic and custom) are the open item. See the Unreleased 
 
 ## License
 
-MIT (or whatever you choose at release).
+Copyright (c) 2026 34minutespast12. See [LICENSE](LICENSE).
+
+- You may download and use Runner free of charge, for any purpose, including at work.
+- You may not change it, build new works from it, or give copies of it to others. Point people to the [releases page](https://github.com/34Minutes/runner/releases) instead.
+- Runner comes as is, without warranty.
+
+The source code is public so you can read it and check what Runner does. It is source-available, not open source: a GitHub fork is only a copy and grants no extra rights.
+
+Runner includes Qt, PySide6, and Shiboken6 under the GNU LGPL version 3, plus Python and other components under their own licenses. Those parts keep their own terms, and you may rebuild Runner with your own version of the LGPL libraries. See [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt). Both files are attached to every release and included in the builds.

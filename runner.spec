@@ -194,7 +194,8 @@ a = Analysis(
     ["scripts/launch.py"],
     pathex=["src", "scripts"],
     binaries=[],
-    datas=[],
+    # Runner's license and the third-party notices travel with every build.
+    datas=[("LICENSE", "."), ("THIRD-PARTY-NOTICES.txt", ".")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -249,11 +250,11 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable(u'040904B0', [
-        StringStruct(u'CompanyName', u'Runner Contributors'),
+        StringStruct(u'CompanyName', u'34minutespast12'),
         StringStruct(u'FileDescription', u'Runner'),
         StringStruct(u'FileVersion', u'{dotted}'),
         StringStruct(u'InternalName', u'Runner'),
-        StringStruct(u'LegalCopyright', u'Copyright (c) Runner Contributors'),
+        StringStruct(u'LegalCopyright', u'Copyright (c) 34minutespast12. PolyForm Strict 1.0.0 with additional permissions.'),
         StringStruct(u'OriginalFilename', u'Runner.exe'),
         StringStruct(u'ProductName', u'Runner'),
         StringStruct(u'ProductVersion', u'{version}'),
@@ -332,5 +333,6 @@ else:
                 "CFBundleShortVersionString": VERSION,
                 "CFBundleVersion": VERSION,
                 "NSHighResolutionCapable": True,
+                "NSHumanReadableCopyright": "Copyright (c) 34minutespast12",
             },
         )

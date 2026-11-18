@@ -76,6 +76,7 @@ jobs:
           cp artifacts/Runner-windows-x64/Runner.exe "release/Runner-$TAG-windows-x64.exe"
           cp artifacts/Runner-linux-x64/Runner "release/Runner-$TAG-linux-x64"
           chmod +x "release/Runner-$TAG-linux-x64"
+          cp LICENSE THIRD-PARTY-NOTICES.txt release/
           (cd release && sha256sum Runner-* > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
           # The CHANGELOG section for this version, headings one level down.
