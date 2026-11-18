@@ -1,7 +1,9 @@
 name: Build Linux x64
 
+# Run it from the Actions tab, or from the Release workflow for a version tag.
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:

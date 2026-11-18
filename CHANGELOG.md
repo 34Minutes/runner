@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+### Changed
+- Dependencies are pinned to exact versions (PySide6 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Python 3.11 or newer is required; the pinned Qt already needed it.
+- Pushing a version tag publishes the release: a new Release workflow checks the tag against the version, runs the tests, builds Windows and Linux from that commit, and attaches both files with the changelog notes.
+- A lint check (`ruff`, unused and undefined names) runs before the tests, in `build-mac.sh` and on GitHub. The tests now also run on Linux.
+
 ### Fixed
 - Windows: if Windows refuses to add or remove Runner from the startup list, **Launch at Windows startup** says so. It failed silently.
 - Errors that were caught and ignored everywhere are now caught only where they are expected (a row already deleted, a missing Windows API). An unexpected error is no longer hidden. A launch failure is still shown to the user and does not stop an execute group.

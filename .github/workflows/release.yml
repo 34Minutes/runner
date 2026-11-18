@@ -1,0 +1,90 @@
+name: Release
+
+# Push a version tag (for example 1.0.11) to publish a release:
+#   git tag -a 1.0.11 -m 1.0.11 && git push origin 1.0.11
+# The tag must match the version in pyproject.toml and src/runner/__init__.py,
+# and CHANGELOG.md must have a "## [1.0.11]" section. Lint, tests, and both
+# builds run from the tagged commit, then the release is created with the
+# changelog section as its notes and the Windows and Linux files attached.
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag, pyproject.toml, __init__.py, and CHANGELOG.md agree
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          project=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          package=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/runner/__init__.py)
+          echo "tag=$TAG pyproject=$project __init__=$package"
+          if [ "$TAG" != "$project" ] || [ "$TAG" != "$package" ]; then
+            echo "::error::Tag $TAG does not match pyproject.toml ($project) and __init__.py ($package)."
+            exit 1
+          fi
+          if ! grep -qF "## [$TAG]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$TAG]' section."
+            exit 1
+          fi
+
+  tests:
+    needs: check-version
+    uses: ./.github/workflows/tests.yml
+
+  windows:
+    needs: check-version
+    uses: ./.github/workflows/windows.yml
+
+  linux:
+    needs: check-version
+    uses: ./.github/workflows/linux-x64.yml
+
+  publish:
+    needs: [tests, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Name the files and write the notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir release
+          cp artifacts/Runner-windows-x64/Runner.exe "release/Runner-$TAG-windows-x64.exe"
+          cp artifacts/Runner-linux-x64/Runner "release/Runner-$TAG-linux-x64"
+          chmod +x "release/Runner-$TAG-linux-x64"
+          # The CHANGELOG section for this version, headings one level down.
+          {
+            echo "### $TAG"
+            awk -v head="## [$TAG]" '
+              index($0, head) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { sub(/^### /, "#### "); print }
+            ' CHANGELOG.md
+          } > notes.md
+          cat notes.md
+          ls -l release
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" release/* \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --verify-tag

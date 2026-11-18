@@ -63,6 +63,8 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
+Versions are pinned exactly in `pyproject.toml`, so every build uses the Qt that was tested. To update one, change the number, reinstall, and run `ruff check src tests` and `pytest`.
+
 ## Running
 
 ```bash
@@ -111,16 +113,19 @@ python -m nuitka --onefile --windows-disable-console --output-dir=dist --output-
 
 ### GitHub Actions
 
-Four workflows run when someone starts them from the Actions tab (`workflow_dispatch`). Each one uploads a build artifact. Publishing a GitHub Release is a separate step.
+- **Tests** (`.github/workflows/tests.yml`) runs on every branch push and pull request: a lint check (`ruff`), then the test suite on macOS, Windows, and Linux.
+- **Release** (`.github/workflows/release.yml`) runs when a version tag is pushed:
 
-- **Build Windows** (`.github/workflows/windows.yml`) uploads `dist/Runner.exe` as the artifact `Runner-windows-x64`.
-- **Build Linux x64** (`.github/workflows/linux-x64.yml`) uploads `dist/Runner` as the artifact `Runner-linux-x64`.
-- **Build Intel Mac** (`.github/workflows/macos-intel.yml`) uploads `Runner-intel.dmg`.
-- **Build Apple silicon Mac** (`.github/workflows/macos-arm64.yml`) uploads `Runner-arm64.dmg`.
+  ```bash
+  git tag -a 1.0.11 -m 1.0.11 && git push origin 1.0.11
+  ```
+
+  The tag must match the version in `pyproject.toml` and `src/runner/__init__.py`, and `CHANGELOG.md` must have a `## [1.0.11]` section. It runs the tests, builds Windows and Linux from the tagged commit, and publishes the GitHub Release with that changelog section as its notes and `Runner-<version>-windows-x64.exe` and `Runner-<version>-linux-x64` attached.
+- **Build Windows**, **Build Linux x64**, **Build Intel Mac**, and **Build Apple silicon Mac** can also be started from the Actions tab. Each uploads a build artifact (`Runner-windows-x64`, `Runner-linux-x64`, `Runner-intel.dmg`, `Runner-arm64.dmg`) without publishing anything.
 
 ### Downloads
 
-The download on a public GitHub Release is the Windows executable. The Linux workflow produces an Actions artifact for the same kind of one-file download. There is no published Mac build. Mac users clone the repo and run `./scripts/build-mac.sh`. An Apple Developer ID signature is required before a Mac download can open without an extra approval, and this project does not have one.
+Each GitHub Release has the Windows executable and the Linux one-file program. There is no published Mac build. Mac users clone the repo and run `./scripts/build-mac.sh`. An Apple Developer ID signature is required before a Mac download can open without an extra approval, and this project does not have one.
 
 The bundled app still stores config in the user config directory above.
 
