@@ -28,22 +28,16 @@ jobs:
       - name: Tag, pyproject.toml, __init__.py, and CHANGELOG.md agree
         id: check
         env:
+          # A dry run from the Actions tab checks the version in pyproject.toml.
           TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
         run: |
-          project=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          package=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/runner/__init__.py)
-          # A dry run checks the version in pyproject.toml.
-          TAG=${TAG:-$project}
-          echo "tag=$TAG pyproject=$project __init__=$package"
-          if [ "$TAG" != "$project" ] || [ "$TAG" != "$package" ]; then
-            echo "::error::Tag $TAG does not match pyproject.toml ($project) and __init__.py ($package)."
-            exit 1
+          if [ -n "$TAG" ]; then
+            version=$(python3 scripts/check_version.py --tag "$TAG")
+          else
+            project=$(python3 scripts/check_version.py)
+            version=$(python3 scripts/check_version.py --tag "$project")
           fi
-          if ! grep -qF "## [$TAG]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## [$TAG]' section."
-            exit 1
-          fi
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   tests:
     needs: check-version

@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Dependencies are pinned to exact versions (PySide6 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Python 3.11 or newer is required; the pinned Qt already needed it.
 - Pushing a version tag publishes the release: a new Release workflow checks the tag against the version, runs the tests, builds Windows and Linux from that commit, and attaches both files with the changelog notes.
+- `build-windows.ps1` and `build-linux.sh` work like `build-mac.sh`: they use the project's `.venv` when it exists, check the version, and run the lint check and the tests first (`-SkipTests` / `--skip-tests`). A failed PyInstaller run now stops the Windows script; it used to print "Build complete!" anyway. `-OneDir` replaces `-OneFile:$false`.
+- The Windows file properties take their version from `pyproject.toml` at build time, and the Windows build checks the finished exe reports it. `file_version_info.txt`, which had to be edited by hand for every release, is gone.
+- UPX compression is off. It could break Qt DLLs and trip antivirus, and made a build depend on whether UPX was installed.
 - A lint check (`ruff`, unused and undefined names) runs before the tests, in `build-mac.sh` and on GitHub. The tests now also run on Linux.
 
 ### Fixed

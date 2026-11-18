@@ -56,16 +56,7 @@ fi
 # Use the venv's Python directly, whatever venv the calling shell has active.
 PY="$VENV_DIR/bin/python"
 
-VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)"
-if [ -z "$VERSION" ]; then
-  echo "ERROR: no version found in pyproject.toml" >&2
-  exit 1
-fi
-PKG_VERSION="$("$PY" -c 'import sys; sys.path.insert(0, "src"); import runner; print(runner.__version__)')"
-if [ "$PKG_VERSION" != "$VERSION" ]; then
-  echo "ERROR: pyproject.toml says $VERSION but src/runner/__init__.py says $PKG_VERSION" >&2
-  exit 1
-fi
+VERSION="$("$PY" scripts/check_version.py)"
 
 echo "==> Runner $VERSION"
 echo "==> Python: $PY ($("$PY" --version 2>&1))"

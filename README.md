@@ -84,7 +84,7 @@ Give clients a bundled app. PyInstaller is the supported bundler. `runner.spec` 
 ./scripts/build-mac.sh --deploy   # also install to /Applications and start it
 ```
 
-It runs the tests first (`--skip-tests` to skip them), then writes `dist/Runner.app` and `dist/Runner.dmg`. It works from any folder. `--deploy` quits a running installed Runner, replaces `/Applications/Runner.app`, and opens the new one. The version comes from `pyproject.toml`; the build stops if `src/runner/__init__.py` disagrees. `dist/` is gitignored. An unsigned build will warn in Gatekeeper on first open. Right-click the app and choose Open, or approve it in System Settings → Privacy & Security.
+It runs the lint check and the tests first (`--skip-tests` to skip them), then writes `dist/Runner.app` and `dist/Runner.dmg`. It works from any folder. `--deploy` quits a running installed Runner, replaces `/Applications/Runner.app`, and opens the new one. The version comes from `pyproject.toml`; the build stops if `src/runner/__init__.py` disagrees. `dist/` is gitignored. An unsigned build will warn in Gatekeeper on first open. Right-click the app and choose Open, or approve it in System Settings → Privacy & Security.
 
 **Windows**
 
@@ -92,18 +92,17 @@ It runs the tests first (`--skip-tests` to skip them), then writes `dist/Runner.
 .\scripts\build-windows.ps1
 ```
 
-That writes a portable `dist\Runner.exe` for 64-bit Windows 10 or 11 on Intel or AMD. The executable icon is `assets/icon.ico`, and the file properties use the product name Runner.
+It runs the lint check and the tests first (`-SkipTests` to skip them), then writes a portable `dist\Runner.exe` for 64-bit Windows 10 or 11 on Intel or AMD. `-OneDir` writes a `dist\Runner\` folder instead. The executable icon is `assets/icon.ico`. The file properties show the product name Runner and the version from `pyproject.toml`, and the build stops if the finished exe reports a different version. The project's `.venv` is used when it exists.
 
 Build the Windows executable on Windows, or with the Windows workflow below.
 
 **Linux**
 
 ```bash
-pip install -e ".[dev]"
 ./scripts/build-linux.sh
 ```
 
-That writes one file, `dist/Runner`, for x86_64. It includes Python. It runs on glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, and later releases of those families. A normal desktop already has the graphics libraries it uses. Copy the file to the machine and run it.
+It runs the lint check and the tests first (`--skip-tests` to skip them; without a display it uses `xvfb-run`), then writes one file, `dist/Runner`, for x86_64. It includes Python. It needs the glibc of the machine that built it, or newer, and the script prints which one that is. The GitHub workflow builds on Ubuntu 22.04 (glibc 2.35), so its file runs on Ubuntu 22.04, Debian 12, Fedora 36, and later releases of those families. A normal desktop already has the graphics libraries it uses. Copy the file to the machine and run it.
 
 Nuitka is an optional smaller Windows build. The workflows use the PyInstaller scripts:
 

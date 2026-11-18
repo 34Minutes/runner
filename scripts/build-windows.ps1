@@ -1,58 +1,92 @@
-# Build Runner for Windows using PyInstaller
-# Run this on a Windows machine (PowerShell)
+# Build Runner for Windows: dist\Runner.exe, one portable file.
 #
-# Prerequisites:
-#   1. Clone the repo
-#   2. cd to the repo root
-#   3. python -m venv .venv
-#   4. .\.venv\Scripts\Activate.ps1
-#   5. pip install -e ".[dev]"
-#   6. Icon is now included (assets\icon.ico - an arrow matching the trigger)
+# Usage, from any folder:
+#   .\scripts\build-windows.ps1              lint, test, then build
+#   .\scripts\build-windows.ps1 -SkipTests   build without the lint check and tests
+#   .\scripts\build-windows.ps1 -OneDir      build a folder, dist\Runner\, instead
 #
-# Then run:
-#   .\scripts\build-windows.ps1
+# First time, from the repo root:
+#   python -m venv .venv
+#   .\.venv\Scripts\python -m pip install -e ".[dev]"
 #
-# Output will be in dist\Runner.exe (onefile by default).
-# Unused Qt modules (PDF, QML/Quick, Virtual Keyboard, SVG, extra codecs) are
-# stripped by runner.spec so the exe stays Widgets-only.
+# The project's .venv is used when it exists, whatever venv the shell has
+# active; otherwise the python on PATH (as on GitHub Actions). The version
+# comes from pyproject.toml and runner.spec writes it into the exe's file
+# properties.
 
 param(
-    [switch]$OneFile = $true
+    [switch]$OneDir,
+    [switch]$SkipTests,
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "==> Building Runner for Windows..."
+if ($Help) {
+    Get-Content $MyInvocation.MyCommand.Path | Select-Object -Skip 2 -First 4 |
+        ForEach-Object { $_ -replace '^# ?', '' }
+    exit 0
+}
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$projectRoot = Split-Path -Parent $scriptDir
+# "Stop" does not cover programs like python. Check each exit code.
+function Invoke-Checked {
+    param([string]$Exe, [string[]]$Arguments)
+    & $Exe @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+    }
+}
+
+$projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $projectRoot
 
-# Canonical spec excludes unused Qt modules/plugins/translations and embeds
-# the Windows icon + version info. Override onedir vs onefile via env var.
-if ($OneFile) {
-    $env:RUNNER_ONEFILE = "1"
+$venvPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $py = $venvPython
 } else {
-    $env:RUNNER_ONEFILE = "0"
+    $py = (Get-Command python -ErrorAction Stop).Source
 }
 
-if (Test-Path "assets\icon.ico") {
-    Write-Host "Using assets\icon.ico for exe icon and taskbar (via runner.spec)."
-} else {
-    Write-Host "Note: assets\icon.ico not found. The exe will use a default icon."
+$version = & $py scripts\check_version.py
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "==> Runner $version"
+Write-Host "==> Python: $py ($(& $py --version 2>&1))"
+
+if (-not $SkipTests) {
+    Write-Host "==> Lint (ruff)..."
+    Invoke-Checked $py @("-m", "ruff", "check", "src", "tests")
+    Write-Host "==> Running tests (some briefly open windows)..."
+    # --capture=sys lets Qt's own error messages through if Qt aborts.
+    Invoke-Checked $py @("-m", "pytest", "-q", "--capture=sys")
 }
 
-Write-Host "Running: pyinstaller --clean --noconfirm runner.spec"
-pyinstaller --clean --noconfirm runner.spec
+if ($OneDir) { $env:RUNNER_ONEFILE = "0" } else { $env:RUNNER_ONEFILE = "1" }
 
+Write-Host "==> Building..."
+Invoke-Checked $py @("-m", "PyInstaller", "--clean", "--noconfirm", "runner.spec")
+
+if ($OneDir) {
+    $exe = Join-Path $projectRoot "dist\Runner\Runner.exe"
+} else {
+    $exe = Join-Path $projectRoot "dist\Runner.exe"
+}
+if (-not (Test-Path $exe)) {
+    throw "The build finished but $exe is missing."
+}
+
+# The file properties must carry the version just built.
+$shown = (Get-Item $exe).VersionInfo.ProductVersion
+if ($shown -ne $version) {
+    throw "$exe reports version '$shown', expected '$version'."
+}
+
+$sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 Write-Host ""
-Write-Host "==> Build complete!"
-if ($OneFile) {
-    Write-Host "Executable: dist\Runner.exe"
-    Write-Host "Right-click the exe -> Properties to verify 'Runner' as Product name."
+Write-Host "==> Built Runner $version"
+Write-Host "    $exe ($sizeMb MB)"
+if ($OneDir) {
+    Write-Host "    Copy the whole dist\Runner folder; Runner.exe needs the files beside it."
 } else {
-    Write-Host "Folder: dist\Runner\"
+    Write-Host "    One portable file. Config is stored in %APPDATA%\Runner."
 }
-Write-Host ""
-Write-Host "To test: Copy Runner.exe to a real Windows machine and run it."
-Write-Host "The app is designed as a portable single-file exe (config goes to AppData by default)."
