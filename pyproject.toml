@@ -11,7 +11,10 @@ authors = [
 # Exact versions, so every build gets the Qt that was tested. Update them on
 # purpose: change the number, run the tests, then build.
 dependencies = [
-    "PySide6==6.12.0",
+    # Essentials holds QtCore, QtGui, QtWidgets, QtNetwork, and QtDBus. The
+    # PySide6 package adds about 175 MB of Addons, WebEngine, and Pdf that
+    # Runner never imports.
+    "PySide6-Essentials==6.12.0",
     "platformdirs==4.14.6",
 ]
 

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (planning) Per-launcher icons (auto + custom).
 
 ### Changed
-- Dependencies are pinned to exact versions (PySide6 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Python 3.11 or newer is required; the pinned Qt already needed it.
+- Dependencies are pinned to exact versions (PySide6-Essentials 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Runner depends on `PySide6-Essentials` instead of `PySide6`, which skips about 175 MB of Qt add-ons (WebEngine, Pdf, and others) Runner never used; the built app is unchanged. Python 3.11 or newer is required; the pinned Qt already needed it.
 - Pushing a version tag publishes the release: a new Release workflow checks the tag against the version, runs the tests, builds Windows and Linux from that commit, and attaches both files with the changelog notes.
 - `build-windows.ps1` and `build-linux.sh` work like `build-mac.sh`: they use the project's `.venv` when it exists, check the version, and run the lint check and the tests first (`-SkipTests` / `--skip-tests`). A failed PyInstaller run now stops the Windows script; it used to print "Build complete!" anyway. `-OneDir` replaces `-OneFile:$false`.
 - The Windows file properties take their version from `pyproject.toml` at build time, and the Windows build checks the finished exe reports it. `file_version_info.txt`, which had to be edited by hand for every release, is gone.
