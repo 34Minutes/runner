@@ -370,7 +370,6 @@ class RunnerController:
             lambda ms: self._update_settings_soon(decay_ms=clamp_decay_ms(ms))
         )
         trigger.color_scheme_selected.connect(self._on_color_scheme)
-        trigger.opacity_changed.connect(lambda box: self._update_settings_soon(box_opacity=box))
 
     def _connect_windows_startup(self) -> None:
         if sys.platform != "win32" or win_utils is None:

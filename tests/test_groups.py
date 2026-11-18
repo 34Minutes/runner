@@ -390,7 +390,7 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-15:] == [
+    assert labels[-14:] == [
         "---",
         "Execute Groups",
         "Container Groups",
@@ -403,7 +403,6 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "Decay rate",
         "---",
         "Color Schemes",
-        "Opacity",
         "---",
         "Exit",
     ]

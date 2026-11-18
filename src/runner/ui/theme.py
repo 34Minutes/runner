@@ -294,13 +294,6 @@ def with_opacity(color: tuple[int, int, int, int], percent: int) -> tuple[int, i
     return (color[0], color[1], color[2], int(round(clamped * 255 / 100)))
 
 
-def opacity_percent(color: tuple[int, int, int, int], percent: int) -> int:
-    """Slider position for a stored percent. Below 0, that is the scheme alpha."""
-    if percent < 0:
-        return int(round(color[3] * 100 / 255))
-    return max(0, min(100, int(percent)))
-
-
 def current() -> ColorScheme:
     return _current
 

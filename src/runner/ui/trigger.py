@@ -2,7 +2,7 @@
 
 - Frameless Tool window
 - Draggable by the user
-- Right-click context menu (Add..., Manage..., groups, Exit, Color Schemes, Opacity)
+- Right-click context menu (Add..., Manage..., groups, Opacity, Decay rate, Color Schemes, Exit)
 - Emits hover enter/leave for the dropdown controller
 - Respects size from settings
 """
@@ -15,7 +15,6 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QWidget, QWid
 import sys
 
 from ..config import AppConfig
-from .opacity_dialog import OpacityDialog
 from .theme import SCHEMES, current, resolve, with_opacity
 from .toggle_switch import ToggleSwitch
 
@@ -220,8 +219,6 @@ class TriggerWidget(QWidget):
     request_reset = Signal()
     request_exit = Signal()
     color_scheme_selected = Signal(str)
-    # The Opacity row under Color Schemes. This is the arrow box, not the lists.
-    opacity_changed = Signal(int)
     pin_toggled = Signal(bool)
     filter_toggled = Signal(bool)
     greeting_toggled = Signal(bool)
@@ -265,12 +262,8 @@ class TriggerWidget(QWidget):
         # with frameless/Tool windows.
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
-        self.color_scheme_selected.connect(
-            lambda _scheme_id: QTimer.singleShot(0, self._refresh_opacity_dialog)
-        )
 
         self._in_context_menu = False
-        self._opacity_dialog: OpacityDialog | None = None
 
         # Context menu actions
         self._create_actions()
@@ -283,7 +276,7 @@ class TriggerWidget(QWidget):
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
             "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position & size, Exit, Color Schemes, Opacity"
+            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position & size, Opacity, Decay rate, Color Schemes, Exit"
         )
 
     def _create_actions(self) -> None:
@@ -435,16 +428,6 @@ class TriggerWidget(QWidget):
             scheme_menu.addAction(action)
         menu.addMenu(scheme_menu)
 
-        opacity_action = QAction("Opacity", menu)
-
-        def _open_opacity(*_args: object) -> None:
-            # A normal row already marks the menu chosen. Set it here too so a
-            # direct trigger() cannot pop the menu back over the panel.
-            menu._chose_action = True
-            QTimer.singleShot(0, self._show_opacity_dialog)
-
-        opacity_action.triggered.connect(_open_opacity)
-        menu.addAction(opacity_action)
         menu.addSeparator()
         menu.addAction(self._action_exit)
 
@@ -538,54 +521,6 @@ class TriggerWidget(QWidget):
         if self.frameGeometry().contains(QCursor.pos()):
             return
         self.hover_leave.emit()
-
-    def _show_opacity_dialog(self) -> None:
-        dialog = self._opacity_dialog
-        if dialog is not None:
-            try:
-                if dialog.isVisible():
-                    dialog.raise_()
-                    dialog.activateWindow()
-                    return
-            except RuntimeError:
-                dialog = None
-        dialog = OpacityDialog(self._config, self._apply_opacity, self)
-        dialog.destroyed.connect(self._forget_opacity_dialog)
-        self._opacity_dialog = dialog
-        self._place_opacity_dialog(dialog)
-        dialog.show()
-
-    def _forget_opacity_dialog(self, *_args: object) -> None:
-        self._opacity_dialog = None
-
-    def _refresh_opacity_dialog(self) -> None:
-        dialog = self._opacity_dialog
-        if dialog is None:
-            return
-        try:
-            dialog.sync_from_scheme()
-        except RuntimeError:
-            self._opacity_dialog = None
-
-    def _place_opacity_dialog(self, dialog: OpacityDialog) -> None:
-        dialog.adjustSize()
-        origin = self.mapToGlobal(QPoint(self.width() + 8, 0))
-        x, y = origin.x(), origin.y()
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is not None:
-            avail = screen.availableGeometry()
-            if x + dialog.width() > avail.right():
-                x = self.mapToGlobal(QPoint(0, 0)).x() - dialog.width() - 8
-            if y + dialog.height() > avail.bottom():
-                y = avail.bottom() - dialog.height()
-            x = max(avail.left(), min(x, avail.right() - dialog.width()))
-            y = max(avail.top(), min(y, avail.bottom() - dialog.height()))
-        dialog.move(x, y)
-
-    def _apply_opacity(self, box: int) -> None:
-        self._config.settings.box_opacity = box
-        self.update()
-        self.opacity_changed.emit(box)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
