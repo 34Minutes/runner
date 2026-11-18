@@ -4,7 +4,7 @@ import pytest
 import sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QPoint, QRect, QEvent
-from PySide6.QtWidgets import QApplication, QMenu, QPushButton
+from PySide6.QtWidgets import QApplication, QMenu
 from PySide6.QtGui import QMouseEvent
 from unittest.mock import patch, MagicMock
 

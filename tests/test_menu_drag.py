@@ -74,7 +74,7 @@ def test_container_row_drags_among_launchers(qapp, qtbot):
         panel._cancel_drag()
 
     assert launchers == []
-    assert rows == [[f"launcher:{alpha.id}", f"launcher:{beta.id}", f"container:folder"]]
+    assert rows == [[f"launcher:{alpha.id}", f"launcher:{beta.id}", "container:folder"]]
     assert [type(button).__name__ for button in panel._buttons[:3]] == [
         "LaunchButton",
         "LaunchButton",

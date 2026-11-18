@@ -1,10 +1,7 @@
 """Basic non-GUI tests for config persistence and Launcher model."""
 
 import json
-import tempfile
-from pathlib import Path
 
-import pytest
 
 from runner.config import AppConfig, ConfigManager, Launcher, Settings
 

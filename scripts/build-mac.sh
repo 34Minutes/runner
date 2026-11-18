@@ -6,7 +6,7 @@ set -euo pipefail
 # Usage:
 #   ./scripts/build-mac.sh               test, then build dist/Runner.app and dist/Runner.dmg
 #   ./scripts/build-mac.sh --deploy      also replace /Applications/Runner.app and start it
-#   ./scripts/build-mac.sh --skip-tests  build without running pytest first
+#   ./scripts/build-mac.sh --skip-tests  build without the lint check and tests first
 #
 # Works from any folder. The version comes from pyproject.toml; runner.spec
 # reads the same value for the bundle's Info.plist.
@@ -72,6 +72,8 @@ echo "==> Python: $PY ($("$PY" --version 2>&1))"
 echo "==> PyInstaller: $("$PY" -m PyInstaller --version)"
 
 if [ "$RUN_TESTS" -eq 1 ]; then
+  echo "==> Lint (ruff)..."
+  "$PY" -m ruff check src tests
   echo "==> Running tests (some briefly open windows)..."
   # The GUI tests use the normal macOS display. Set QT_QPA_PLATFORM yourself
   # to override, for example on a headless machine.
