@@ -7,11 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.0.11] - 2026-11-18
+
 ### Changed
 - **License.** Runner is now licensed under the PolyForm Strict License 1.0.0, with added permissions for use for any purpose (including at work) and for rebuilding with your own version of the LGPL libraries. You may use it free of charge, but not change it or redistribute it. Earlier metadata said MIT; this replaces it. See `LICENSE`.
+- Dependencies are pinned to exact versions (PySide6-Essentials 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Runner depends on `PySide6-Essentials` instead of `PySide6`, which skips about 175 MB of Qt add-ons (WebEngine, Pdf, and others) Runner never used; the built app is unchanged. Python 3.11 or newer is required; the pinned Qt already needed it.
+- Pushing a version tag publishes the release: a new Release workflow checks the tag against the version, runs the tests, builds Windows and Linux from that commit, and attaches both files with the changelog notes.
+- `build-windows.ps1` and `build-linux.sh` work like `build-mac.sh`: they use the project's `.venv` when it exists, check the version, and run the lint check and the tests first (`-SkipTests` / `--skip-tests`). A failed PyInstaller run now stops the Windows script; it used to print "Build complete!" anyway. `-OneDir` replaces `-OneFile:$false`.
+- The Windows file properties take their version from `pyproject.toml` at build time, and the Windows build checks the finished exe reports it. `file_version_info.txt`, which had to be edited by hand for every release, is gone.
+- UPX compression is off. It could break Qt DLLs and trip antivirus, and made a build depend on whether UPX was installed.
+- A lint check (`ruff`, unused and undefined names) runs before the tests, in `build-mac.sh` and on GitHub. The tests now also run on Linux.
 
 ### Added
-- (planning) Per-launcher icons (auto + custom).
 - `THIRD-PARTY-NOTICES.txt`, with the licenses of Qt, PySide6, and Shiboken6 (LGPL 3), Python and the libraries it includes, platformdirs, and the PyInstaller bootloader. It and `LICENSE` are inside every build, in the Mac disk image, and attached to every release. The Windows file properties and the Mac app name 34minutespast12 as the copyright holder.
 
 ### Security
@@ -21,14 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Releases include `SHA256SUMS.txt` and a signed build attestation for each file. `gh attestation verify <file> --repo 34Minutes/runner` confirms a download was built by the release workflow from this repository.
 - GitHub Actions are pinned to full commit IDs instead of tags such as `@v4`, which their owners can move. They are also updated to current releases that run on Node.js 24.
 - On macOS and Linux the config file and its backups are readable only by you (0600), and the config folder is 0700. Launcher arguments can hold tokens or passwords. An existing file is tightened the next time Runner saves.
-
-### Changed
-- Dependencies are pinned to exact versions (PySide6-Essentials 6.12.0, platformdirs 4.14.6, PyInstaller 6.22.3), so every build uses the Qt that was tested. Runner depends on `PySide6-Essentials` instead of `PySide6`, which skips about 175 MB of Qt add-ons (WebEngine, Pdf, and others) Runner never used; the built app is unchanged. Python 3.11 or newer is required; the pinned Qt already needed it.
-- Pushing a version tag publishes the release: a new Release workflow checks the tag against the version, runs the tests, builds Windows and Linux from that commit, and attaches both files with the changelog notes.
-- `build-windows.ps1` and `build-linux.sh` work like `build-mac.sh`: they use the project's `.venv` when it exists, check the version, and run the lint check and the tests first (`-SkipTests` / `--skip-tests`). A failed PyInstaller run now stops the Windows script; it used to print "Build complete!" anyway. `-OneDir` replaces `-OneFile:$false`.
-- The Windows file properties take their version from `pyproject.toml` at build time, and the Windows build checks the finished exe reports it. `file_version_info.txt`, which had to be edited by hand for every release, is gone.
-- UPX compression is off. It could break Qt DLLs and trip antivirus, and made a build depend on whether UPX was installed.
-- A lint check (`ruff`, unused and undefined names) runs before the tests, in `build-mac.sh` and on GitHub. The tests now also run on Linux.
 
 ### Fixed
 - Windows: if Windows refuses to add or remove Runner from the startup list, **Launch at Windows startup** says so. It failed silently.
