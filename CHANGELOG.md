@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (planning) Per-launcher icons (auto + custom).
 
+### Removed
+- The `box_opacity` setting. Its only control was the Opacity window removed in 1.0.10. The arrow's box uses the color scheme's own opacity; an old config that has the key still loads, and the key is dropped on the next save.
+
 ## [1.0.10] - 2026-11-17
 
 ### Changed

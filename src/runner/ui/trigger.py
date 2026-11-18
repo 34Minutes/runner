@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QWidget, QWid
 import sys
 
 from ..config import AppConfig
-from .theme import SCHEMES, current, resolve, with_opacity
+from .theme import SCHEMES, current, resolve
 from .toggle_switch import ToggleSwitch
 
 # The arrow has to stay visible enough to drag the slider back up.
@@ -662,7 +662,7 @@ class TriggerWidget(QWidget):
 
         # Subtle background pill / rounded rect
         scheme = current()
-        fill = with_opacity(scheme.trigger_fill, self._config.settings.box_opacity)
+        fill = scheme.trigger_fill
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(*fill))
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)

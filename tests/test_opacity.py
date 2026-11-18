@@ -1,11 +1,11 @@
-"""Opacity: the arrow-menu slider, and the box alpha kept in the config."""
+"""Opacity: the one slider on the arrow menu. The box takes its alpha from the scheme."""
 
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QDialog, QMenu, QWidgetAction
 
 from runner.config import AppConfig, ConfigManager
-from runner.ui.theme import DARK, use, with_opacity
+from runner.ui.theme import DARK, use
 from runner.ui.trigger import TriggerWidget
 
 
@@ -23,36 +23,6 @@ def _box_color(trigger) -> QColor:
     image = trigger.grab().toImage()
     # Left interior of the pill, clear of the centered chevron.
     return image.pixelColor(max(1, image.width() // 8), image.height() // 2)
-
-
-def test_stored_percent_replaces_scheme_alpha_and_negative_keeps_it():
-    assert with_opacity((30, 30, 30, 170), -1) == (30, 30, 30, 170)
-    assert with_opacity((30, 30, 30, 170), 0) == (30, 30, 30, 0)
-    assert with_opacity((30, 30, 30, 170), 100) == (30, 30, 30, 255)
-    assert with_opacity((30, 30, 30, 170), 50)[3] == round(50 * 255 / 100)
-    assert with_opacity((30, 30, 30, 170), 140)[3] == 255
-
-
-def test_old_config_keeps_scheme_opacity_until_a_slider_is_saved(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "runner.config.platformdirs.user_config_dir",
-        lambda *args, **kwargs: str(tmp_path),
-    )
-    loaded = AppConfig.from_dict(
-        {"version": 1, "settings": {"color_scheme": "bright"}, "launchers": []}
-    )
-    assert loaded.settings.box_opacity == -1
-    kept = AppConfig.from_dict(
-        {"version": 1, "settings": {"box_opacity": 40, "arrow_opacity": 10}, "launchers": []}
-    )
-    assert kept.settings.box_opacity == 40
-    assert not hasattr(kept.settings, "arrow_opacity")
-
-    mgr = ConfigManager()
-    assert mgr.config.settings.box_opacity == -1
-    mgr.update_settings(box_opacity=25)
-    again = ConfigManager()
-    assert again.config.settings.box_opacity == 25
 
 
 def test_arrow_menu_has_one_opacity_row_the_slider(qapp, qtbot):
@@ -73,14 +43,26 @@ def test_arrow_menu_has_one_opacity_row_the_slider(qapp, qtbot):
     assert trigger.findChildren(QDialog, "opacityDialog") == []
 
 
-def test_saved_box_opacity_still_paints_the_box(qapp, qtbot):
+def test_old_box_opacity_key_is_ignored_and_dropped_on_save(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "runner.config.platformdirs.user_config_dir",
+        lambda *args, **kwargs: str(tmp_path),
+    )
+    (tmp_path / "config.json").write_text(
+        '{"version": 2, "settings": {"box_opacity": 40}, "launchers": []}'
+    )
+    mgr = ConfigManager()
+    assert not hasattr(mgr.config.settings, "box_opacity")
+    assert mgr.load_problems == []
+    mgr.save()
+    assert "box_opacity" not in (tmp_path / "config.json").read_text()
+
+
+def test_box_uses_the_scheme_alpha(qapp, qtbot):
     use("dark")
-    cfg = AppConfig()
-    trigger = TriggerWidget(cfg)
+    trigger = TriggerWidget(AppConfig())
     qtbot.addWidget(trigger)
     trigger.resize(120, 96)
     rested = _box_color(trigger)
     assert abs(rested.alpha() - DARK.trigger_fill[3]) <= 2
-
-    cfg.settings.box_opacity = 100
-    assert _box_color(trigger).alpha() > 250
+    assert abs(rested.red() - DARK.trigger_fill[0]) <= 2

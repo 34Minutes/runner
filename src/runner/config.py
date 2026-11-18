@@ -259,9 +259,6 @@ class Settings:
     show_groups: bool = False
     # dark, bright, or medium. Unknown values display as Dark.
     color_scheme: str = "dark"
-    # Opacity of the arrow's rounded box.
-    # -1 keeps the alpha designed into the color scheme. 0-100 replaces it.
-    box_opacity: int = -1
     # How solid the arrow and the lists are, from 20 to 100.
     opacity_percent: int = 100
     # How long a list takes to fade after the pointer leaves. 0 is immediate.
