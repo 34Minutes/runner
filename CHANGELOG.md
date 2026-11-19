@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Opacity** applies to the arrow only. The lists are always solid, so their rows are easy to read.
+- The lists open and close with a fade, at their full size and in place. They used to grow out of the arrow and shrink back into it. A list closing toward the arrow could move its rows under the pointer, and the list then reopened as if you had moved onto it, making it bounce.
+
+### Fixed
+- The arrow menu and tray menu showed "Reset position  size" with a double space, because `&` in a menu label marks a keyboard shortcut and is not shown. It now reads **Reset position and size**.
+- A list that needed a little more than 420 px, such as twelve launchers and a container group, stopped at 420 px and scrolled the last few pixels; the scrollbar appeared just after the list opened. A list now uses the room on the roomier side of the arrow before it scrolls.
+- A list opening above the arrow sat one pixel too high while it faded in, then dropped into place.
+- Resizing or moving the arrow could get stuck. On macOS the launcher list opening under the pointer could take the mouse release, so the arrow never learned the button was up: it kept resizing toward the pointer with nothing held, and the new size or position was not saved until Runner quit. This is also what made **Reset position and size** seem not to work: the stuck resize pulled the arrow straight back out. A move with the button up now ends the gesture and saves it, and Reset drops any gesture in progress.
+- Dragging the very edge of the arrow on macOS resized it through the system, not through Runner: no press or release reached Runner, so the size was not saved until quit and resizing did not dismiss the greeting. A size the arrow did not drag to itself is now saved once it stops changing.
+
+### Added
+- Dragging the arrow closes every open list as soon as it starts to move, and nothing reopens until it is dropped. On the drop they open again where the arrow lands, as a hover opens them. A click without a move closes nothing.
+- **Reset position and size** shows the greeting bubble again ("Resize arrow to preferred size", "Drag arrow to preferred location"), even if it was dismissed or **Show greeting message** is off.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 

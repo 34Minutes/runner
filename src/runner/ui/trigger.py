@@ -20,6 +20,8 @@ from .toggle_switch import ToggleSwitch
 
 # The arrow has to stay visible enough to drag the slider back up.
 OPACITY_MIN_PERCENT = 20
+# A resize macOS does on its own counts as finished once the size holds this long.
+_OUTSIDE_RESIZE_SETTLE_MS = 250
 OPACITY_MAX_PERCENT = 100
 DECAY_MAX_MS = 1000
 
@@ -207,6 +209,9 @@ class TriggerWidget(QWidget):
     dragged = Signal(int, int)  # x, y
     # Once, when a drag ends. This is the one to save.
     position_changed = Signal(int, int)  # x, y
+    # The arrow starts moving under a drag, and that drag is over. A click is neither.
+    drag_started = Signal()
+    drag_finished = Signal()
     size_changed = Signal(int, int)  # w, h
     request_add = Signal()
     request_manage = Signal()
@@ -223,7 +228,7 @@ class TriggerWidget(QWidget):
     filter_toggled = Signal(bool)
     greeting_toggled = Signal(bool)
     groups_toggled = Signal(bool)
-    # The Opacity slider above Decay rate. This is the arrow and the lists.
+    # The Opacity slider above Decay rate. This is the arrow only; the lists stay solid.
     window_opacity_changed = Signal(int)
     decay_changed = Signal(int)
     startup_toggled = Signal(bool)  # Windows only
@@ -256,6 +261,13 @@ class TriggerWidget(QWidget):
             config.settings.trigger_width,
             config.settings.trigger_height,
         )
+        # macOS also resizes this borderless window itself, from its very edge,
+        # without sending us a press or release. Once such a size stops
+        # changing, report it as a finished resize.
+        self._outside_resize_timer = QTimer(self)
+        self._outside_resize_timer.setSingleShot(True)
+        self._outside_resize_timer.setInterval(_OUTSIDE_RESIZE_SETTLE_MS)
+        self._outside_resize_timer.timeout.connect(self._finish_outside_resize)
 
         # Use custom context menu policy. Overriding contextMenuEvent can cause
         # the menu to immediately close on some platforms (especially macOS)
@@ -276,7 +288,7 @@ class TriggerWidget(QWidget):
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
             "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position & size, Opacity, Decay rate, Color Schemes, Exit"
+            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position and size, Opacity, Decay rate, Color Schemes, Exit"
         )
 
     def _create_actions(self) -> None:
@@ -286,7 +298,7 @@ class TriggerWidget(QWidget):
         self._action_manage = QAction("Manage launchers...", self)
         self._action_manage.triggered.connect(self.request_manage.emit)
 
-        self._action_reset = QAction("Reset position & size", self)
+        self._action_reset = QAction("Reset position and size", self)
         self._action_reset.triggered.connect(self.request_reset.emit)
 
         self._action_add_group = QAction("Add Execute Group", self)
@@ -539,6 +551,12 @@ class TriggerWidget(QWidget):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        held = bool(event.buttons() & Qt.MouseButton.LeftButton)
+        if (self._resizing or self._dragging) and not held:
+            # The release went to another window: on macOS a list that opens
+            # while the pointer is on the arrow can take it. Without this the
+            # arrow kept resizing toward the pointer with no button held.
+            self._finish_pointer_gesture()
         if self._resizing:
             self._perform_resize(event)
             event.accept()
@@ -552,6 +570,8 @@ class TriggerWidget(QWidget):
                 new_pos.setX(max(geo.left(), min(new_pos.x(), geo.right() - self.width())))
                 new_pos.setY(max(geo.top(), min(new_pos.y(), geo.bottom() - self.height())))
             if new_pos != self.pos():
+                if not self._drag_moved:
+                    self.drag_started.emit()
                 self.move(new_pos)
                 self._drag_moved = True
                 self.dragged.emit(new_pos.x(), new_pos.y())
@@ -561,23 +581,51 @@ class TriggerWidget(QWidget):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self._resizing:
-                self._resizing = False
-                self._resize_edge = None
-                self.size_changed.emit(self.width(), self.height())
-                self.setCursor(Qt.ArrowCursor)
-                event.accept()
-            elif self._dragging:
-                self._dragging = False
-                if self._drag_moved:
-                    self._drag_moved = False
-                    self.position_changed.emit(self.x(), self.y())
-                event.accept()
-            else:
-                super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and (self._resizing or self._dragging):
+            self._finish_pointer_gesture()
+            event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if not self._resizing:
+            self._outside_resize_timer.start()
+
+    def _finish_outside_resize(self) -> None:
+        """A size this widget did not drag to itself. One that only puts back the
+        saved size, such as a reset or a restart, is not news."""
+        if self._resizing:
+            return
+        settings = self._config.settings
+        size = (self.width(), self.height())
+        if size != (settings.trigger_width, settings.trigger_height):
+            self.size_changed.emit(*size)
+
+    def _finish_pointer_gesture(self) -> None:
+        """End a resize or move as the button comes up, and report where it ended."""
+        if self._resizing:
+            self._resizing = False
+            self._resize_edge = None
+            self.setCursor(Qt.ArrowCursor)
+            self.size_changed.emit(self.width(), self.height())
+        elif self._dragging:
+            self._dragging = False
+            if self._drag_moved:
+                self._drag_moved = False
+                self.position_changed.emit(self.x(), self.y())
+                self.drag_finished.emit()
+
+    def cancel_pointer_gesture(self) -> None:
+        """Drop a resize or move in progress without saving it, as Reset does."""
+        was_moving = self._dragging and self._drag_moved
+        self._resizing = False
+        self._resize_edge = None
+        self._dragging = False
+        self._drag_moved = False
+        self.setCursor(Qt.ArrowCursor)
+        if was_moving:
+            self.drag_finished.emit()
 
     def _get_resize_edge(self, pos: QPoint):
         rect = self.rect()

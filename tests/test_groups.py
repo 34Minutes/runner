@@ -704,7 +704,7 @@ def test_group_list_matches_the_main_view_and_reorders_groups_only(qapp, qtbot):
 
 
 def test_arrow_hover_locks_main_popup_and_execute_groups(qapp, qtbot):
-    """The two lists share one opacity and one fraction of their full height."""
+    """The two lists share one fade. Neither grows, shrinks, or moves while it fades."""
     cfg = AppConfig()
     main_panel = DropdownPanel(cfg)
     groups = DropdownPanel(cfg, honor_pin=False)
@@ -738,15 +738,18 @@ def test_arrow_hover_locks_main_popup_and_execute_groups(qapp, qtbot):
     assert main_panel._linked_full_h > groups._linked_full_h
     assert main_panel._linked_fraction == groups._linked_fraction
 
+    def _full_size_in_place() -> None:
+        assert main_panel._frame.height() == main_panel._linked_full_h
+        assert groups._frame.height() == groups._linked_full_h
+        assert main_panel.y() == 80 and groups.y() == 80
+
     def _locked_open() -> bool:
         fraction = main_panel._linked_fraction
-        if fraction <= 0.08 or abs(fraction - groups._linked_fraction) > 0.001:
+        if not 0.08 < fraction < 0.9 or abs(fraction - groups._linked_fraction) > 0.001:
             return False
-        if main_panel.y() != 80 or groups.y() != 80:
-            return False
-        left = main_panel._frame.height() / main_panel._linked_full_h
-        right = groups._frame.height() / groups._linked_full_h
-        return abs(left - fraction) < 0.02 and abs(right - fraction) < 0.02
+        _full_size_in_place()
+        return (abs(main_panel.windowOpacity() - fraction) < 0.02
+                and abs(groups.windowOpacity() - fraction) < 0.02)
 
     qtbot.waitUntil(_locked_open, timeout=2000)
     assert samples
@@ -766,9 +769,9 @@ def test_arrow_hover_locks_main_popup_and_execute_groups(qapp, qtbot):
             return False
         if abs(fraction - groups._linked_fraction) > 0.001:
             return False
-        left = main_panel._frame.height() / main_panel._linked_full_h
-        right = groups._frame.height() / groups._linked_full_h
-        return abs(left - fraction) < 0.02 and abs(right - fraction) < 0.02
+        _full_size_in_place()
+        return (abs(main_panel.windowOpacity() - fraction) < 0.02
+                and abs(groups.windowOpacity() - fraction) < 0.02)
 
     qtbot.waitUntil(_locked_close, timeout=2000)
     # Moving onto one list must restore both. One list must not finish closing alone.
@@ -823,3 +826,105 @@ def _row_menu(panel: DropdownPanel, button: LaunchButton) -> QMenu:
     menu = panel._item_menu
     assert menu is not None
     return menu
+
+
+def test_lists_stay_solid_whatever_the_opacity_slider_says(qapp, qtbot):
+    """The Opacity slider is for the arrow. A list at rest is always solid."""
+    cfg = AppConfig()
+    cfg.settings.opacity_percent = 30
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new("Alpha", "a")])
+    panel.start_show_animation(focus=False)
+    qtbot.waitUntil(lambda: panel.windowOpacity() >= 0.999, timeout=2000)
+    panel.ensure_visible_and_sized()
+    assert panel.windowOpacity() >= 0.999
+
+
+def test_a_list_fades_in_at_full_size_and_in_place(qapp, qtbot):
+    """Opening above the arrow used to grow upward from it. Now it only fades."""
+    cfg = AppConfig()
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new(f"L{i}", "x") for i in range(8)])
+
+    def place_above() -> None:
+        panel._grow_from_top = False
+        panel._fixed_edge_y = 600
+        panel.move(100, 600 - panel.height())
+
+    panel.use_position_hook(place_above)
+    poses: list[tuple[int, int, float]] = []
+    timer = QTimer()
+    timer.setInterval(5)
+    timer.timeout.connect(lambda: poses.append((panel.y(), panel._frame.height(), panel.windowOpacity())))
+    panel.start_show_animation(focus=False)
+    full = (panel.y(), panel._frame.height())
+    timer.start()
+    qtbot.waitUntil(lambda: panel.windowOpacity() >= 0.999, timeout=2000)
+    timer.stop()
+    assert panel.y() + panel.height() == 600
+    partly = [pose for pose in poses if 0.05 < pose[2] < 0.95]
+    assert partly, "the fade should have been caught part way"
+    assert {(y, h) for y, h, _ in poses} == {full}
+
+
+def test_reset_label_reads_position_and_size(qapp, qtbot):
+    """'&' in a menu label marks a shortcut and is not shown, which left a double space."""
+    trigger = TriggerWidget(AppConfig())
+    qtbot.addWidget(trigger)
+    trigger._show_context_menu(QPoint(8, 8))
+    qapp.processEvents()
+    menus = [m for m in trigger.findChildren(QMenu) if any(a.text() == "Exit" for a in m.actions())]
+    menu = menus[-1]
+    qtbot.addWidget(menu)
+    texts = [action.text() for action in menu.actions()]
+    assert "Reset position and size" in texts
+    assert not any("&" in text for text in texts)
+    menu.close()
+
+
+def test_a_list_a_little_over_420px_opens_without_a_scrollbar(qapp, qtbot):
+    """The list used to stop at 420 px and scroll the last few pixels."""
+    cfg = AppConfig()
+    arrow = QLabel("arrow")
+    qtbot.addWidget(arrow)
+    arrow.resize(60, 40)
+    screen = QApplication.primaryScreen().availableGeometry()
+    arrow.move(screen.left() + 40, screen.top() + 10)
+    arrow.show()
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new(f"L{i}", "x") for i in range(14)])  # ~440 px of rows
+    panel.position_adjacent(arrow)
+    if screen.height() - 60 < 500:
+        return  # no room for the taller list on this screen
+    panel.start_show_animation(focus=False)
+    qtbot.waitUntil(lambda: panel.windowOpacity() >= 0.999, timeout=2000)
+    qapp.processEvents()
+    assert panel.height() > 420
+    assert panel._scroll.verticalScrollBar().maximum() == 0
+
+
+def test_a_list_above_the_arrow_keeps_its_place_when_it_finishes_opening(qapp, qtbot):
+    """QRect.bottom() is one short of the edge; a list above the arrow jumped a pixel."""
+    cfg = AppConfig()
+    arrow = QLabel("arrow")
+    qtbot.addWidget(arrow)
+    arrow.resize(60, 40)
+    screen = QApplication.primaryScreen().availableGeometry()
+    arrow.move(screen.left() + 40, screen.bottom() - 60)  # near the bottom: the list opens above
+    arrow.show()
+    panel = DropdownPanel(cfg)
+    qtbot.addWidget(panel)
+    panel.rebuild_buttons([Launcher.new(f"L{i}", "x") for i in range(4)])
+    panel.position_adjacent(arrow)
+    assert panel._grow_from_top is False
+    motion = LockedPairMotion(panel, lambda: 100, hide_duration_ms=100)
+    panel.set_locked_pair(motion)
+    motion.open([panel], focus_first=False)
+    during = panel.geometry()
+    qtbot.waitUntil(lambda: not motion.is_running(), timeout=2000)
+    assert panel.geometry() == during
+    # The list's bottom edge overlaps the arrow's top by the usual 3 px.
+    assert panel.y() + panel.height() == arrow.mapToGlobal(QPoint(0, 0)).y() + 3

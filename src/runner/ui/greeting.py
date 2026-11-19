@@ -341,6 +341,9 @@ class StartupGreeting(QObject):
         self._trigger: QWidget | None = None
         self._dismissed = False
         self._show_bubble = show_bubble
+        # Where the pointer was when the hint was asked for. The arrow can land
+        # under it; that is not a hover until the pointer moves.
+        self._held_pointer: QPoint | None = None
         self._flash_on = True
         self._timer = QTimer(self)
         self._timer.setInterval(_FLASH_INTERVAL_MS)
@@ -367,19 +370,23 @@ class StartupGreeting(QObject):
     def dismissed(self) -> bool:
         return self._dismissed
 
-    def present(self, trigger: QWidget, *, show_bubble: bool | None = None) -> None:
+    def present(self, trigger: QWidget, *, show_bubble: bool | None = None,
+                even_under_pointer: bool = False) -> None:
         """Show the hint around trigger. Does nothing after it was dismissed this launch.
 
         The bubble is shown on every launch. show_bubble False keeps the flashing
-        border and leaves the bubble hidden.
+        border and leaves the bubble hidden. even_under_pointer shows it although
+        the pointer is already on the arrow, for when it was asked for.
         """
         if show_bubble is not None:
             self._show_bubble = show_bubble
         if self._dismissed or not isinstance(trigger, QWidget):
             return
         self._attach(trigger)
+        self._held_pointer = QPoint(QCursor.pos()) if even_under_pointer else None
         # The pointer is already on the arrow, so this launch has been noticed.
-        if trigger.isVisible() and trigger.rect().contains(trigger.mapFromGlobal(QCursor.pos())):
+        if (not even_under_pointer and trigger.isVisible()
+                and trigger.rect().contains(trigger.mapFromGlobal(QCursor.pos()))):
             self.dismiss_for_session()
             return
         self._flash_on = True
@@ -401,12 +408,14 @@ class StartupGreeting(QObject):
         if not self._timer.isActive():
             self._timer.start()
 
-    def show_again(self, trigger: QWidget) -> None:
-        """Used when the edit-screen switch is turned back on during this launch."""
+    def show_again(self, trigger: QWidget, *, show_bubble: bool | None = None,
+                   even_under_pointer: bool = False) -> None:
+        """Bring the hint back this launch: when its switch is turned back on,
+        or after Reset position and size."""
         self._fade.stop()
         self._dismissed = False
         self._bubble.set_opacity(1.0)
-        self.present(trigger)
+        self.present(trigger, show_bubble=show_bubble, even_under_pointer=even_under_pointer)
 
     def dismiss_for_session(self) -> None:
         """Fade the hint out, then keep it hidden until Runner is started again."""
@@ -491,6 +500,10 @@ class StartupGreeting(QObject):
         except RuntimeError:
             return False
         kind = event.type()
+        if kind in (QEvent.Type.Enter, QEvent.Type.HoverEnter, QEvent.Type.MouseMove):
+            if self._held_pointer is not None and QCursor.pos() == self._held_pointer:
+                return False  # the arrow moved under a still pointer
+            self._held_pointer = None
         # Border-only launches still dismiss when the pointer reaches the arrow.
         if kind in (
             QEvent.Type.Enter,

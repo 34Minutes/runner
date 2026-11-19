@@ -1,6 +1,6 @@
 """Startup arrow size and the resize greeting."""
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QApplication, QMenu
 
@@ -419,3 +419,130 @@ def test_greeting_switch_is_on_the_arrow_menu(qapp, qtbot):
     for dialog in (edit, add):
         labels = [w.text() for w in dialog.findChildren(ToggleSwitch)]
         assert "Show greeting message" not in labels
+
+
+def test_reset_brings_the_greeting_back_even_under_the_pointer(qapp, qtbot, monkeypatch):
+    """Reset position and size shows the bubble again, after a dismiss and with
+    the arrow landing under the pointer. A still pointer is not a hover."""
+    trigger = _shown_trigger(qtbot, 300, 300)
+    middle = trigger.mapToGlobal(QPoint(trigger.width() // 2, trigger.height() // 2))
+    _pointer_at(monkeypatch, middle)
+    greeting = StartupGreeting(show_bubble=False)
+    try:
+        greeting.dismiss_for_session()
+        assert greeting.dismissed is True
+
+        greeting.show_again(trigger, show_bubble=True, even_under_pointer=True)
+        assert greeting.dismissed is False
+        assert greeting.bubble.isVisible() is True
+        assert trigger._greeting_highlight is True
+
+        QApplication.sendEvent(trigger, QEvent(QEvent.Type.Enter))  # the arrow moved under it
+        assert greeting.dismissed is False
+
+        _pointer_at(monkeypatch, middle + QPoint(3, 0))  # now the pointer really moves
+        QApplication.sendEvent(trigger, QEvent(QEvent.Type.Enter))
+        assert greeting.dismissed is True
+    finally:
+        greeting.shutdown()
+
+
+def _mouse(kind, widget, local: QPoint, buttons):
+    from PySide6.QtGui import QMouseEvent
+
+    button = Qt.MouseButton.LeftButton if kind != QEvent.Type.MouseMove else Qt.MouseButton.NoButton
+    return QMouseEvent(kind, QPointF(local), QPointF(widget.mapToGlobal(local)),
+                       button, buttons, Qt.KeyboardModifier.NoModifier)
+
+
+def test_a_resize_whose_release_went_elsewhere_ends_on_the_next_move(qapp, qtbot):
+    """On macOS a list that opens mid-resize can take the mouse release. The arrow
+    must not keep resizing after the button is up, and the new size must be saved."""
+    trigger = _shown_trigger(qtbot, 300, 300)
+    saved = []
+    trigger.size_changed.connect(lambda w, h: saved.append((w, h)))
+    edge = QPoint(trigger.width() - 2, trigger.height() // 2)  # the right edge
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonPress, trigger, edge, Qt.MouseButton.LeftButton))
+    assert trigger._resizing is True
+    grown = edge + QPoint(30, 0)
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseMove, trigger, grown, Qt.MouseButton.LeftButton))
+    qapp.processEvents()
+    width = trigger.width()
+    # The release never arrives. The next move has no button held.
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseMove, trigger, grown + QPoint(40, 0), Qt.MouseButton.NoButton))
+    qapp.processEvents()
+    assert trigger._resizing is False
+    assert trigger.width() == width
+    assert saved == [(width, trigger.height())]
+
+
+def test_a_drag_whose_release_went_elsewhere_saves_where_it_stopped(qapp, qtbot):
+    trigger = _shown_trigger(qtbot, 300, 300)
+    moved = []
+    trigger.position_changed.connect(lambda x, y: moved.append((x, y)))
+    middle = QPoint(trigger.width() // 2, trigger.height() // 2)
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonPress, trigger, middle, Qt.MouseButton.LeftButton))
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseMove, trigger, middle + QPoint(25, 15), Qt.MouseButton.LeftButton))
+    qapp.processEvents()
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseMove, trigger, middle, Qt.MouseButton.NoButton))
+    assert trigger._dragging is False
+    assert moved == [(trigger.x(), trigger.y())]
+
+
+def test_a_resize_macos_does_itself_is_saved_once_it_stops(qapp, qtbot):
+    """Dragging the very edge of the borderless arrow lets macOS resize it with no
+    press or release reaching Runner. That size used to be lost until quit."""
+    trigger = _shown_trigger(qtbot, 300, 300)
+    saved = []
+    trigger.size_changed.connect(lambda w, h: saved.append((w, h)))
+    for step in range(1, 6):  # the window manager resizing it bit by bit
+        trigger.resize(120 + step * 8, 96 + step * 5)
+        qapp.processEvents()
+    assert saved == []  # not while it is still changing
+    qtbot.waitUntil(lambda: saved == [(160, 121)], timeout=2000)
+
+
+def test_putting_back_the_saved_size_is_not_a_resize(qapp, qtbot):
+    """Reset and a restart resize the arrow to the saved size. That must not count
+    as the user's resize, which would dismiss the greeting Reset just showed."""
+    trigger = _shown_trigger(qtbot, 300, 300)
+    trigger.resize(200, 150)
+    trigger._config.settings.trigger_width = 120
+    trigger._config.settings.trigger_height = 96
+    trigger._outside_resize_timer.stop()
+    saved = []
+    trigger.size_changed.connect(lambda w, h: saved.append((w, h)))
+    trigger.update_size_from_settings()
+    qtbot.wait(400)
+    assert (trigger.width(), trigger.height()) == (120, 96)
+    assert saved == []
+
+
+def test_dragging_the_arrow_reports_start_and_finish_but_a_click_does_not(qapp, qtbot):
+    trigger = _shown_trigger(qtbot, 300, 300)
+    events = []
+    trigger.drag_started.connect(lambda: events.append("started"))
+    trigger.drag_finished.connect(lambda: events.append("finished"))
+    middle = QPoint(trigger.width() // 2, trigger.height() // 2)
+
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonPress, trigger, middle, Qt.MouseButton.LeftButton))
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonRelease, trigger, middle, Qt.MouseButton.NoButton))
+    assert events == []  # a click is not a drag
+
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonPress, trigger, middle, Qt.MouseButton.LeftButton))
+    for step in (10, 20, 30):
+        QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseMove, trigger, middle + QPoint(step, 0), Qt.MouseButton.LeftButton))
+    assert events == ["started"]
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonRelease, trigger, middle, Qt.MouseButton.NoButton))
+    assert events == ["started", "finished"]
+
+
+def test_reset_mid_drag_still_finishes_the_drag(qapp, qtbot):
+    trigger = _shown_trigger(qtbot, 300, 300)
+    events = []
+    trigger.drag_finished.connect(lambda: events.append("finished"))
+    middle = QPoint(trigger.width() // 2, trigger.height() // 2)
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseButtonPress, trigger, middle, Qt.MouseButton.LeftButton))
+    QApplication.sendEvent(trigger, _mouse(QEvent.Type.MouseMove, trigger, middle + QPoint(20, 0), Qt.MouseButton.LeftButton))
+    trigger.cancel_pointer_gesture()
+    assert events == ["finished"]

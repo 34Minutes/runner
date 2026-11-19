@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import (
     QEasingCurve,
-    QPoint,
     QPropertyAnimation,
     Qt,
 )
@@ -89,28 +88,20 @@ class PanelMotionMixin:
         self._linked_grow_top = bool(self._grow_from_top)
 
     def apply_open_fraction(self, fraction: float) -> None:
-        """fraction 0 is the closed pose, 1 is the captured full height.
-
-        Opacity uses the same fraction, so two lists driven together match.
-        """
+        """fraction 0 is invisible, 1 is fully solid. The list stays at its full
+        size and place throughout: it only fades, so its rows never move under
+        the pointer. Two lists driven together share the fraction."""
         full_h = self._linked_full_h
         if full_h <= 0:
             return
         fraction = max(0.0, min(1.0, float(fraction)))
-        if fraction >= 1.0:
-            frame_h = full_h
-        else:
-            frame_h = max(1, int(round(full_h * fraction)))
         self._button_container.setMinimumHeight(0)
         self._scroll.setMinimumHeight(0)
         self._frame.setMinimumHeight(0)
         self._frame.setMaximumHeight(full_h)
-        self._frame.setFixedHeight(frame_h)
+        self._frame.setFixedHeight(full_h)
         self.setFixedHeight(full_h)
-        if self._linked_grow_top:
-            y = self._linked_edge
-        else:
-            y = self._linked_edge - frame_h
+        y = self._linked_edge if self._linked_grow_top else self._linked_edge - full_h
         self.move(self._linked_x, y)
         self._linked_fraction = fraction
         self.setWindowOpacity(fraction * self._rest_opacity())
@@ -200,39 +191,11 @@ class PanelMotionMixin:
         if take_focus:
             self.setFocus(Qt.FocusReason.OtherFocusReason)
 
+        # Fade in at full size and in place. Growing toward or away from the
+        # arrow moved rows under the pointer, which could reopen a closing list.
         self._update_height_for_content()
-
-        self._button_container.setMinimumHeight(0)
-        self._scroll.setMinimumHeight(0)
-
-        start_h = 8
-        end_h = self._frame.height()
-
-        grow_from_top = getattr(self, "_grow_from_top", True)
-        fixed_edge = getattr(self, "_fixed_edge_y", self.y())
-
-        if grow_from_top:
-            # Below: top edge fixed at the attachment point. Grow downward.
-            self.move(self.x(), fixed_edge)
-            self._frame.setFixedHeight(start_h)
-            self.setWindowOpacity(0.0)
-            pos_anim = None
-        else:
-            # Above: bottom edge fixed at the attachment point. Grow upward.
-            # Start small with its bottom at the fixed edge.
-            init_y = fixed_edge - start_h
-            self.move(self.x(), init_y)
-            self._frame.setFixedHeight(start_h)
-            self.setWindowOpacity(0.0)
-            # We also need to animate the y position upward as height grows.
-            final_y = fixed_edge - end_h
-            pos_anim = QPropertyAnimation(self, b"pos", self)
-            pos_anim.setDuration(self._config.settings.animation_duration_ms)
-            pos_anim.setStartValue(QPoint(self.x(), init_y))
-            pos_anim.setEndValue(QPoint(self.x(), final_y))
-            pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self._frame.setMaximumHeight(end_h)
+        self._place()
+        self.setWindowOpacity(0.0)
 
         anim = QPropertyAnimation(self, b"windowOpacity", self)
         anim.setDuration(self._config.settings.animation_duration_ms)
@@ -240,33 +203,16 @@ class PanelMotionMixin:
         anim.setEndValue(self._rest_opacity())
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        height_anim = QPropertyAnimation(self._frame, b"minimumHeight", self)
-        height_anim.setDuration(self._config.settings.animation_duration_ms)
-        height_anim.setStartValue(start_h)
-        height_anim.setEndValue(end_h)
-        height_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
         def on_finished(motion: int = motion) -> None:
             if motion != self._motion:
                 return
-            self._frame.setMinimumHeight(0)
-            self._frame.setMaximumHeight(16777215)
-            self._frame.setFixedHeight(end_h)
             self.setWindowOpacity(self._rest_opacity())
-            # Restore proper mins for the content now that we are at full open height.
-            # This re-enables the "don't squish my spacings" protection.
-            self._update_height_for_content()
 
-        height_anim.finished.connect(on_finished)
+        anim.finished.connect(on_finished)
 
         self._animation = anim  # keep ref
         self._track_anim(anim)
-        self._track_anim(height_anim)
         anim.start()
-        height_anim.start()
-        if pos_anim is not None:
-            self._track_anim(pos_anim)
-            pos_anim.start()
 
     def start_hide_animation(self) -> None:
         """Fade this list out where it is, then close it.

@@ -40,6 +40,11 @@ from .dropdown_motion import PanelMotionMixin
 from .locked_pair import _HIDE_DECAY_MS, LockedPairMotion
 from .rows import SubmenuButton, _RowGhost
 
+# A list is allowed at least this tall before it scrolls, more when the screen has room.
+_MIN_MAX_LIST_H = 420
+# Kept clear between a full-height list and the edge of the screen.
+_SCREEN_EDGE_GAP = 8
+
 # Re-exported for callers that import these from here.
 __all__ = [
     "DropdownPanel",
@@ -222,12 +227,9 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         return self._honor_pin and self._config.settings.pinned_open
 
     def _rest_opacity(self) -> float:
-        percent = getattr(self._config.settings, "opacity_percent", 100)
-        try:
-            percent = int(percent)
-        except (TypeError, ValueError):
-            percent = 100
-        return max(20, min(100, percent)) / 100.0
+        """A list at rest is fully solid. The Opacity slider is for the arrow only;
+        a list is only see-through while it fades in or out."""
+        return 1.0
 
     def _decay_ms(self) -> int:
         """How long the close fade lasts. The Decay rate slider stores this."""
@@ -503,6 +505,24 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         if previous is not None and previous in self._visible_buttons and previous.isVisible():
             self._set_keyboard_current(previous)
 
+    def _max_list_height(self) -> int:
+        """How tall the list may grow before it scrolls: all the room on the
+        roomier side of the arrow, and never less than the old fixed limit.
+
+        A fixed 420 px made a list that needed a few pixels more scroll by
+        those few pixels, with a scrollbar appearing once it opened."""
+        trigger = self._anchor_trigger
+        if trigger is None:
+            return _MIN_MAX_LIST_H
+        top_left = trigger.mapToGlobal(QPoint(0, 0))
+        screen = QApplication.screenAt(top_left) or QApplication.primaryScreen()
+        if screen is None:
+            return _MIN_MAX_LIST_H
+        avail = screen.availableGeometry()
+        above = top_left.y() - avail.top()
+        below = avail.bottom() + 1 - (top_left.y() + trigger.size().height())
+        return max(_MIN_MAX_LIST_H, max(above, below) - _SCREEN_EDGE_GAP)
+
     def _update_height_for_content(self) -> None:
         """Compute the height required so that each button row gets its full height
         (minHeight or sizeHint) + the declared _button_layout spacing (2px) + chrome.
@@ -567,8 +587,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         # own spacing(2), we need extra on top of the pure inner_h.
         viewport_chrome = 22  # extra allowance so the inner button_layout rect is large enough for all minHeights + the full declared spacing(2) between each (previously we were 1px short per gap)
         target_h = inner_h + frame_chrome + viewport_chrome + search_h + heading_h + layout_sp
-        max_h = 420
-        target_h = min(target_h, max_h)
+        target_h = min(target_h, self._max_list_height())
         self._frame.setFixedHeight(target_h)
         self.setFixedHeight(target_h)
 
@@ -801,7 +820,9 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             fixed_edge_y = final_rect.top()
             grow_from_top = True
         else:
-            fixed_edge_y = final_rect.bottom()
+            # The line just below the list. QRect.bottom() is its last row of
+            # pixels, one short of that, which left the list a pixel too high.
+            fixed_edge_y = final_rect.bottom() + 1
             grow_from_top = False
 
         # Store for animations so they expand/contract away from the edge.
@@ -857,7 +878,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
 
         self.move(rect.topLeft())
         self._grow_from_top = grow_from_top
-        self._fixed_edge_y = rect.top() if grow_from_top else rect.bottom()
+        self._fixed_edge_y = rect.top() if grow_from_top else rect.bottom() + 1
 
     def position_next_to(self, host: QWidget, anchor: QWidget, *, prefer_right: bool = True) -> None:
         """Open beside the launcher list, lined up with one row.
@@ -899,7 +920,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
 
         self.move(rect.topLeft())
         self._grow_from_top = rect.top() <= anchor_top + 2
-        self._fixed_edge_y = rect.top() if self._grow_from_top else rect.bottom()
+        self._fixed_edge_y = rect.top() if self._grow_from_top else rect.bottom() + 1
 
     # --- Hover handling (combined area: trigger + this panel) ---
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]

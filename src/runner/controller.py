@@ -169,7 +169,7 @@ def create_tray(
     for text, slot in (
         ("Add new launcher...", on_add),
         ("Manage launchers...", on_manage),
-        ("Reset position & size", on_reset),
+        ("Reset position and size", on_reset),
         ("Reload config", on_reload),
     ):
         action = QAction(text, menu)
@@ -210,6 +210,8 @@ class RunnerController:
         self.app = app
         self.cfg = cfg
         self.mode = PopupMode.MAIN
+        # True while the arrow itself is being dragged. The lists stay closed.
+        self._arrow_dragging = False
 
         self._build_widgets()
         self._place_trigger_on_start()
@@ -396,6 +398,8 @@ class RunnerController:
         # The lists follow the arrow while it moves. The position is saved once, on release.
         self.trigger.dragged.connect(lambda _x, _y: self._follow_trigger())
         self.trigger.position_changed.connect(self._save_position)
+        self.trigger.drag_started.connect(self._on_arrow_drag_started)
+        self.trigger.drag_finished.connect(self._on_arrow_drag_finished)
         self.trigger.size_changed.connect(self._save_size)
         self.app.aboutToQuit.connect(self._save_trigger_geometry)
         self.app.aboutToQuit.connect(self.flush_pending_save)
@@ -619,6 +623,8 @@ class RunnerController:
     def _apply_pinned_state(self) -> None:
         if self._groups_only():
             return
+        if self._arrow_dragging:
+            return  # the drop reopens a pinned list where the arrow lands
         if self.settings.pinned_open:
             self.dropdown.position_adjacent(self.trigger)
             self.dropdown.cancel_hide()
@@ -638,6 +644,8 @@ class RunnerController:
 
     def _follow_trigger(self) -> None:
         """Keep whichever list is open beside the arrow."""
+        if self._arrow_dragging:
+            return
         if self._groups_only() and self.group_panel.isVisible():
             self.group_panel.use_position_hook(None)
             self.group_panel.position_adjacent(self.trigger)
@@ -661,7 +669,30 @@ class RunnerController:
 
     # ------------------------------------------------------- hover handlers
 
+    def _on_arrow_drag_started(self) -> None:
+        """Moving the arrow closes every list at once, pinned or not."""
+        self._arrow_dragging = True
+        self.hide_timer.stop()
+        self.container_menu.hide()
+        self.execute_menu.hide()
+        for panel in (self.dropdown, self.group_panel, self.container_panel, self.execute_panel):
+            if panel.isVisible():
+                panel.force_hide()
+
+    def _on_arrow_drag_finished(self) -> None:
+        """The lists open again where the arrow was dropped, as a hover opens them."""
+        self._arrow_dragging = False
+        if self.settings.pinned_open:
+            self._apply_pinned_state()
+        self._on_trigger_enter()
+        # A release noticed late can come with the pointer elsewhere. Then no
+        # leave will arrive to close the lists, so start the usual fade now.
+        if not self._pointer_over_any() and self._should_hide_on_leave():
+            self._schedule_hide()
+
     def _on_trigger_enter(self) -> None:
+        if self._arrow_dragging:
+            return
         self._cancel_hide()
         self.container_menu.hide()
         self.execute_menu.hide()
@@ -1180,11 +1211,8 @@ class RunnerController:
     def _apply_opacity(self, percent: int | None = None) -> None:
         if percent is None:
             percent = self.settings.opacity_percent
-        value = clamp_opacity_percent(percent) / 100
-        self.trigger.setWindowOpacity(value)
-        for panel in (self.dropdown, self.group_panel, self.container_panel, self.execute_panel):
-            if panel.isVisible() and not panel.is_closing():
-                panel.setWindowOpacity(value)
+        # Only the arrow. The lists stay solid so their rows are easy to read.
+        self.trigger.setWindowOpacity(clamp_opacity_percent(percent) / 100)
 
     def _on_opacity_changed(self, percent: int) -> None:
         self._update_settings_soon(opacity_percent=percent)
@@ -1216,14 +1244,16 @@ class RunnerController:
 
     def _move_trigger_to_default(self) -> None:
         x, y = DEFAULT_POSITION
-        self.trigger.resize(DEFAULT_TRIGGER_WIDTH, DEFAULT_TRIGGER_HEIGHT)
-        self.trigger.move(x, y)
+        # Save first: the arrow treats a size that differs from the saved one
+        # as the user's own resize, which would dismiss the reset's greeting.
         self.cfg.update_settings(
             trigger_width=DEFAULT_TRIGGER_WIDTH,
             trigger_height=DEFAULT_TRIGGER_HEIGHT,
             position_x=x,
             position_y=y,
         )
+        self.trigger.resize(DEFAULT_TRIGGER_WIDTH, DEFAULT_TRIGGER_HEIGHT)
+        self.trigger.move(x, y)
 
     def _reset_if_off_screen(self) -> None:
         """A saved position can be off screen after a monitor change."""
@@ -1233,9 +1263,15 @@ class RunnerController:
         self._move_trigger_to_default()
 
     def reset_position_and_size(self) -> None:
+        # A resize or move whose release never arrived would pull the arrow
+        # straight back out to the pointer.
+        self.trigger.cancel_pointer_gesture()
         self._move_trigger_to_default()
         self.trigger.raise_()
         self._follow_trigger()
+        # The arrow just jumped to the default spot: point it out, and remind
+        # them they can resize and move it. Shown whatever the greeting switch says.
+        self.greeting.show_again(self.trigger, show_bubble=True, even_under_pointer=True)
 
     def _save_position(self, x: int, y: int) -> None:
         self.cfg.update_settings(position_x=x, position_y=y)

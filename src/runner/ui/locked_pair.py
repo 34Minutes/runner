@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 class LockedPairMotion(QObject):
     """One open/close clock for the main popup and the execute-groups list.
 
-    Arrow hover starts both. They keep the same opacity and the same fraction
-    of their full height for the whole animation, including a reverse.
+    Arrow hover starts both. They fade in and out together at their full size,
+    keeping the same opacity for the whole fade, including a reverse.
     """
 
     def __init__(
@@ -61,7 +61,7 @@ class LockedPairMotion(QObject):
         return self._closing
 
     def open(self, panels: list[DropdownPanel], *, focus_first: bool = True) -> None:
-        """Animate every panel from the shared progress up to fully open."""
+        """Fade every panel from the shared progress up to fully solid."""
         if not self._presented:
             self._progress = 0.0
         self._closing = False
@@ -100,7 +100,7 @@ class LockedPairMotion(QObject):
         return True
 
     def close(self, panels: list[DropdownPanel]) -> None:
-        """Animate the panels that are still showing down together."""
+        """Fade out the panels that are still showing, together."""
         if not self._presented:
             return
         visible = [panel for panel in panels if panel.isVisible()]
