@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.0.12] - 2026-11-19
+
 ### Changed
 - **Opacity** applies to the arrow only. The lists are always solid, so their rows are easy to read.
 - The lists open and close with a fade, at their full size and in place. They used to grow out of the arrow and shrink back into it. A list closing toward the arrow could move its rows under the pointer, and the list then reopened as if you had moved onto it, making it bounce.
@@ -21,9 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Dragging the arrow closes every open list as soon as it starts to move, and nothing reopens until it is dropped. On the drop they open again where the arrow lands, as a hover opens them. A click without a move closes nothing.
 - **Reset position and size** shows the greeting bubble again ("Resize arrow to preferred size", "Drag arrow to preferred location"), even if it was dismissed or **Show greeting message** is off.
-
-### Planned
-- Per-launcher icons (auto + custom).
 
 ## [1.0.11] - 2026-11-18
 
