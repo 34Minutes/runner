@@ -491,10 +491,15 @@ def test_container_groups_menu_item_opens_only_the_container_rows(qapp, qtbot, m
     """It opens beside the arrow on its own, as Execute Groups does."""
     ctl = _controller(qapp, monkeypatch, tmp_path)
     ctl.trigger.show()
+    # Near the top, so both lists open below the arrow on any screen size.
+    # Lower down, a short screen can fit the shorter list below and not the other.
+    avail = ctl.trigger.screen().availableGeometry()
+    ctl.trigger.move(avail.left() + 200, avail.top() + 40)
     try:
         ctl.trigger.request_groups.emit()
         assert ctl.group_panel.isVisible() and not ctl.dropdown.isVisible()
         groups_side = ctl.group_panel.y() < ctl.trigger.y()
+        assert groups_side is False
 
         ctl.trigger.request_containers.emit()
         listing = ctl.container_list
