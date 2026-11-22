@@ -457,3 +457,132 @@ def test_container_submenu_opens_beside_the_hovered_row(qapp, qtbot):
     menu.position_next_to(host, row, prefer_right=True)
     assert menu.x() >= host.x() + host.width()
     assert abs(menu.y() - row.mapToGlobal(QPoint(0, 0)).y()) <= 2
+
+
+def _controller(qapp, monkeypatch, tmp_path, *, pinned=False):
+    """The real controller over a throwaway config with two containers and one execute group."""
+    from unittest.mock import MagicMock
+
+    from runner.controller import RunnerController
+
+    cfg = _isolate_config(monkeypatch, tmp_path)
+    alpha, beta = Launcher.new("Alpha", "a"), Launcher.new("Beta", "b")
+    cfg.config.launchers = [alpha, beta]
+    cfg.config.container_groups = [
+        ContainerGroup.new("Projects", [ContainerMember(alpha.id)]),
+        ContainerGroup.new("Notes", [ContainerMember(beta.id)]),
+    ]
+    cfg.config.groups = [Group.new("Class", [GroupMember(alpha.id)])]
+    cfg.config.settings.pinned_open = pinned
+    cfg.config.settings.position_x, cfg.config.settings.position_y = 400, 500
+    monkeypatch.setattr("runner.controller.create_tray", lambda **_: MagicMock())
+    ctl = RunnerController(qapp, cfg)
+    ctl.greeting.dismiss_for_session()
+    return ctl
+
+
+def _close_all(ctl):
+    for panel in ctl._all_lists():
+        panel.force_hide()
+    ctl.trigger.hide()
+
+
+def test_container_groups_menu_item_opens_only_the_container_rows(qapp, qtbot, monkeypatch, tmp_path):
+    """It opens beside the arrow on its own, as Execute Groups does."""
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    ctl.trigger.show()
+    try:
+        ctl.trigger.request_groups.emit()
+        assert ctl.group_panel.isVisible() and not ctl.dropdown.isVisible()
+        groups_side = ctl.group_panel.y() < ctl.trigger.y()
+
+        ctl.trigger.request_containers.emit()
+        listing = ctl.container_list
+        assert listing.isVisible()
+        assert not ctl.dropdown.isVisible()
+        assert not ctl.group_panel.isVisible()
+        assert listing._heading.text() == "Container Groups"
+        rows = [b for b in listing._buttons if isinstance(b, SubmenuButton)]
+        assert [b.item_name for b in rows] == ["Projects", "Notes"]
+        assert not [b for b in listing._buttons if isinstance(b, LaunchButton)]
+        # Same side of the arrow as the execute-groups list.
+        assert (listing.y() < ctl.trigger.y()) == groups_side
+        qtbot.waitUntil(lambda: listing.windowOpacity() >= 0.99, timeout=2000)
+    finally:
+        _close_all(ctl)
+
+
+def test_hovering_a_container_row_opens_its_launchers_beside_the_list(qapp, qtbot, monkeypatch, tmp_path):
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    ctl.trigger.show()
+    try:
+        ctl.trigger.request_containers.emit()
+        listing = ctl.container_list
+        projects = ctl.cfg.config.container_groups[0]
+        row = listing.submenu_button(projects.id)
+        assert row is not None and row.isVisible()
+        listing.submenu_hovered.emit(projects.id)
+        panel = ctl.container_panel
+        assert panel.isVisible()
+        assert ctl.container_menu.open_id == projects.id
+        assert [b.launcher.name for b in panel._launch_buttons()] == ["Alpha"]
+        assert panel.x() >= listing.x() + listing.width() or panel.x() + panel.width() <= listing.x()
+        assert abs(panel.y() - row.mapToGlobal(QPoint(0, 0)).y()) <= 2
+    finally:
+        _close_all(ctl)
+
+
+def test_hovering_the_arrow_keeps_the_container_list_until_it_closes(qapp, qtbot, monkeypatch, tmp_path):
+    """Like Execute Groups: the arrow reopens the same list until it has closed."""
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    ctl.trigger.show()
+    try:
+        ctl.trigger.request_containers.emit()
+        ctl._on_trigger_enter()
+        assert ctl.container_list.isVisible() and not ctl.dropdown.isVisible()
+
+        ctl.container_list.force_hide()
+        assert ctl.mode.name == "MAIN"
+        ctl._on_trigger_enter()
+        assert ctl.dropdown.isVisible() and not ctl.container_list.isVisible()
+    finally:
+        _close_all(ctl)
+
+
+def test_dragging_the_arrow_reopens_the_container_list_on_the_drop(qapp, qtbot, monkeypatch, tmp_path):
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    ctl.trigger.show()
+    try:
+        ctl.trigger.request_containers.emit()
+        ctl.trigger.drag_started.emit()
+        assert not ctl.container_list.isVisible()
+        ctl.trigger.drag_finished.emit()
+        assert ctl.container_list.isVisible() and not ctl.dropdown.isVisible()
+    finally:
+        _close_all(ctl)
+
+
+def test_pinned_main_popup_returns_after_the_container_list_closes(qapp, qtbot, monkeypatch, tmp_path):
+    ctl = _controller(qapp, monkeypatch, tmp_path, pinned=True)
+    ctl.trigger.show()
+    try:
+        ctl._apply_pinned_state()
+        assert ctl.dropdown.isVisible()
+        ctl.trigger.request_containers.emit()
+        assert ctl.container_list.isVisible() and not ctl.dropdown.isVisible()
+        ctl.container_list.force_hide()
+        assert ctl.dropdown.isVisible()
+    finally:
+        _close_all(ctl)
+
+
+def test_container_groups_with_none_saved_opens_nothing(qapp, qtbot, monkeypatch, tmp_path):
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    ctl.cfg.config.container_groups = []
+    ctl.trigger.show()
+    try:
+        ctl.trigger.request_containers.emit()
+        assert not ctl.container_list.isVisible()
+        assert ctl.mode.name == "MAIN"
+    finally:
+        _close_all(ctl)

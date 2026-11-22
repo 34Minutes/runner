@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Container Groups** on the arrow menu opens the container-group list on its own, beside the arrow, the same way **Execute Groups** opens the execute-group list. Hover a container group to open its launchers. It used to open the main popup.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 
