@@ -7,7 +7,9 @@ time does: 60 minutes make an hour, 24 hours a day, 7 days a week, and
 interval never goes below zero or above 99 months.
 
 Drag a roller (flick it to coast), scroll over it, or click above or below
-the middle. Left/Right picks a roller, Up/Down steps it.
+the middle. Left/Right picks a roller, Up/Down steps it. The Select key on
+the right, a drum-sized key in the same metal, presses in to select the
+interval; Enter or Space does the same. It is off while the interval is zero.
 
 Run from the Runner repo (it reads src/runner/ui/theme.py):
     .venv/bin/python prototypes/interval_roller.py             demo window
@@ -35,7 +37,7 @@ from PySide6.QtGui import (
     QPixmap,
     QStaticText,
 )
-from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from metal_dial import DialPalette, _mix, _rgb, palette_for  # noqa: E402  same materials as the dial
@@ -148,6 +150,7 @@ def _drum_spec(t: float) -> float:
 # ---------- the widget ----------
 class IntervalRoller(QWidget):
     changed = Signal(int)  # the interval, as a mixed-radix total (see digits())
+    selected = Signal(int)  # the Select key was pressed; the total, as for changed
 
     STEP_DEG = 30.0  # angle between neighbouring numbers on the drum
     LABEL_H = 26
@@ -155,7 +158,7 @@ class IntervalRoller(QWidget):
     def __init__(self, total: int = 60, *, scheme: theme.ColorScheme = theme.DARK, parent=None):
         super().__init__(parent)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setMinimumSize(380, 220)
+        self.setMinimumSize(440, 220)
         self.rollers = [Roller(i, u) for i, u in enumerate(UNITS)]
         self._total = 0
         self.focus_roller = len(self.rollers) - 2  # hours
@@ -167,12 +170,17 @@ class IntervalRoller(QWidget):
         self._bezel: QPixmap | None = None
         self._bezel_key: tuple | None = None
         self._grain = []  # each drum's lathe lines, fixed
-        for i in range(len(self.rollers)):
+        for i in range(len(self.rollers) + 1):  # the last is the Select key
             rnd = random.Random(i + 1)
             self._grain.append([(rnd.random(), rnd.random() < 0.5, rnd.uniform(6, 26)) for _ in range(140)])
         self._wheel_acc = 0
         self._press: tuple[Roller, float, float, bool] | None = None  # roller, start y, start pos, moved
         self._drag_samples: list[tuple[float, float]] = []
+        self._key_hover = False
+        self._key_down = False
+        self._key_press = 0.0  # how far the Select key is pushed in, 0 up to 1 down
+        self._key_flash = 0.0  # accent rim after a select, fading
+        self.setMouseTracking(True)
 
         self._clock = QElapsedTimer()
         self._clock.start()
@@ -234,6 +242,16 @@ class IntervalRoller(QWidget):
         dt_s = min(0.05, (now - self._last) / 1000.0)
         self._last = now
         busy = False
+        press_to = 1.0 if self._key_down else 0.0
+        if self._key_press != press_to:
+            # Down fast, like a key, and back up a little slower.
+            gap = press_to - self._key_press
+            speed = 45.0 if self._key_down else 16.0
+            self._key_press = press_to if abs(gap) < 0.01 else self._key_press + gap * min(1.0, dt_s * speed)
+            busy = True
+        if self._key_flash > 0.0:
+            self._key_flash = max(0.0, self._key_flash - dt_s * 1.8)
+            busy = True
         for r in self.rollers:
             if r.lift != r.lift_target:
                 diff = r.lift_target - r.lift
@@ -261,19 +279,47 @@ class IntervalRoller(QWidget):
     TOP = 34.0  # bezel above the drums, where the unit names are engraved
     BOTTOM = 18.0
 
-    def _layout(self) -> tuple[QRectF, list[QRectF], float]:
-        """The bezel, each drum's slot, and the drum radius."""
+    def _geometry(self) -> tuple[QRectF, list[QRectF], float, QRectF]:
+        """The bezel, each drum's slot, the drum radius, and the Select key.
+
+        The key is a drum's size, to the right of the drums, in its own recess.
+        """
         n = len(self.rollers)
         h = self.height() - 2 * self.MARGIN - self.TOP - self.BOTTOM
         drum_h = max(80.0, min(h, 300.0))
         gap = max(6.0, drum_h * 0.05)
-        w = min((self.width() - 2 * self.MARGIN - 2 * self.SIDE - (n - 1) * gap) / n, drum_h * 0.62)
-        total_w = n * w + (n - 1) * gap
+        key_gap = gap * 3
+        w = min((self.width() - 2 * self.MARGIN - 2 * self.SIDE - (n - 1) * gap - key_gap) / (n + 1),
+                drum_h * 0.62)
+        total_w = (n + 1) * w + (n - 1) * gap + key_gap
         x0 = (self.width() - total_w) / 2
         y0 = self.MARGIN + self.TOP + (h - drum_h) / 2
         slots = [QRectF(x0 + i * (w + gap), y0, w, drum_h) for i in range(n)]
+        key = QRectF(slots[-1].right() + key_gap, y0, w, drum_h)
         bezel = QRectF(x0 - self.SIDE, y0 - self.TOP, total_w + 2 * self.SIDE, drum_h + self.TOP + self.BOTTOM)
-        return bezel, slots, drum_h / 2
+        return bezel, slots, drum_h / 2, key
+
+    def _layout(self) -> tuple[QRectF, list[QRectF], float]:
+        """The bezel, each drum's slot, and the drum radius."""
+        bezel, slots, radius, _ = self._geometry()
+        return bezel, slots, radius
+
+    def _key_rect(self) -> QRectF:
+        return self._geometry()[3]
+
+    def _on_key(self, pos: QPointF) -> bool:
+        return self._key_rect().contains(pos)
+
+    def can_select(self) -> bool:
+        return self._total > 0
+
+    def select(self) -> None:
+        """Press the Select key: report the interval, if there is one."""
+        if not self.can_select():
+            return
+        self._key_flash = 1.0
+        self._kick()
+        self.selected.emit(self._total)
 
     def _roller_at(self, pos: QPointF) -> Roller | None:
         _, slots, _ = self._layout()
@@ -286,6 +332,11 @@ class IntervalRoller(QWidget):
         return self._layout()[2] * math.radians(self.STEP_DEG)
     # ----- input -----
     def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self._on_key(e.position()):
+            if self.can_select():
+                self._key_down = True
+                self._kick()
+            return
         r = self._roller_at(e.position())
         if r is None:
             return
@@ -298,6 +349,12 @@ class IntervalRoller(QWidget):
         self._kick()
 
     def mouseMoveEvent(self, e):
+        hover = self._on_key(e.position())
+        if hover != self._key_hover:
+            self._key_hover = hover
+            usable = hover and self.can_select()
+            self.setCursor(Qt.CursorShape.PointingHandCursor if usable else Qt.CursorShape.ArrowCursor)
+            self.update()
         if not self._press:
             return
         r, y0, p0, moved = self._press
@@ -314,6 +371,12 @@ class IntervalRoller(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if self._key_down:
+            self._key_down = False
+            if self._on_key(e.position()):  # moving off first cancels, as on any button
+                self.select()
+            self._kick()
+            return
         if not self._press:
             return
         r, _, _, moved = self._press
@@ -329,6 +392,11 @@ class IntervalRoller(QWidget):
             _, slots, _ = self._layout()
             self.step(r, -1 if e.position().y() < slots[r.index].center().y() else 1)
         self._kick()
+
+    def leaveEvent(self, e):
+        if self._key_hover:
+            self._key_hover = False
+            self.update()
 
     def wheelEvent(self, e):
         r = self._roller_at(e.position())
@@ -350,6 +418,8 @@ class IntervalRoller(QWidget):
             self.update()
         elif k in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             self.step(self.rollers[self.focus_roller], 1 if k == Qt.Key.Key_Up else -1)
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.select()
         else:
             super().keyPressEvent(e)
 
@@ -365,8 +435,9 @@ class IntervalRoller(QWidget):
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         pal = self.palette_
         p.fillRect(self.rect(), pal.background)
-        bezel, slots, radius = self._layout()
+        bezel, slots, radius, key = self._geometry()
         self._paint_bezel(p, bezel, slots)
+        self._paint_key(p, key)
 
         resting = [(r, s) for r, s in zip(self.rollers, slots) if r.lift <= 0.001]
         raised = [(r, s) for r, s in zip(self.rollers, slots) if r.lift > 0.001]
@@ -389,12 +460,12 @@ class IntervalRoller(QWidget):
             bp = QPainter(pix)
             bp.setRenderHint(QPainter.RenderHint.Antialiasing)
             bp.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-            self._draw_bezel(bp, bezel, slots)
+            self._draw_bezel(bp, bezel, slots, self._key_rect())
             bp.end()
             self._bezel, self._bezel_key = pix, key
         p.drawPixmap(0, 0, self._bezel)
 
-    def _draw_bezel(self, p: QPainter, bezel: QRectF, slots: list[QRectF]):
+    def _draw_bezel(self, p: QPainter, bezel: QRectF, slots: list[QRectF], key: QRectF):
         pal = self.palette_
         radius = 18.0
         p.setPen(Qt.PenStyle.NoPen)
@@ -423,6 +494,14 @@ class IntervalRoller(QWidget):
         for s in slots:  # each drum's own groove
             p.setBrush(QColor(0, 0, 0, 200))
             p.drawRoundedRect(s.adjusted(-1.5, -1.5, 1.5, 1.5), self.CORNER + 1, self.CORNER + 1)
+        # The Select key's own recess, the same depth as the drums'.
+        hole = key.adjusted(-6, -6, 6, 6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(_mix(QColor(0, 0, 0), pal.shadow, 0.35))
+        p.drawRoundedRect(hole, self.CORNER + 4, self.CORNER + 4)
+        self._edge(p, hole, self.CORNER + 4, 2.0, raised=False)
+        p.setBrush(QColor(0, 0, 0, 200))
+        p.drawRoundedRect(key.adjusted(-1.5, -1.5, 1.5, 1.5), self.CORNER + 1, self.CORNER + 1)
 
         # Unit names engraved into the rim.
         font = QFont(self.font())
@@ -457,17 +536,17 @@ class IntervalRoller(QWidget):
         p.drawRoundedRect(rect, radius, radius)
 
     # drums
-    def _drum_base(self, r: Roller, size: QSizeF, lit: bool) -> QPixmap:
+    def _drum_base(self, index: int, size: QSizeF, lit: bool) -> QPixmap:
         """The drum's brushed metal, lathe lines and bevels. The light never
         moves, so they look the same however far it turns: draw them once."""
         dpr = self.devicePixelRatioF()
-        key = (r.index, round(size.width(), 1), round(size.height(), 1), lit, dpr, id(self.palette_))
+        key = (index, round(size.width(), 1), round(size.height(), 1), lit, dpr, id(self.palette_))
         pix = self._bases.get(key)
         if pix is not None:
             return pix
         if len(self._bases) > 40:
             self._bases.clear()
-        metal = self._drum_metal(r)
+        metal = self._drum_metal(index)
         if lit:
             metal = metal.lighter(115)
         w, h = size.width(), size.height()
@@ -492,10 +571,10 @@ class IntervalRoller(QWidget):
         # Brushing: a faint fine texture under the dial's own kind of lathe lines.
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Overlay)
         p.setOpacity(0.24)
-        p.drawImage(rect, self._brush_noise(r.index))
+        p.drawImage(rect, self._brush_noise(index))
         p.setOpacity(1.0)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-        for frac, light, alpha in self._grain[r.index]:  # fine lathe lines round the drum
+        for frac, light, alpha in self._grain[index]:  # fine lathe lines round the drum
             x = 1 + (w - 2) * frac
             p.setPen(QPen(QColor(255, 255, 255, int(alpha)) if light else QColor(0, 0, 0, int(alpha)), 1))
             p.drawLine(QPointF(x, 0), QPointF(x, h))
@@ -507,10 +586,10 @@ class IntervalRoller(QWidget):
 
     BLACKEN = 0.62  # how far the drums' metal is taken toward black
 
-    def _drum_metal(self, r: Roller) -> QColor:
+    def _drum_metal(self, index: int) -> QColor:
         """The scheme's metal, blackened, alternating a shade lighter and darker like the dial's rings."""
         base = _mix(self.palette_.metal, QColor(0, 0, 0), self.BLACKEN)
-        return base.lighter(118) if r.index % 2 else base
+        return base.lighter(118) if index % 2 else base
 
     def _metal_at(self, f: float, metal: QColor) -> QColor:
         """The dial's ramp: soft shadow, the metal, then most of the way to its shine."""
@@ -532,12 +611,12 @@ class IntervalRoller(QWidget):
 
     def _paint_drum(self, p: QPainter, r: Roller, slot: QRectF, radius: float, lit: bool):
         pal = self.palette_
-        p.drawPixmap(slot.topLeft(), self._drum_base(r, slot.size(), lit))
+        p.drawPixmap(slot.topLeft(), self._drum_base(r.index, slot.size(), lit))
         clip = QPainterPath()
         clip.addRoundedRect(slot.adjusted(1, 1, -1, -1), self.CORNER, self.CORNER)
         p.save()
         p.setClipPath(clip)
-        metal = self._drum_metal(r)
+        metal = self._drum_metal(r.index)
         cx, cy = slot.center().x(), slot.center().y()
         # Black metal takes light engraving in every scheme, and an accent light enough to read on it.
         ink = _mix(pal.shine, QColor(255, 255, 255), 0.4)
@@ -588,6 +667,11 @@ class IntervalRoller(QWidget):
             p.drawStaticText(at, text)
             p.restore()
 
+        self._paint_depth_and_gloss(p, slot)
+        p.restore()
+
+    @staticmethod
+    def _paint_depth_and_gloss(p: QPainter, slot: QRectF, gloss_k: float = 1.0):
         # Depth: the drum turns into shadow toward the top and bottom of its slot.
         shade = QLinearGradient(0, slot.top(), 0, slot.bottom())
         dark = QColor(0, 0, 0)
@@ -600,9 +684,68 @@ class IntervalRoller(QWidget):
         gloss = QLinearGradient(0, slot.top(), 0, slot.bottom())
         for at, alpha in ((0.08, 0), (0.125, 40), (0.145, 95), (0.165, 40), (0.21, 0),
                           (0.79, 0), (0.815, 45), (0.84, 0)):
-            gloss.setColorAt(at, QColor(255, 255, 255, alpha))
+            gloss.setColorAt(at, QColor(255, 255, 255, int(alpha * gloss_k)))
         p.fillRect(slot, gloss)
+
+    def _paint_key(self, p: QPainter, slot: QRectF):
+        """The Select key: a drum's size and metal, with SELECT down its face.
+
+        Pressed, it sinks into its recess and its top falls into shadow.
+        """
+        pal = self.palette_
+        k = self._key_press
+        usable = self.can_select()
+        lit = self._key_hover and usable and k < 0.5
+        # Pushed in: a little smaller and lower, so the dark gap round it opens at the top.
+        inset = slot.width() * 0.035 * k
+        face = slot.adjusted(inset, inset + slot.height() * 0.012 * k, -inset, -inset + slot.height() * 0.012 * k)
+        p.drawPixmap(face.topLeft(), self._drum_base(len(self.rollers), face.size(), lit))
+        clip = QPainterPath()
+        clip.addRoundedRect(face.adjusted(1, 1, -1, -1), self.CORNER, self.CORNER)
+        p.save()
+        p.setClipPath(clip)
+        metal = self._drum_metal(len(self.rollers))
+
+        # SELECT, one letter under the next, engraved like the numbers.
+        letters = "SELECT"
+        font = QFont(self.font())
+        font.setBold(True)
+        pitch = face.height() * 0.70 / len(letters)
+        font.setPixelSize(max(9, int(min(pitch * 0.82, face.width() * 0.42))))
+        p.setFont(font)
+        ink = _mix(pal.shine, QColor(255, 255, 255), 0.4)
+        accent = pal.accent if pal.accent.lightnessF() > 0.45 else pal.accent.lighter(190)
+        if not usable:
+            ink = _mix(ink, metal, 0.65)
+        elif lit or self._key_flash > 0:
+            ink = _mix(ink, accent, max(0.75 if lit else 0.0, self._key_flash))
+        relief = max(1.0, face.height() * 0.006)
+        top = face.center().y() - pitch * len(letters) / 2
+        for i, ch in enumerate(letters):
+            box = QRectF(face.left(), top + i * pitch, face.width(), pitch)
+            p.setPen(QColor(0, 0, 0, 200 if usable else 120))
+            p.drawText(box.translated(0, relief), Qt.AlignmentFlag.AlignCenter, ch)
+            p.setPen(ink)
+            p.drawText(box, Qt.AlignmentFlag.AlignCenter, ch)
+
+        self._paint_depth_and_gloss(p, face, gloss_k=1.0 - 0.7 * k)
+        if k > 0:
+            # The rim of the recess shades the top of the sunken key.
+            lip = QLinearGradient(0, face.top(), 0, face.top() + face.height() * 0.35)
+            lip.setColorAt(0.0, QColor(0, 0, 0, int(170 * k)))
+            lip.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.fillRect(face, lip)
+            p.fillRect(face, QColor(0, 0, 0, int(45 * k)))
         p.restore()
+        self._edge(p, face.adjusted(0.75, 0.75, -0.75, -0.75), self.CORNER, 1.4, raised=k < 0.5)
+
+        glow = max(self._key_flash, 0.5 if lit else 0.0)
+        if glow > 0:
+            rim = QColor(pal.accent)
+            rim.setAlphaF(min(1.0, glow))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(rim, 1.5 + 1.5 * self._key_flash))
+            p.drawRoundedRect(face.adjusted(-2, -2, 2, 2), self.CORNER + 2, self.CORNER + 2)
 
     def _paint_well(self, p: QPainter, slot: QRectF):
         """The empty channel a raised drum leaves behind."""
@@ -689,16 +832,10 @@ class Demo(QWidget):
         self.readout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.readout)
 
-        row = QHBoxLayout()
-        row.addStretch(1)
-        self.select = QPushButton("Select")
-        self.select.setMinimumWidth(140)
-        self.select.clicked.connect(self._selected)
-        row.addWidget(self.select)
-        row.addStretch(1)
-        layout.addLayout(row)
+        self.picker.selected.connect(self._selected)
 
-        self.hint = QLabel("Drag or flick a roller  ·  scroll over it  ·  ←→ pick a roller, ↑↓ step")
+        self.hint = QLabel("Drag or flick a roller  ·  scroll over it  ·  ←→ pick a roller, ↑↓ step"
+                           "  ·  press Select or Enter")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hint)
 
@@ -724,22 +861,14 @@ class Demo(QWidget):
             f"QWidget {{ background: {pal.background.name()}; color: {_rgb(scheme.row_fg).name()}; }}"
             f"QComboBox, QPushButton {{ background: {_rgb(scheme.row_bg).name()};"
             f" border: 1px solid {_rgb(scheme.row_border).name()}; border-radius: 4px; padding: 4px 12px; }}"
-            f"QPushButton#select {{ border: 1px solid {pal.accent.name()}; color: {pal.accent.name()};"
-            f" font-weight: 600; padding: 7px 20px; }}"
-            f"QPushButton#select:disabled {{ border-color: {_rgb(scheme.row_border).name()};"
-            f" color: {pal.hint.name()}; }}"
         )
-        self.select.setObjectName("select")
-        self.select.style().unpolish(self.select)
-        self.select.style().polish(self.select)
         self.readout.setStyleSheet(f"font-size: 20px; font-weight: 600; color: {pal.accent.name()};")
         self.hint.setStyleSheet(f"color: {pal.hint.name()}; font-size: 12px;")
 
     def _show(self, total: int):
         self.readout.setText(describe(total))
-        self.select.setEnabled(total > 0)
 
-    def _selected(self):
+    def _selected(self, _total: int):
         print("Selected:", self.picker.values(), "-", describe(self.picker.total()), flush=True)
         self.hint.setText("Selected: " + describe(self.picker.total()))
 
