@@ -219,6 +219,9 @@ class TriggerWidget(QWidget):
     request_manage_groups = Signal()
     request_groups = Signal()
     request_containers = Signal()
+    request_schedules = Signal()
+    request_add_schedule = Signal()
+    request_manage_schedules = Signal()
     request_add_container = Signal()
     request_manage_containers = Signal()
     request_reset = Signal()
@@ -288,7 +291,7 @@ class TriggerWidget(QWidget):
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
             "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Execute Groups, Container Groups, Add and Manage groups, Reset position and size, Opacity, Decay rate, Color Schemes, Exit"
+            "Add, Manage, Schedules, Execute Groups, Container Groups, Add and Manage groups, Reset position and size, Opacity, Decay rate, Color Schemes, Exit"
         )
 
     def _create_actions(self) -> None:
@@ -297,6 +300,15 @@ class TriggerWidget(QWidget):
 
         self._action_manage = QAction("Manage launchers...", self)
         self._action_manage.triggered.connect(self.request_manage.emit)
+
+        self._action_add_schedule = QAction("Add new Schedule...", self)
+        self._action_add_schedule.triggered.connect(self.request_add_schedule.emit)
+
+        self._action_manage_schedules = QAction("Manage Schedules...", self)
+        self._action_manage_schedules.triggered.connect(self.request_manage_schedules.emit)
+
+        self._action_schedules = QAction("Schedules", self)
+        self._action_schedules.triggered.connect(self.request_schedules.emit)
 
         self._action_reset = QAction("Reset position and size", self)
         self._action_reset.triggered.connect(self.request_reset.emit)
@@ -329,7 +341,9 @@ class TriggerWidget(QWidget):
         """
         menu = ArrowContextMenu(self)
         menu.addAction(self._action_add)
+        menu.addAction(self._action_add_schedule)
         menu.addAction(self._action_manage)
+        menu.addAction(self._action_manage_schedules)
         menu.addAction(self._action_reset)
         menu.addSeparator()
 
@@ -383,6 +397,7 @@ class TriggerWidget(QWidget):
             menu.addAction(startup_action)
 
         menu.addSeparator()
+        menu.addAction(self._action_schedules)
         menu.addAction(self._action_groups)
         menu.addAction(self._action_containers)
         menu.addAction(self._action_add_group)

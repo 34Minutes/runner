@@ -59,6 +59,39 @@ class GroupMember:
 
 
 @dataclass
+class ScheduleEntry:
+    """One date a scheduled group runs on, and how often it repeats from there.
+
+    start is local time, "YYYY-MM-DDTHH:MM". The repeat is the interval
+    roller's five values; all zero means it runs once. Months are calendar
+    months: from the 31st, a 30-day month uses the 30th.
+    """
+
+    id: str
+    start: str
+    months: int = 0
+    weeks: int = 0
+    days: int = 0
+    hours: int = 0
+    minutes: int = 0
+
+    @classmethod
+    def new(cls, start: datetime) -> ScheduleEntry:
+        return cls(id=str(uuid4()), start=start.strftime(SCHEDULE_TIME_FORMAT))
+
+    @property
+    def when(self) -> datetime:
+        return datetime.strptime(self.start, SCHEDULE_TIME_FORMAT)
+
+    @property
+    def repeats(self) -> bool:
+        return any((self.months, self.weeks, self.days, self.hours, self.minutes))
+
+
+SCHEDULE_TIME_FORMAT = "%Y-%m-%dT%H:%M"
+
+
+@dataclass
 class Group:
     """An ordered set of launchers the user can start together."""
 
@@ -67,6 +100,10 @@ class Group:
     members: list[GroupMember] = field(default_factory=list)
     # Hover opens this group's launchers only when this is on. Default is collapsed.
     show_contents: bool = False
+    # A scheduled group runs on its dates instead of from the Execute Groups
+    # list, and shows only in the Schedules list. Turned off, its dates are kept.
+    scheduled: bool = False
+    schedule: list[ScheduleEntry] = field(default_factory=list)
 
     @classmethod
     def new(cls, name: str, members: list[GroupMember] | None = None) -> Group:
@@ -174,6 +211,33 @@ def _members_from(cls, raw: Any, *, label: str, problems: list[str]) -> list:
         seen.add(member.launcher_id)
         members.append(member)
     return members
+
+
+def _schedule_from(raw: Any, *, label: str, problems: list[str]) -> list[ScheduleEntry]:
+    """A group's dates. One with an unreadable date or a negative repeat is dropped."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        problems.append(f"{label}: schedule was not a list and was cleared.")
+        return []
+    entries: list[ScheduleEntry] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw, start=1):
+        where = f"{label}, schedule date {index}"
+        entry = _from_fields(ScheduleEntry, item, label=where, problems=problems, required=("id", "start"))
+        if entry is None or entry.id in seen:
+            continue
+        try:
+            entry.when
+        except ValueError:
+            problems.append(f"{where} has an unreadable date and was skipped.")
+            continue
+        if min(entry.months, entry.weeks, entry.days, entry.hours, entry.minutes) < 0:
+            problems.append(f"{where} has a negative repeat and was skipped.")
+            continue
+        seen.add(entry.id)
+        entries.append(entry)
+    return entries
 
 
 def _migrate_main_menu_flags(data: dict[str, Any], launchers: list[Launcher]) -> None:
@@ -335,7 +399,12 @@ class AppConfig:
             if isinstance(item, dict):
                 item = {"name": "", **item}
             group = _from_fields(
-                Group, item, label=label, problems=problems, required=("id",), skip=("members",)
+                Group,
+                item,
+                label=label,
+                problems=problems,
+                required=("id",),
+                skip=("members", "schedule"),
             )
             if group is None or group.id in group_ids:
                 continue
@@ -343,6 +412,7 @@ class AppConfig:
             group.members = _members_from(
                 GroupMember, item.get("members"), label=label, problems=problems
             )
+            group.schedule = _schedule_from(item.get("schedule"), label=label, problems=problems)
             groups.append(group)
 
         container_groups: list[ContainerGroup] = []

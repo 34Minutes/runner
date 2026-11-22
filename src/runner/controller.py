@@ -1,18 +1,22 @@
 """Wires the arrow, the lists, the dialogs, and the tray together.
 
-There are five lists:
+There are six lists:
 
 - the main popup (launchers and container rows),
 - the execute-groups list,
 - the container-groups list,
+- the schedules list (execute groups that run on dates),
 - a container's launchers, beside its row in the main popup or the
   container-groups list,
 - an execute group's launchers, beside its row in the execute-groups list.
 
 PopupMode says which lists the arrow opens. In MAIN the execute-groups list
-sits beside the main popup when Show execute groups is on. GROUPS_ONLY and
-CONTAINERS_ONLY were opened from the arrow menu: that one list is shown on
-its own and the main popup is hidden.
+sits beside the main popup when Show execute groups is on. GROUPS_ONLY,
+CONTAINERS_ONLY, and SCHEDULES_ONLY were opened from the arrow menu: that one
+list is shown on its own and the main popup is hidden.
+
+A scheduled execute group shows only in the schedules list. The Scheduler
+runs it on its dates.
 
 The two side lists are SideMenus. Each one is open for at most one row,
 and it fades out a moment after the pointer leaves both it and that row.
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from enum import Enum, auto
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
@@ -40,13 +45,15 @@ from .elevation import warn_if_elevated
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .launcher import launch
 from .moves import member_launchers, visible_main_tokens
+from .schedule import execute_groups, format_when, group_next_run, scheduled_groups
+from .scheduler import Scheduler
 from .ui.add_dialog import AddEditDialog
 from .ui.container_dialog import ContainerDialog
 from .ui.container_manager import ContainerManagerDialog
 from .ui.dropdown import DropdownPanel, LockedPairMotion, SubmenuButton
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .ui.group_dialog import GroupDialog
-from .ui.group_manager import GroupManagerDialog
+from .ui.group_manager import GroupManagerDialog, ScheduleManagerDialog
 from .ui.launch_button import LaunchButton
 from .ui.manager_dialog import ManagerDialog
 from .ui.stay_on_top import on_dialog_open
@@ -63,6 +70,10 @@ else:
 DEFAULT_POSITION = (100, 100)
 # A slider writes the config this long after it stops moving.
 SLIDER_SAVE_DELAY_MS = 400
+# The schedules list grows to fit a name and its next run, up to this width.
+SCHEDULE_LIST_MAX_W = 460
+# A row's text inset, the list's frame, and room for its scrollbar.
+SCHEDULE_ROW_PADDING = 64
 # Shown at most this many config problems in the warning. The rest are counted.
 _MAX_PROBLEMS_SHOWN = 12
 
@@ -71,6 +82,7 @@ class PopupMode(Enum):
     MAIN = auto()  # The main popup, with execute groups beside it when that switch is on.
     GROUPS_ONLY = auto()  # The execute-groups list on its own, from the arrow menu.
     CONTAINERS_ONLY = auto()  # The container-groups list on its own, from the arrow menu.
+    SCHEDULES_ONLY = auto()  # The schedules list on its own, from the arrow menu.
 
 
 def _pointer_over(widget: QWidget) -> bool:
@@ -236,6 +248,8 @@ class RunnerController:
         self._arrow_dragging = False
 
         self._build_widgets()
+        # Started once the arrow is up. Runs missed while Runner was closed are skipped.
+        self.scheduler = Scheduler(lambda: self.cfg.config.groups, self._run_scheduled)
         self._place_trigger_on_start()
         self._build_timers()
         self._connect_hover()
@@ -268,12 +282,13 @@ class RunnerController:
         self.container_panel = DropdownPanel(cfg.config, honor_pin=False)
         self.execute_panel = DropdownPanel(cfg.config, honor_pin=False)
         self.container_list = DropdownPanel(cfg.config, honor_pin=False)
+        self.schedule_list = DropdownPanel(cfg.config, honor_pin=False, allow_reorder=False)
 
         self.dropdown.set_mix_rows(True)
         self.dropdown.set_drag_source_key("main")
 
         self.group_panel.set_list_copy(placeholder="Filter execute groups...", empty_hint="")
-        self.group_panel.set_order_ids(lambda: [group.id for group in self.cfg.config.groups])
+        self.group_panel.set_order_ids(lambda: [group.id for group in self._execute_groups()])
         self.group_panel.set_row_tooltip(self._group_row_tooltip)
         self.group_panel.set_heading("Execute Groups")
         self.group_panel.set_drag_source_key("groups")
@@ -282,6 +297,17 @@ class RunnerController:
         # Container rows on their own, drawn as they are in the main popup.
         self.container_list.set_list_copy(placeholder="Filter container groups...", empty_hint="")
         self.container_list.set_heading("Container Groups")
+
+        # Scheduled execute groups, each with its next run. A click edits it.
+        self.schedule_list.set_list_copy(placeholder="Filter schedules...", empty_hint="")
+        self.schedule_list.set_heading("Schedules")
+        self.schedule_list.set_row_tooltip(self._schedule_row_tooltip)
+        self.schedule_list.set_emit_row_hover(True)
+        # The list opened on its own from the arrow menu for each mode.
+        self._standalone = {
+            PopupMode.CONTAINERS_ONLY: self.container_list,
+            PopupMode.SCHEDULES_ONLY: self.schedule_list,
+        }
 
         self.container_panel.set_list_copy(
             placeholder="Filter launchers...", empty_hint="Nothing in this container."
@@ -293,7 +319,9 @@ class RunnerController:
         self.container_menu = SideMenu(
             self.container_panel, lambda group_id: self._container_host().submenu_button(group_id)
         )
-        self.execute_menu = SideMenu(self.execute_panel, self.group_panel.launcher_button)
+        self.execute_menu = SideMenu(
+            self.execute_panel, lambda group_id: self._execute_host().launcher_button(group_id)
+        )
         self.container_panel.set_order_ids(
             lambda: self._member_ids(self._container_by_id(self.container_menu.open_id))
         )
@@ -350,11 +378,14 @@ class RunnerController:
         self.execute_panel.hover_leave.connect(self._on_execute_leave)
         self.dropdown.submenu_hovered.connect(self._show_container_menu)
         self.dropdown.submenu_left.connect(self.container_menu.on_row_left)
-        self.container_list.hover_enter.connect(self._on_container_list_enter)
-        self.container_list.hover_leave.connect(self._on_container_list_leave)
-        self.container_list.closed.connect(self._on_container_list_closed)
+        for panel in self._standalone.values():
+            panel.hover_enter.connect(lambda p=panel: self._on_standalone_enter(p))
+            panel.hover_leave.connect(lambda p=panel: self._on_standalone_leave(p))
+            panel.closed.connect(lambda p=panel: self._on_standalone_closed(p))
         self.container_list.submenu_hovered.connect(self._show_container_menu)
         self.container_list.submenu_left.connect(self.container_menu.on_row_left)
+        self.schedule_list.row_hovered.connect(self._show_execute_members)
+        self.schedule_list.row_left.connect(self.execute_menu.on_row_left)
         self.group_panel.row_hovered.connect(self._show_execute_members)
         self.group_panel.row_left.connect(self.execute_menu.on_row_left)
         on_dialog_open(self._make_room_for_dialog)
@@ -375,7 +406,7 @@ class RunnerController:
         self.container_menu.hide()
         self.execute_menu.hide()
         if self._one_list_only():
-            for panel in (self.group_panel, self.container_list):
+            for panel in (self.group_panel, *self._standalone.values()):
                 if panel.isVisible():
                     panel.force_hide()  # its close handler restores a pinned list
             return
@@ -418,6 +449,11 @@ class RunnerController:
         groups.delete_requested.connect(self._on_group_delete)
         groups.reordered.connect(self.cfg.reorder_groups)
 
+        schedules = self.schedule_list
+        schedules.launch_requested.connect(self._on_group_edit)  # a click edits its dates
+        schedules.edit_requested.connect(self._on_group_edit)
+        schedules.delete_requested.connect(self._on_group_delete)
+
     def _connect_trigger_menu(self) -> None:
         trigger = self.trigger
         trigger.request_add.connect(lambda: self.show_add_dialog())
@@ -428,6 +464,9 @@ class RunnerController:
         trigger.request_manage_groups.connect(self.show_group_manager)
         trigger.request_groups.connect(self._show_group_panel)
         trigger.request_containers.connect(self._show_container_list)
+        trigger.request_schedules.connect(self._show_schedule_list)
+        trigger.request_add_schedule.connect(lambda: self.show_group_dialog(scheduled=True))
+        trigger.request_manage_schedules.connect(self.show_schedule_manager)
         trigger.request_add_container.connect(lambda: self.show_container_dialog())
         trigger.request_manage_containers.connect(self.show_container_manager)
 
@@ -485,8 +524,27 @@ class RunnerController:
             self.greeting.present(self.trigger)
         self._apply_pinned_state()
         self._report_load_problems()
+        self.scheduler.start()
 
     # ------------------------------------------------------------ lookups
+
+    def _execute_groups(self) -> list[Group]:
+        """Execute groups run by hand. Scheduled ones are only in the schedules list."""
+        return execute_groups(self.cfg.config.groups)
+
+    def _scheduled_groups(self) -> list[Group]:
+        return scheduled_groups(self.cfg.config.groups)
+
+    def _schedule_row_tooltip(self, row: Launcher) -> str:
+        group = self._group_by_id(row.id)
+        lines = [f"Schedule: {group.name}" if group else "Schedule"]
+        if group is not None:
+            lines.append(f"Runs {len(group.members)} launcher{'' if len(group.members) == 1 else 's'}")
+            if group.show_contents:
+                lines.append("Hover to see its launchers")
+        lines.append("Click to edit its dates")
+        lines.append("Right-click to edit or delete")
+        return "\n".join(lines)
 
     def _group_by_id(self, group_id: str | None) -> Group | None:
         return next((g for g in self.cfg.config.groups if g.id == group_id), None)
@@ -516,15 +574,23 @@ class RunnerController:
     def _containers_only(self) -> bool:
         return self.mode is PopupMode.CONTAINERS_ONLY
 
+    def _schedules_only(self) -> bool:
+        return self.mode is PopupMode.SCHEDULES_ONLY
+
     def _one_list_only(self) -> bool:
         """A list opened on its own from the arrow menu is showing instead of the main popup."""
-        return self.mode in (PopupMode.GROUPS_ONLY, PopupMode.CONTAINERS_ONLY)
+        return self.mode is not PopupMode.MAIN
+
+    def _standalone_panel(self) -> DropdownPanel | None:
+        """The container or schedules list, when the arrow menu opened it on its own."""
+        return self._standalone.get(self.mode)
 
     def _all_lists(self) -> tuple[DropdownPanel, ...]:
         return (
             self.dropdown,
             self.group_panel,
             self.container_list,
+            self.schedule_list,
             self.container_panel,
             self.execute_panel,
         )
@@ -532,6 +598,10 @@ class RunnerController:
     def _container_host(self) -> DropdownPanel:
         """The list whose container rows open the container's launchers."""
         return self.container_list if self._containers_only() else self.dropdown
+
+    def _execute_host(self) -> DropdownPanel:
+        """The list whose group rows open that group's launchers."""
+        return self.schedule_list if self._schedules_only() else self.group_panel
 
     def _pointer_over_any(self, *, trigger: bool = True) -> bool:
         panels = list(self._all_lists())
@@ -599,8 +669,9 @@ class RunnerController:
         if self._groups_only():
             self.group_panel.start_hide_animation()
             return
-        if self._containers_only():
-            self.container_list.start_hide_animation()
+        standalone = self._standalone_panel()
+        if standalone is not None:
+            standalone.start_hide_animation()
             return
         pinned = self.settings.pinned_open
         if (
@@ -619,7 +690,7 @@ class RunnerController:
     def _refresh_group_list(self) -> None:
         rows = [
             Launcher(id=group.id, name=group.name, command="")
-            for group in self.cfg.config.groups
+            for group in self._execute_groups()
         ]
         self.group_panel.rebuild_buttons(rows)
         if self.group_panel.isVisible():
@@ -635,7 +706,7 @@ class RunnerController:
         """
         if self._groups_only() or not self._groups_beside_enabled():
             return
-        if not self.cfg.config.groups:
+        if not self._execute_groups():
             self._hide_groups_beside()
             return
         self._refresh_group_list()
@@ -659,8 +730,8 @@ class RunnerController:
         """The execute-groups list on its own, from the arrow menu."""
         self.container_menu.hide()
         self.execute_menu.hide()
-        self._hide_container_list()
-        if not self.cfg.config.groups:
+        self._hide_standalone()
+        if not self._execute_groups():
             self.mode = PopupMode.MAIN
             self._hide_groups_beside()
             return
@@ -680,21 +751,53 @@ class RunnerController:
     def _on_group_panel_closed(self) -> None:
         # A hide that was already running can finish after the list is shown again.
         # A list closed by an arrow drag opens again where the arrow lands.
-        if self.group_panel.isVisible() or self._containers_only() or self._arrow_dragging:
+        if self.group_panel.isVisible() or self._standalone_panel() is not None or self._arrow_dragging:
             return
         self.mode = PopupMode.MAIN
         if self.settings.pinned_open:
             self._apply_pinned_state()
 
-    # ----------------------------------------------- container groups list
+    # ------------------------------- container groups and schedules, alone
+
+    def _standalone_items(self, mode: PopupMode) -> bool:
+        """Whether that list has anything to show."""
+        if mode is PopupMode.CONTAINERS_ONLY:
+            return bool(self.cfg.config.container_groups)
+        return bool(self._scheduled_groups())
+
+    def _refresh_standalone(self, mode: PopupMode) -> None:
+        panel = self._standalone[mode]
+        if mode is PopupMode.CONTAINERS_ONLY:
+            panel.set_submenu_items([(group.id, group.name) for group in self.cfg.config.container_groups])
+            panel.rebuild_buttons([])
+        else:
+            now = datetime.now()
+            rows = []
+            for group in self._scheduled_groups():
+                upcoming = group_next_run(group, now)
+                when = (
+                    f"next {format_when(upcoming, with_year=upcoming.year != now.year)}"
+                    if upcoming else "no upcoming runs"
+                )
+                rows.append(Launcher(id=group.id, name=f"{group.name}  ·  {when}", command=""))
+            panel.rebuild_buttons(rows)
+            self._fit_schedule_width(panel)
+        if panel.isVisible():
+            panel.update_height_for_content()
+
+    def _fit_schedule_width(self, panel: DropdownPanel) -> None:
+        """Wide enough for a name and its next run, between the list width and SCHEDULE_LIST_MAX_W."""
+        base = self.settings.dropdown_width
+        buttons = panel._launch_buttons()
+        if buttons:
+            metrics = buttons[0].fontMetrics()
+            need = max(metrics.horizontalAdvance(b.launcher.name) for b in buttons) + SCHEDULE_ROW_PADDING
+        else:
+            need = base
+        panel.setFixedWidth(max(base, min(need, SCHEDULE_LIST_MAX_W)))
 
     def _refresh_container_list(self) -> None:
-        self.container_list.set_submenu_items(
-            [(group.id, group.name) for group in self.cfg.config.container_groups]
-        )
-        self.container_list.rebuild_buttons([])
-        if self.container_list.isVisible():
-            self.container_list.update_height_for_content()
+        self._refresh_standalone(PopupMode.CONTAINERS_ONLY)
 
     def _show_container_list(self) -> None:
         """The container-groups list on its own, from the arrow menu.
@@ -702,60 +805,78 @@ class RunnerController:
         It opens beside the arrow as the execute-groups list does. Hovering a
         row opens that container's launchers beside it.
         """
+        self._show_standalone(PopupMode.CONTAINERS_ONLY)
+
+    def _show_schedule_list(self) -> None:
+        """The schedules list on its own, from the arrow menu.
+
+        Each row is a scheduled group and its next run. A click opens it to
+        edit its dates; hovering opens its launchers when Show group contents is on.
+        """
+        self._show_standalone(PopupMode.SCHEDULES_ONLY)
+
+    def _show_standalone(self, mode: PopupMode) -> None:
         self.container_menu.hide()
         self.execute_menu.hide()
-        if not self.cfg.config.container_groups:
-            self._hide_container_list()
+        if not self._standalone_items(mode):
+            self._hide_standalone()
             return
-        self.mode = PopupMode.CONTAINERS_ONLY
+        panel = self._standalone[mode]
+        self.mode = mode
         self._cancel_hide()
-        for panel in (self.dropdown, self.group_panel):
-            panel.use_position_hook(None)
-            if panel.isVisible():
-                panel.force_hide()
-        self._refresh_container_list()
-        self.container_list.position_adjacent(self.trigger)
-        if self.container_list.isVisible() and not self.container_list.is_closing():
-            self.container_list.ensure_visible_and_sized()
+        for other in (self.dropdown, self.group_panel, *self._standalone.values()):
+            if other is panel:
+                continue
+            other.use_position_hook(None)
+            if other.isVisible():
+                other.force_hide()
+        self._refresh_standalone(mode)
+        panel.position_adjacent(self.trigger)
+        if panel.isVisible() and not panel.is_closing():
+            panel.ensure_visible_and_sized()
         else:
-            self.container_list.start_show_animation()
-        self._keep_arrow_on_top(self.container_list)
+            panel.start_show_animation()
+        self._keep_arrow_on_top(panel)
 
-    def _hide_container_list(self) -> None:
+    def _hide_standalone(self) -> None:
         """Back to the main popup's mode. The pinned list returns when pinned."""
-        was_only = self._containers_only()
+        panel = self._standalone_panel()
         self.mode = PopupMode.MAIN
-        if self.container_list.isVisible():
-            self.container_list.force_hide()
-        elif was_only and self.settings.pinned_open:
+        if panel is not None and panel.isVisible():
+            panel.force_hide()
+        elif panel is not None and self.settings.pinned_open:
             self._apply_pinned_state()
 
-    def _on_container_list_closed(self) -> None:
+    def _hide_container_list(self) -> None:
+        self._hide_standalone()
+
+    def _on_standalone_closed(self, panel: DropdownPanel) -> None:
         # A hide that was already running can finish after the list is shown again.
-        if (
-            self.container_list.isVisible()
-            or not self._containers_only()
-            or self._arrow_dragging
-        ):
+        if panel.isVisible() or self._standalone_panel() is not panel or self._arrow_dragging:
             return
         self.container_menu.hide()
+        self.execute_menu.hide()
         self.mode = PopupMode.MAIN
         if self.settings.pinned_open:
             self._apply_pinned_state()
 
-    def _on_container_list_enter(self) -> None:
-        self._cancel_hide()
-        self.container_menu.timer.stop()
-        if self.container_list.is_closing() and self._containers_only():
-            self.container_list.cancel_close()
+    def _side_for(self, panel: DropdownPanel) -> SideMenu:
+        return self.container_menu if panel is self.container_list else self.execute_menu
 
-    def _on_container_list_leave(self) -> None:
-        if not self.container_list.isVisible():
+    def _on_standalone_enter(self, panel: DropdownPanel) -> None:
+        self._cancel_hide()
+        self._side_for(panel).timer.stop()
+        if panel.is_closing() and self._standalone_panel() is panel:
+            panel.cancel_close()
+
+    def _on_standalone_leave(self, panel: DropdownPanel) -> None:
+        if not panel.isVisible():
             return  # a late leave from a list that is already closed
-        if _pointer_over(self.container_panel):
+        side = self._side_for(panel)
+        if _pointer_over(side.panel):
             return
-        self.container_menu.schedule_hide()
-        if self._containers_only():
+        side.schedule_hide()
+        if self._standalone_panel() is panel:
             self._schedule_hide()
 
     # ---------------------------------------------------------- main popup
@@ -780,11 +901,12 @@ class RunnerController:
         self._cancel_hide()
         self.container_menu.hide()
         self.execute_menu.hide()
-        if self.container_list.isVisible():
-            self.container_list.force_hide()
+        for panel in self._standalone.values():
+            if panel.isVisible():
+                panel.force_hide()
         fill_main_dropdown(self.dropdown, self.cfg)
         self.dropdown.position_adjacent(self.trigger)
-        groups_too = self._groups_beside_enabled() and bool(self.cfg.config.groups)
+        groups_too = self._groups_beside_enabled() and bool(self._execute_groups())
         if groups_too and (self.locked_pair.is_presented() or not self._dropdown_settled_open()):
             self._refresh_group_list()
             self.group_panel.use_position_hook(self._place_groups_beside)
@@ -830,14 +952,15 @@ class RunnerController:
             self.group_panel.ensure_visible_and_sized()
             self._keep_arrow_on_top(self.group_panel)
             return
-        if self._containers_only():
-            if self.container_list.isVisible():
-                self.container_list.position_adjacent(self.trigger)
-                self.container_list.ensure_visible_and_sized()
-                self._keep_arrow_on_top(self.container_list)
+        standalone = self._standalone_panel()
+        if standalone is not None:
+            if standalone.isVisible():
+                standalone.position_adjacent(self.trigger)
+                standalone.ensure_visible_and_sized()
+                self._keep_arrow_on_top(standalone)
             return
         if self.locked_pair.is_presented():
-            if self._groups_beside_enabled() and self.cfg.config.groups:
+            if self._groups_beside_enabled() and self._execute_groups():
                 self._show_groups_beside()
             self._keep_arrow_on_top(self.dropdown, self.group_panel)
             return
@@ -886,11 +1009,12 @@ class RunnerController:
                 self._show_group_panel()
             self._keep_arrow_on_top(self.group_panel)
             return
-        if self._containers_only():
-            self.container_list.position_adjacent(self.trigger)
-            if self.container_list.is_closing() or not self.container_list.isVisible():
-                self._show_container_list()
-            self._keep_arrow_on_top(self.container_list)
+        standalone = self._standalone_panel()
+        if standalone is not None:
+            standalone.position_adjacent(self.trigger)
+            if standalone.is_closing() or not standalone.isVisible():
+                self._show_standalone(self.mode)
+            self._keep_arrow_on_top(standalone)
             return
         self._show_main_popup()
 
@@ -963,6 +1087,7 @@ class RunnerController:
         self.execute_menu.schedule_hide()
         if (
             _pointer_over(self.group_panel)
+            or _pointer_over(self.schedule_list)
             or _pointer_over(self.dropdown)
             or _pointer_over(self.trigger)
             or _pointer_over(self.container_panel)
@@ -981,6 +1106,8 @@ class RunnerController:
 
     def _execute_prefer_right(self) -> bool:
         """Open away from the main list when both lists are on screen."""
+        if self._schedules_only():
+            return True
         return not (self.dropdown.isVisible() and self.dropdown.x() >= self.group_panel.x())
 
     def _place_container(self) -> None:
@@ -994,7 +1121,7 @@ class RunnerController:
         button = self.execute_menu.anchor()
         if button is not None:
             self.execute_panel.position_next_to(
-                self.group_panel, button, prefer_right=self._execute_prefer_right()
+                self._execute_host(), button, prefer_right=self._execute_prefer_right()
             )
 
     def _show_container_menu(self, group_id: str, *, force: bool = False) -> None:
@@ -1026,10 +1153,11 @@ class RunnerController:
 
     def _show_execute_members(self, group_id: str, *, force: bool = False) -> None:
         menu, panel = self.execute_menu, self.execute_panel
-        if panel.is_dragging() or self.group_panel.is_dragging():
+        host = self._execute_host()
+        if panel.is_dragging() or host.is_dragging():
             return
         group = self._group_by_id(group_id)
-        if group is None or not self.group_panel.isVisible():
+        if group is None or not host.isVisible():
             menu.hide()
             return
         # Show group contents defaults off. Hover and drag-over stay collapsed.
@@ -1037,7 +1165,7 @@ class RunnerController:
             if menu.open_id is not None:
                 menu.hide()
             return
-        button = self.group_panel.launcher_button(group_id)
+        button = host.launcher_button(group_id)
         if button is None or not button.isVisible():
             menu.hide()
             return
@@ -1055,7 +1183,7 @@ class RunnerController:
             panel.ensure_visible_and_sized()
         else:
             panel.start_show_animation(focus=not self._any_drag())
-        self._keep_arrow_on_top(self.group_panel, panel)
+        self._keep_arrow_on_top(host, panel)
 
     def _refresh_open_container(self) -> None:
         if self.container_menu.open_id and self.container_panel.isVisible():
@@ -1067,14 +1195,15 @@ class RunnerController:
 
     def _refresh_open_list(self) -> None:
         fill_main_dropdown(self.dropdown, self.cfg)
-        if self._containers_only():
-            if not self.cfg.config.container_groups:
-                self._hide_container_list()
+        standalone = self._standalone_panel()
+        if standalone is not None:
+            if not self._standalone_items(self.mode):
+                self._hide_standalone()
             else:
-                self._refresh_container_list()
-                if self.container_list.isVisible():
-                    self.container_list.position_adjacent(self.trigger)
-                    self.container_list.ensure_visible_and_sized()
+                self._refresh_standalone(self.mode)
+                if standalone.isVisible():
+                    standalone.position_adjacent(self.trigger)
+                    standalone.ensure_visible_and_sized()
         self._refresh_open_container()
         self._refresh_open_execute()
         if self.settings.pinned_open:
@@ -1086,12 +1215,16 @@ class RunnerController:
         The member list closes when its execute group is gone. With no groups
         left, the list hides.
         """
+        self.scheduler.refresh()
         if self.execute_menu.open_id and self._group_by_id(self.execute_menu.open_id) is None:
             self.execute_menu.hide()
         elif self.execute_menu.open_id:
             self._refresh_open_execute()
+        if self._schedules_only():
+            self._refresh_open_list()
+            return
         if self._groups_only():
-            if not self.cfg.config.groups:
+            if not self._execute_groups():
                 self.group_panel.force_hide()
                 return
             self._refresh_group_list()
@@ -1218,8 +1351,8 @@ class RunnerController:
             else:
                 self.container_menu.hide()
                 self.execute_menu.hide()
-                if self._containers_only():
-                    self._hide_container_list()
+                if self._standalone_panel() is not None:
+                    self._hide_standalone()
                 # Keep the pinned list fully open after the click.
                 QTimer.singleShot(50, self.dropdown.ensure_visible_and_sized)
                 QTimer.singleShot(55, lambda: self._keep_arrow_on_top(self.dropdown))
@@ -1228,13 +1361,22 @@ class RunnerController:
         group = self._group_by_id(row.id)
         if group is None:
             return
-        steps = execution_steps(group, self.cfg.config.launchers)
         if self.settings.pinned_open:
             self.group_panel.force_hide()
             self.container_menu.hide()
             self.execute_menu.hide()
         else:
             self._collapse_open_lists()
+        self._start_group(group, "Started")
+
+    def _run_scheduled(self, group: Group) -> None:
+        """The scheduler's turn: run it without touching the lists the user has open."""
+        self._start_group(group, "Scheduled run")
+        if self._schedules_only():
+            self._refresh_standalone(PopupMode.SCHEDULES_ONLY)
+
+    def _start_group(self, group: Group, notice: str) -> None:
+        steps = execution_steps(group, self.cfg.config.launchers)
         if not steps:
             stay_on_top_warning(
                 self.trigger,
@@ -1251,7 +1393,7 @@ class RunnerController:
             if errors:
                 stay_on_top_warning(self.trigger, "Launch failed", "\n".join(errors))
 
-        self._notify("Started", group.name)
+        self._notify(notice, group.name)
         run_group_steps(
             steps,
             launch,
@@ -1266,8 +1408,8 @@ class RunnerController:
         self.execute_menu.hide()
         if self._groups_only():
             self.group_panel.force_hide()
-        if self._containers_only():
-            self._hide_container_list()
+        if self._standalone_panel() is not None:
+            self._hide_standalone()
         self.dropdown.position_adjacent(self.trigger)
         fill_main_dropdown(self.dropdown, self.cfg)
         if self.settings.pinned_open:
@@ -1321,8 +1463,8 @@ class RunnerController:
         self._sync_groups_after_change()
         self._apply_pinned_state()
 
-    def show_group_dialog(self, existing: Group | None = None) -> None:
-        dialog = GroupDialog(self.cfg, existing, self.trigger)
+    def show_group_dialog(self, existing: Group | None = None, *, scheduled: bool = False) -> None:
+        dialog = GroupDialog(self.cfg, existing, self.trigger, scheduled=scheduled)
         dialog.launchers_changed.connect(self._refresh_open_list)
         accepted = bool(dialog.exec())
         result = dialog.result_group
@@ -1339,6 +1481,11 @@ class RunnerController:
         self._refresh_open_list()
         self._sync_groups_after_change()
 
+    def show_schedule_manager(self) -> None:
+        ScheduleManagerDialog(self.cfg, self.trigger).exec()
+        self._refresh_open_list()
+        self._sync_groups_after_change()
+
     def _on_group_edit(self, row: Launcher) -> None:
         group = self._group_by_id(row.id)
         if group is not None:
@@ -1346,7 +1493,8 @@ class RunnerController:
 
     def _on_group_delete(self, row: Launcher) -> None:
         group = self._group_by_id(row.id)
-        if group is None or not self._confirm_delete("Delete Execute Group", group.name):
+        title = "Delete Schedule" if group is not None and group.scheduled else "Delete Execute Group"
+        if group is None or not self._confirm_delete(title, group.name):
             return
         self.cfg.remove_group(group.id)
         self._sync_groups_after_change()
@@ -1393,9 +1541,9 @@ class RunnerController:
         if self._groups_only() and self.group_panel.isVisible():
             self.group_panel.update_height_for_content()
             self.group_panel.position_adjacent(self.trigger)
-        elif self._containers_only() and self.container_list.isVisible():
-            self.container_list.update_height_for_content()
-            self.container_list.position_adjacent(self.trigger)
+        elif self._standalone_panel() is not None and self._standalone_panel().isVisible():
+            self._standalone_panel().update_height_for_content()
+            self._standalone_panel().position_adjacent(self.trigger)
         elif self._groups_beside_enabled() and self.group_panel.isVisible():
             self.group_panel.update_height_for_content()
             self._place_groups_beside()
@@ -1542,7 +1690,8 @@ class RunnerController:
         if self._groups_only():
             self._sync_groups_after_change()
             return
-        if self._containers_only():
+        self.scheduler.refresh()
+        if self._standalone_panel() is not None:
             self._refresh_open_list()
             return
         if self.settings.pinned_open:

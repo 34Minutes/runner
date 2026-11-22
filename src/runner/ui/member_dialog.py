@@ -218,6 +218,8 @@ class MemberPickerDialog(StayOnTopDialog):
             layout.addWidget(widget)
         layout.addWidget(note)
         layout.addWidget(self._table, 1)
+        for widget in self._bottom_widgets(group):
+            layout.addWidget(widget)
         layout.addLayout(buttons)
 
         self._rebuild()
@@ -233,6 +235,10 @@ class MemberPickerDialog(StayOnTopDialog):
 
     def _extra_widgets(self, group) -> list[QWidget]:
         """Widgets between the name and the note."""
+        return []
+
+    def _bottom_widgets(self, group) -> list[QWidget]:
+        """Widgets between the table and the buttons."""
         return []
 
     def _fill_row(self, row: int, launcher: Launcher, member: bool) -> None:

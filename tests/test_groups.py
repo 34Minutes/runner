@@ -222,7 +222,9 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     assert _NOTE in notes
     assert dialog._show_contents.text() == "Show group contents"
     assert dialog._show_contents.isChecked() is False
-    assert [button.text() for button in dialog.findChildren(QPushButton)] == [
+    # A new execute group is not scheduled: its schedule area is greyed out with no + button.
+    assert dialog.schedule_switch.isChecked() is False
+    assert [button.text() for button in dialog.findChildren(QPushButton) if button.isVisible()] == [
         "Add new Launcher",
         "Save",
         "Cancel",
@@ -390,8 +392,18 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-14:] == [
+    # Your spec: Add new Schedule under Add new launcher, Manage Schedules under
+    # Manage launchers, and Schedules above Execute Groups.
+    assert labels[:5] == [
+        "Add new launcher...",
+        "Add new Schedule...",
+        "Manage launchers...",
+        "Manage Schedules...",
+        "Reset position and size",
+    ]
+    assert labels[-15:] == [
         "---",
+        "Schedules",
         "Execute Groups",
         "Container Groups",
         "Add Execute Group",
@@ -407,10 +419,16 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "Exit",
     ]
 
+    trigger.request_schedules.connect(lambda: seen.append("schedules"))
+    trigger.request_add_schedule.connect(lambda: seen.append("add schedule"))
+    trigger.request_manage_schedules.connect(lambda: seen.append("manage schedules"))
     trigger._action_add_group.trigger()
     trigger._action_manage_groups.trigger()
     trigger._action_groups.trigger()
-    assert seen == ["add", "manage", "groups"]
+    trigger._action_schedules.trigger()
+    trigger._action_add_schedule.trigger()
+    trigger._action_manage_schedules.trigger()
+    assert seen == ["add", "manage", "groups", "schedules", "add schedule", "manage schedules"]
     menu.close()
 
 

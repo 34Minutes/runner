@@ -6,16 +6,25 @@ launcher together with its neighbours. Only In Groups is the opposite of
 Include in dropdown list; changing it updates that switch and every container
 group. Show group contents is off until the user turns it on. Only then does
 hovering that group open its launchers.
+
+The Schedule switch turns the group into a schedule: it runs on the dates in
+the schedule area below the table instead of from the Execute Groups list,
+and shows only in the Schedules list. Turned off, it is an execute group
+again and its dates are kept, greyed out.
 """
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QWidget
 
-from ..config import Group, GroupMember, Launcher
+from ..config import ConfigManager, Group, GroupMember, Launcher
+from . import theme
 from .member_dialog import MemberPickerDialog, _ClickCell
+from .schedule_editor import ScheduleEditor
 from .stay_on_top import warning
 from .toggle_switch import ToggleSwitch
+
+SCHEDULE_NOTE = "Scheduled items will not appear in the launcher menu."
 
 _NOTE = "These items will be executed in the order it appears in the list below"
 # Kept for callers and tests that read the original colours from here.
@@ -30,9 +39,23 @@ class GroupDialog(MemberPickerDialog):
     NOUN = "Execute Group"
     NOTE = _NOTE
     COLUMNS = ("Launcher", "Concurrent", "Only In Groups")
-    SIZE = (680, 480)
+    SIZE = (720, 700)
     ROW_HEIGHT = 34
     DRAG_ROLES = ("member", "concurrent", "only")
+
+    def __init__(
+        self,
+        cfg: ConfigManager,
+        group: Group | None = None,
+        parent: QWidget | None = None,
+        *,
+        scheduled: bool = False,
+    ) -> None:
+        # Read by _extra_widgets, which the base class calls while it builds.
+        self._start_scheduled = scheduled if group is None else group.scheduled
+        super().__init__(cfg, group, parent)
+        if group is None and scheduled:
+            self.setWindowTitle("Add Schedule")
 
     def _init_state(self) -> None:
         self._concurrent: dict[str, bool] = {}
@@ -43,7 +66,30 @@ class GroupDialog(MemberPickerDialog):
     def _extra_widgets(self, group: Group | None) -> list[QWidget]:
         self._show_contents = ToggleSwitch("Show group contents")
         self._show_contents.setChecked(group is not None and group.show_contents)
-        return [self._show_contents]
+        self.schedule_switch = ToggleSwitch("Schedule")
+        self.schedule_switch.setChecked(self._start_scheduled)
+        self.schedule_switch.toggled.connect(self._on_schedule_toggled)
+        note = QLabel(SCHEDULE_NOTE)
+        note.setStyleSheet(f"color: {theme.current().hint_fg};")
+        row = QWidget()
+        line = QHBoxLayout(row)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.addWidget(self._show_contents)
+        line.addSpacing(24)
+        line.addWidget(self.schedule_switch)
+        line.addSpacing(10)
+        line.addWidget(note, 1)
+        return [row]
+
+    def _bottom_widgets(self, group: Group | None) -> list[QWidget]:
+        self.schedule_editor = ScheduleEditor(group.schedule if group is not None else [], self)
+        self.schedule_editor.set_active(self._start_scheduled)
+        return [self.schedule_editor]
+
+    def _on_schedule_toggled(self, checked: bool) -> None:
+        editor = getattr(self, "schedule_editor", None)
+        if editor is not None:
+            editor.set_active(checked)
 
     def _saved_groups(self) -> list[Group]:
         return self._cfg.config.groups
@@ -104,13 +150,19 @@ class GroupDialog(MemberPickerDialog):
             for launcher_id in self._selected
         ]
         show_contents = self._show_contents.isChecked()
+        scheduled = self.schedule_switch.isChecked()
+        schedule = self.schedule_editor.entries()
         if self._original is not None:
             self._original.name = name
             self._original.members = members
             self._original.show_contents = show_contents
+            self._original.scheduled = scheduled
+            self._original.schedule = schedule
             self._result = self._original
         else:
             created = Group.new(name, members)
             created.show_contents = show_contents
+            created.scheduled = scheduled
+            created.schedule = schedule
             self._result = created
         super().accept()

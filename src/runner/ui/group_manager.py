@@ -1,4 +1,8 @@
-"""Manage execute groups: edit, delete, and reorder."""
+"""Manage execute groups and schedules: edit, delete, and reorder.
+
+Both are execute groups in the config. Manage Execute Groups lists the ones
+run by hand, and Manage Schedules the ones that run on dates.
+"""
 
 from __future__ import annotations
 
@@ -12,11 +16,13 @@ class GroupManagerDialog(GroupListManagerDialog):
     TITLE = "Manage Execute Groups"
     DELETE_TITLE = "Delete Execute Group"
 
+    SCHEDULED = False
+
     def _saved(self):
-        return self._cfg.config.groups
+        return [group for group in self._cfg.config.groups if bool(group.scheduled) == self.SCHEDULED]
 
     def _editor(self, group):
-        return GroupDialog(self._cfg, group, self)
+        return GroupDialog(self._cfg, group, self, scheduled=self.SCHEDULED)
 
     def _store_new(self, group) -> None:
         self._cfg.add_group(group)
@@ -29,3 +35,11 @@ class GroupManagerDialog(GroupListManagerDialog):
 
     def _reorder(self, ordered_ids: list[str]) -> None:
         self._cfg.reorder_groups(ordered_ids)
+
+
+class ScheduleManagerDialog(GroupManagerDialog):
+    """Edit, delete, and reorder the scheduled execute groups."""
+
+    TITLE = "Manage Schedules"
+    DELETE_TITLE = "Delete Schedule"
+    SCHEDULED = True

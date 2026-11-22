@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Schedules: an execute group can run on dates you set. The **Schedule** switch on the execute group screen turns it into a schedule. **+** adds a date on the metal date dial, and the button beside each date sets how often it repeats on the interval rollers. Dates are listed by their next run; a new date stays at the top until the screen is reopened. **×** removes a date. Turning **Schedule** off returns the group to **Execute Groups** and greys its dates out, keeping them.
+- **Schedules** on the arrow menu lists the scheduled groups with their next run; click one to edit it. **Add new Schedule...** and **Manage Schedules...** sit under **Add new launcher...** and **Manage launchers...**.
+- Scheduled groups run while Runner is open. A run missed while Runner was closed or the computer was asleep is skipped.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 
