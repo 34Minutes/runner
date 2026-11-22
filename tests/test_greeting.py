@@ -285,10 +285,11 @@ def test_dismiss_fades_the_warning_over_about_a_second(qapp, qtbot):
         assert greeting.bubble.isVisible() is True
         assert trigger._greeting_opacity == 1.0
 
-        qtbot.wait(400)
+        # Partway through, both are still showing and half-faded. Wait for that
+        # point instead of a fixed time: a busy CI machine runs the timers late.
+        qtbot.waitUntil(lambda: 0.15 < trigger._greeting_opacity < 0.9, timeout=2000)
         assert greeting.bubble.isVisible() is True
         assert trigger._greeting_highlight is True
-        assert 0.15 < trigger._greeting_opacity < 0.9
         assert 0.15 < greeting.bubble._opacity < 0.9
 
         _wait_until_faded(qtbot, greeting, trigger)
