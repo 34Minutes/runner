@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.0.13] - 2026-11-22
+
 ### Changed
 - **Container Groups** on the arrow menu opens the container-group list on its own, beside the arrow, the same way **Execute Groups** opens the execute-group list. Hover a container group to open its launchers. It used to open the main popup.
 
@@ -17,9 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On macOS a list that took focus as it opened, such as a pinned list at start-up, could cover the bottom edge of the arrow. The arrow now goes back on top.
 - With an arrow wider than the launcher list, the execute-groups list beside it opened under the arrow's corner. It now opens clear of the arrow.
 - Choosing **Container Groups** or **Execute Groups** could close that list a moment later, because the launcher list it replaced still reported the pointer leaving.
-
-### Planned
-- Per-launcher icons (auto + custom).
 
 ## [1.0.12] - 2026-11-19
 
