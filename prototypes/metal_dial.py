@@ -4,6 +4,7 @@ Outside to inside: year, month, day, hour (24 h), and minute (optional).
 A fixed window at the top reads the selected value on every ring. Drag a ring
 to spin it: it rises out of the dial while held and settles back on release.
 Scroll over a ring to step it; Up/Down picks a ring, Left/Right steps it.
+Click the silver centre, or press Enter or Space, to select the date.
 
 Run from the Runner repo (it reads src/runner/ui/theme.py):
     .venv/bin/python prototypes/metal_dial.py             demo window
@@ -184,6 +185,7 @@ class Ring:
 
 class MetalDial(QWidget):
     changed = Signal(object)  # datetime.datetime
+    selected = Signal(object)  # datetime.datetime, when the centre is clicked
 
     OUTER, HUB = 0.95, 0.25  # ring area and centre knob, as fractions of the dial radius
     LIFT_SCALE = 0.05
@@ -218,6 +220,10 @@ class MetalDial(QWidget):
 
         self._grab: Ring | None = None
         self._hover: Ring | None = None
+        self._hub_hover = False
+        self._hub_down = False
+        self._flash = 0.0  # accent rim round the centre after a select, fading
+        self._press = 0.0  # how far the centre is pushed in, 0 up to 1 fully down
         self._last_angle = 0.0
         self._samples: list[tuple[int, float]] = []
         self._wheel = 0
@@ -326,6 +332,22 @@ class MetalDial(QWidget):
         d = math.hypot(pos.x() - c.x(), pos.y() - c.y()) / R
         return next((r for r in self.rings if r.r_in <= d < r.r_out), None)
 
+    def _on_hub(self, pos) -> bool:
+        c = self._center()
+        return math.hypot(pos.x() - c.x(), pos.y() - c.y()) <= self.hub * self._radius()
+
+    def _select(self):
+        """Settle any ring still turning, then report the date it shows."""
+        for ring in self.rings:
+            if ring.moving():  # a step lands where it was going; a flick where it is
+                aim = ring.target if ring.target is not None else ring.rotation
+                ring.jump_to(ring.index_at(aim))
+        self._grab = None
+        self._sync()
+        self._flash = 1.0
+        self._start()
+        self.selected.emit(self.value())
+
     def _angle_at(self, pos) -> float:
         c = self._center()
         return math.degrees(math.atan2(pos.y() - c.y(), pos.x() - c.x()))
@@ -333,6 +355,10 @@ class MetalDial(QWidget):
     # ---------- input ----------
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._on_hub(event.position()):
+            self._hub_down = True
+            self._start()
             return
         ring = self._ring_at(event.position())
         if ring is None:
@@ -348,10 +374,14 @@ class MetalDial(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._grab is None:
-            hover = self._ring_at(event.position())
-            if hover is not self._hover:
-                self._hover = hover
-                self.setCursor(Qt.CursorShape.OpenHandCursor if hover else Qt.CursorShape.ArrowCursor)
+            hub = self._on_hub(event.position())
+            hover = None if self._hub_down else self._ring_at(event.position())
+            if hover is not self._hover or hub != self._hub_hover:
+                self._hover, self._hub_hover = hover, hub
+                if hub:
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.OpenHandCursor if hover else Qt.CursorShape.ArrowCursor)
                 self.update()
             return
         angle = self._angle_at(event.position())
@@ -365,6 +395,12 @@ class MetalDial(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event):
+        if self._hub_down:
+            self._hub_down = False
+            if self._on_hub(event.position()):
+                self._select()
+            self._start()
+            return
         ring, self._grab = self._grab, None
         if ring is None:
             return
@@ -382,8 +418,8 @@ class MetalDial(QWidget):
         self._start()
 
     def leaveEvent(self, event):
-        if self._hover is not None:
-            self._hover = None
+        if self._hover is not None or self._hub_hover:
+            self._hover, self._hub_hover = None, False
             self.update()
 
     def wheelEvent(self, event):
@@ -403,6 +439,8 @@ class MetalDial(QWidget):
             self.focus_ring = max(0, self.focus_ring - 1)
         elif key == Qt.Key.Key_Down:
             self.focus_ring = min(len(self.rings) - 1, self.focus_ring + 1)
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self._select()
         elif key in (Qt.Key.Key_Right, Qt.Key.Key_Left):
             self.rings[self.focus_ring].step_by(1 if key == Qt.Key.Key_Right else -1)
             self._start()
@@ -432,6 +470,16 @@ class MetalDial(QWidget):
                 busy = True
             else:
                 ring.lift = ring.lift_target
+        press_to = 1.0 if self._hub_down else 0.0
+        if self._press != press_to:
+            # Goes down fast, like a button, and springs back a little slower.
+            speed = 45.0 if self._hub_down else 16.0
+            gap = press_to - self._press
+            self._press = press_to if abs(gap) < 0.01 else self._press + gap * min(1.0, dt_s * speed)
+            busy = True
+        if self._flash > 0.0:
+            self._flash = max(0.0, self._flash - dt_s * 1.8)
+            busy = True
         self._sync()
         self.update()
         if not busy and self._grab is None:
@@ -663,35 +711,66 @@ class MetalDial(QWidget):
         return pix
 
     def _paint_hub(self, p: QPainter, c: QPointF, R: float):
+        """The centre button. Pressed, it sinks into the dial and its dome turns concave."""
         pal = self.palette_
+        k = self._press
         r = self.hub * R
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0, 0, 0, 220))
         p.drawEllipse(c, r, r)
-        top = r - R * 0.012
-        hub_metal = _mix(pal.metal, pal.shine, 0.55)
-        p.setBrush(brushed(c, hub_metal, QColor(255, 255, 255), pal.shadow, strength=1.1, light_deg=135))
-        p.drawEllipse(c, top, top)
-        dome = QRadialGradient(c - QPointF(top * 0.35, top * 0.4), top * 1.35)
-        dome.setColorAt(0.0, QColor(255, 255, 255, 110))
-        dome.setColorAt(0.55, QColor(255, 255, 255, 0))
-        dome.setColorAt(1.0, QColor(0, 0, 0, 120))
-        p.setBrush(dome)
-        p.drawEllipse(c, top, top)
-        self._edge(p, c, top, max(1.0, R * 0.007), raised=True)
+        # Pushed in, the face gets smaller and drops a touch, so the dark gap
+        # round it widens at the top: it has gone below the rings.
+        top = r - R * (0.012 + 0.016 * k)
+        cc = c + QPointF(0, R * 0.007 * k)
+        hub_metal = _mix(pal.metal, pal.shine, 0.55 * (1 - 0.35 * k))
+        p.setBrush(brushed(cc, hub_metal, QColor(255, 255, 255), pal.shadow, strength=1.1, light_deg=135))
+        p.drawEllipse(cc, top, top)
+        # Up: a dome lit from the top left. Down: a dish, lit from the bottom right.
+        up = QRadialGradient(cc - QPointF(top * 0.35, top * 0.4), top * 1.35)
+        up.setColorAt(0.0, QColor(255, 255, 255, int(110 * (1 - k))))
+        up.setColorAt(0.55, QColor(255, 255, 255, 0))
+        up.setColorAt(1.0, QColor(0, 0, 0, int(120 * (1 - k))))
+        p.setBrush(up)
+        p.drawEllipse(cc, top, top)
+        if k > 0.0:
+            dish = QRadialGradient(cc + QPointF(top * 0.3, top * 0.35), top * 1.3)
+            dish.setColorAt(0.0, QColor(255, 255, 255, int(60 * k)))
+            dish.setColorAt(0.5, QColor(255, 255, 255, 0))
+            dish.setColorAt(1.0, QColor(0, 0, 0, int(150 * k)))
+            p.setBrush(dish)
+            p.drawEllipse(cc, top, top)
+            # The rim of the hole shades the top of the face.
+            lip = QLinearGradient(0, cc.y() - top, 0, cc.y() + top * 0.1)
+            lip.setColorAt(0.0, QColor(0, 0, 0, int(140 * k)))
+            lip.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.setBrush(lip)
+            p.drawEllipse(cc, top, top)
+        if self._hub_hover and k < 1.0:
+            p.setBrush(QColor(255, 255, 255, int(28 * (1 - k))))
+            p.drawEllipse(cc, top, top)
+        self._edge(p, cc, top, max(1.0, R * 0.007), raised=k < 0.5)
+        glow = max(self._flash, 0.45 if self._hub_hover else 0.0)
+        if glow > 0.0:
+            rim = QColor(pal.accent)
+            rim.setAlphaF(min(1.0, glow))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(rim, max(1.5, R * (0.010 + 0.012 * self._flash))))
+            p.drawEllipse(cc, top + R * 0.004, top + R * 0.004)
+            p.setPen(Qt.PenStyle.NoPen)
 
         when = self.value()
-        ink = _mix(pal.shadow, QColor(0, 0, 0), 0.6)
+        ink = _mix(pal.shadow, QColor(0, 0, 0), 0.6 + 0.2 * k)
+        scale = 1 - 0.05 * k
         font = QFont(self.font())
         font.setBold(True)
-        font.setPixelSize(max(8, int(r * 0.30)))
+        font.setPixelSize(max(8, int(r * 0.30 * scale)))
         p.setFont(font)
         p.setPen(ink)
-        p.drawText(QRectF(c.x() - r, c.y() - r * 0.5, 2 * r, r * 0.45), Qt.AlignmentFlag.AlignCenter,
+        p.drawText(QRectF(cc.x() - r, cc.y() - r * 0.5, 2 * r, r * 0.45), Qt.AlignmentFlag.AlignCenter,
                    when.strftime("%a"))
-        font.setPixelSize(max(8, int(r * 0.36)))
+        font.setPixelSize(max(8, int(r * 0.36 * scale)))
         p.setFont(font)
-        p.drawText(QRectF(c.x() - r, c.y(), 2 * r, r * 0.5), Qt.AlignmentFlag.AlignCenter,
+        p.drawText(QRectF(cc.x() - r, cc.y(), 2 * r, r * 0.5), Qt.AlignmentFlag.AlignCenter,
                    when.strftime("%H:%M"))
 
     def _paint_window(self, p: QPainter, c: QPointF, R: float, pal: DialPalette):
@@ -734,7 +813,13 @@ class Demo(QWidget):
         self.readout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.readout)
 
-        self.hint = QLabel("Drag a ring to spin it  ·  scroll over a ring to step  ·  ↑↓ pick a ring, ←→ step")
+        self.picked = QLabel("Click the centre to select")
+        self.picked.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dial.selected.connect(self._picked)
+        layout.addWidget(self.picked)
+
+        self.hint = QLabel("Drag a ring to spin it  ·  scroll over a ring to step  ·  ↑↓ pick a ring, ←→ step"
+                           "  ·  click the centre or press Enter to select")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hint)
 
@@ -769,6 +854,12 @@ class Demo(QWidget):
         )
         self.readout.setStyleSheet(f"font-size: 24px; font-weight: 600; color: {pal.accent.name()};")
         self.hint.setStyleSheet(f"color: {pal.hint.name()}; font-size: 12px;")
+        self.picked.setStyleSheet(f"color: {pal.hint.name()}; font-size: 13px;")
+
+    def _picked(self, when: dt.datetime):
+        minutes = when.strftime("%H:%M") if self.dial.show_minutes() else when.strftime("%H:00")
+        self.picked.setText(f"Selected  {when.strftime('%A %-d %B %Y')}  ·  {minutes}")
+        self.picked.setStyleSheet(f"color: {self.dial.palette_.accent.name()}; font-size: 13px; font-weight: 600;")
 
     def _show(self, when: dt.datetime):
         if self.dial.show_minutes():
