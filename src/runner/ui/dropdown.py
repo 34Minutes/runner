@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 from ..config import AppConfig, Launcher
 from ..moves import container_token, launcher_token, merge_visible_order
 from .launch_button import LaunchButton
-from .stay_on_top import mark_stay_on_top
+from .stay_on_top import keep_menu_above_lists
 from .theme import frame_qss, heading_qss, hint_qss, scroll_qss, search_qss
 from .dropdown_drag import _DRAG_LIFT_X, DragReorderMixin
 from .dropdown_motion import PanelMotionMixin
@@ -625,7 +625,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
 
         launcher = button.launcher
         menu = QMenu(self)
-        mark_stay_on_top(menu)
+        keep_menu_above_lists(menu)
         edit_action = menu.addAction("Edit")
         delete_action = menu.addAction("Delete")
         edit_action.triggered.connect(lambda checked=False, item=launcher: self.edit_requested.emit(item))
@@ -654,7 +654,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
 
         item_id = button.item_id
         menu = QMenu(self)
-        mark_stay_on_top(menu)
+        keep_menu_above_lists(menu)
         edit_action = menu.addAction("Edit")
         delete_action = menu.addAction("Delete")
         edit_action.triggered.connect(
@@ -867,6 +867,14 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             y = edge - target_h
 
         rect = QRect(x, y, target_w, target_h)
+        # An arrow wider than the launcher list would sit over this list's
+        # top corner. Step out past the arrow instead.
+        arrow = QRect(trig_pos, trigger.size())
+        if rect.intersects(arrow):
+            if place_left:
+                rect.moveRight(min(rect.right(), arrow.left() - gap - 1))
+            else:
+                rect.moveLeft(max(rect.left(), arrow.right() + 1 + gap))
         if rect.left() < avail.left():
             rect.moveLeft(avail.left())
         if rect.right() > avail.right():

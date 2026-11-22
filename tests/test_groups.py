@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QContextMenuEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QPushButton
 
@@ -442,14 +442,44 @@ class _Screen:
 
 
 class _Arrow:
-    def __init__(self, x: int) -> None:
-        self._x = x
+    def __init__(self, x: int, width: int = 40, height: int = 30, y: int = 40) -> None:
+        self._x, self._y, self._w, self._h = x, y, width, height
 
     def mapToGlobal(self, _point):
-        return QPoint(self._x, 40)
+        return QPoint(self._x, self._y)
 
     def width(self) -> int:
-        return 40
+        return self._w
+
+    def height(self) -> int:
+        return self._h
+
+    def size(self) -> QSize:
+        return QSize(self._w, self._h)
+
+
+def test_groups_list_beside_steps_past_an_arrow_wider_than_the_launchers(qapp, qtbot):
+    """A big arrow centred over a narrow launcher list must not sit on the groups list."""
+    cfg = AppConfig()
+    launchers = DropdownPanel(cfg)
+    groups = DropdownPanel(cfg, honor_pin=False)
+    qtbot.addWidget(launchers)
+    qtbot.addWidget(groups)
+    launchers.rebuild_buttons([Launcher.new("Alpha", "a")])
+    groups.rebuild_buttons([Launcher.new("Class", "")])
+    launchers.show()
+    groups.show()
+    qapp.processEvents()
+    launchers.move(300, 160)
+    launchers._grow_from_top = True
+    arrow_w = launchers.width() + 160
+    arrow = _Arrow(300 + launchers.width() // 2 - arrow_w // 2, width=arrow_w, height=120, y=44)
+    with patch("runner.ui.dropdown.QApplication.screenAt", return_value=_Screen()):
+        groups.position_beside(launchers, arrow)
+    arrow_rect = QRect(arrow.mapToGlobal(QPoint()), arrow.size())
+    assert not groups.frameGeometry().intersects(arrow_rect)
+    assert groups.x() >= arrow_rect.right() + 1
+    assert groups.y() == launchers.y()
 
 
 def test_empty_groups_list_shows_no_message(qapp, qtbot):

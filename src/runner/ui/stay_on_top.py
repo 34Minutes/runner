@@ -10,6 +10,15 @@ arrow. A modal dialog does not push those peers backward, so the arrow and
 lists can sit on top of Add, Edit, and Manage. The dialog is lifted to
 NSStatusWindowLevel, above that band and still under popup menus.
 
+Dialogs also open clear of the arrow, the open lists, and other open dialogs
+when the screen has room, instead of centred on the arrow and covering it.
+See place_clear_of_runner.
+
+Right-click menus need the opposite on macOS: a popup menu already sits at
+NSPopUpMenuWindowLevel, above every Runner window, and the stay-on-top flag
+pulls it down to the lists' level, so a list could cover its own row menu.
+keep_menu_above_lists sets the flag only where it helps.
+
 On macOS the same flag makes Qt skip the native open panel and use its own
 file dialog. The widget dialog treats an .app bundle as a folder, so choosing
 Notes.app walks into the bundle. The macOS open dialog accepts the bundle as
@@ -19,21 +28,30 @@ the selected program instead.
 from __future__ import annotations
 
 import sys
+import weakref
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QLineEdit, QMenu, QMessageBox, QWidget
 
 # Above NSModalPanelWindowLevel (8), below NSPopUpMenuWindowLevel (101).
 _NS_STATUS_WINDOW_LEVEL = 25
 _MARK_PROP = "_runnerStayAbove"
 _SURFACE_PROP = "_runnerStayUnderDialogs"
+_PLACED_PROP = "_runnerPlacedClear"
+# Space between a dialog and the Runner window it steps aside from.
+_CLEAR_GAP = 12
+# macOS title bar, for a dialog whose frame is not known before its first show.
+_TITLE_BAR_GUESS = 28
 
 _visible: list[QWidget] = []
 _lift_pending = False
 _in_lift = False
 _swallow_surface_events = False
 _dialog_filter: QObject | None = None
+# Run when a dialog first opens, before it is placed. Runner closes its
+# hover lists here so the dialog does not open over them.
+_on_dialog_open: list = []
 _surface_filter: QObject | None = None
 
 
@@ -48,6 +66,126 @@ def mark_stay_on_top(widget: QWidget) -> None:
         return
     widget.setProperty(_MARK_PROP, True)
     widget.installEventFilter(_filters()[0])
+
+
+def on_dialog_open(callback) -> None:
+    """Call callback() each time a dialog, message box, or file browser first opens.
+
+    A bound method is held weakly, so its owner can go away without unhooking.
+    """
+    ref = weakref.WeakMethod(callback) if hasattr(callback, "__self__") else (lambda: callback)
+    _on_dialog_open.append(ref)
+
+
+def keep_menu_above_lists(menu: QMenu) -> None:
+    """Make a list's right-click menu open above every list.
+
+    Windows and Linux need the stay-on-top flag for that. On macOS a popup
+    menu is already above the lists, and the flag would put it level with them.
+    """
+    app = QApplication.instance()
+    if app is not None and app.platformName() == "cocoa":
+        return
+    menu.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+
+
+def runner_windows_to_avoid(exclude: QWidget | None = None) -> list[QRect]:
+    """Screen rects of the visible arrow, lists, greeting, and open dialogs."""
+    app = QApplication.instance()
+    if app is None:
+        return []
+    rects: list[QRect] = []
+    for widget in app.topLevelWidgets():
+        # A list still fading in counts, even at opacity 0: it is about to be seen.
+        if widget is exclude or not widget.isVisible() or isinstance(widget, QMenu):
+            continue
+        # A dialog's own parent window counts too: it should stay in view.
+        if _is_runner_surface(widget) or widget.property(_MARK_PROP):
+            rects.append(widget.frameGeometry())
+    return [rect for rect in rects if rect.isValid() and not rect.isEmpty()]
+
+
+def clear_position(size: QRect, avoid: list[QRect], avail: QRect, gap: int = _CLEAR_GAP) -> QPoint:
+    """Top-left for a window of size.size() that covers none of avoid, if any spot on avail does.
+
+    size is where the window would open by default; that spot is tried first
+    and ties go to the spot nearest it, so a dialog stays near what opened it.
+    When every spot covers something, the one that covers the least wins.
+    """
+    w, h = size.width(), size.height()
+    start = size.topLeft()
+    candidates = [QPoint(start)]
+    for rect in avoid:
+        for x in (rect.right() + 1 + gap, rect.left() - gap - w, rect.left(), rect.right() + 1 - w,
+                  rect.center().x() - w // 2):
+            for y in (rect.bottom() + 1 + gap, rect.top() - gap - h, rect.top(), rect.bottom() + 1 - h,
+                      rect.center().y() - h // 2):
+                candidates.append(QPoint(x, y))
+    candidates += [
+        QPoint(avail.left(), avail.top()),
+        QPoint(avail.right() + 1 - w, avail.top()),
+        QPoint(avail.left(), avail.bottom() + 1 - h),
+        QPoint(avail.right() + 1 - w, avail.bottom() + 1 - h),
+        QPoint(avail.center().x() - w // 2, avail.center().y() - h // 2),
+    ]
+
+    def clamp(point: QPoint) -> QPoint:
+        x = max(avail.left(), min(point.x(), avail.right() + 1 - w))
+        y = max(avail.top(), min(point.y(), avail.bottom() + 1 - h))
+        return QPoint(x, y)
+
+    def covered(point: QPoint) -> int:
+        rect = QRect(point, size.size())
+        total = 0
+        for other in avoid:
+            part = rect.intersected(other)
+            if not part.isEmpty():
+                total += part.width() * part.height()
+        return total
+
+    def distance(point: QPoint) -> int:
+        return (point - start).manhattanLength()
+
+    return min((clamp(point) for point in candidates), key=lambda point: (covered(point), distance(point)))
+
+
+def place_clear_of_runner(widget: QWidget) -> None:
+    """Move a dialog off the arrow, the open lists, and other open dialogs.
+
+    Done once, when it first opens. After that it stays where the user puts it.
+    The on_dialog_open callbacks run first, so lists they close are not avoided.
+    """
+    if not _alive(widget) or widget.property(_PLACED_PROP):
+        return
+    widget.setProperty(_PLACED_PROP, True)
+    for ref in list(_on_dialog_open):
+        callback = ref()
+        if callback is None:
+            _on_dialog_open.remove(ref)
+            continue
+        try:
+            callback()
+        except RuntimeError:  # its windows were already deleted
+            _on_dialog_open.remove(ref)
+    avoid = runner_windows_to_avoid(exclude=widget)
+    if not avoid:
+        return
+    frame = QRect(widget.frameGeometry())
+    if frame == widget.geometry() and not widget.windowFlags() & Qt.WindowType.FramelessWindowHint:
+        frame.setTop(frame.top() - _TITLE_BAR_GUESS)
+    parent = widget.parentWidget()
+    owner = parent.window() if parent is not None else None
+    screen = (owner.screen() if owner is not None else None) or widget.screen() or QApplication.primaryScreen()
+    if screen is None:
+        return
+    avail = screen.availableGeometry()
+    # Start where Qt would open it, centred on what opened it. Some windows,
+    # such as a message box, have no position of their own yet at this point.
+    over = owner.frameGeometry() if owner is not None and owner.isVisible() else avail
+    frame.moveCenter(over.center())
+    target = clear_position(frame, avoid, avail)
+    # move() places the frame, title bar included.
+    widget.move(target)
 
 
 def _filters() -> tuple[QObject, QObject]:
@@ -198,6 +336,8 @@ class _EditingDialogFilter(QObject):
         if not isinstance(obj, QWidget) or isinstance(obj, QMenu):
             return False
         kind = event.type()
+        if kind == QEvent.Type.Show and obj.isWindow():
+            place_clear_of_runner(obj)
         if kind in (QEvent.Type.Show, QEvent.Type.WindowActivate):
             _register(obj)
         elif kind in (QEvent.Type.Hide, QEvent.Type.Close):

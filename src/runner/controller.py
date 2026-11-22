@@ -24,7 +24,7 @@ import sys
 from collections.abc import Callable
 from enum import Enum, auto
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
@@ -49,6 +49,7 @@ from .ui.group_dialog import GroupDialog
 from .ui.group_manager import GroupManagerDialog
 from .ui.launch_button import LaunchButton
 from .ui.manager_dialog import ManagerDialog
+from .ui.stay_on_top import on_dialog_open
 from .ui.stay_on_top import question as stay_on_top_question
 from .ui.stay_on_top import warning as stay_on_top_warning
 from .ui.theme import current, use
@@ -206,6 +207,24 @@ def fill_main_dropdown(dropdown: DropdownPanel, cfg: ConfigManager) -> None:
     dropdown.apply_token_order(visible_main_tokens(cfg.config))
 
 
+class _ArrowAboveActiveList(QObject):
+    """Put the arrow back on top when a list becomes the active window.
+
+    On macOS the window that becomes key is ordered to the front after any
+    raise that came before it, so a list that takes focus as it opens would
+    otherwise end up over the arrow and the greeting.
+    """
+
+    def __init__(self, restack: Callable[[], None]) -> None:
+        super().__init__()
+        self._restack = restack
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+        if event.type() == QEvent.Type.WindowActivate:
+            QTimer.singleShot(0, self._restack)
+        return False
+
+
 class RunnerController:
     """Owns the widgets and keeps them in step with the config."""
 
@@ -293,6 +312,7 @@ class RunnerController:
         self.group_panel.set_locked_pair(self.locked_pair)
 
         self.greeting = StartupGreeting()
+        self.greeting.set_avoid(lambda: [panel.frameGeometry() for panel in self._open_lists()])
         fill_main_dropdown(self.dropdown, cfg)
 
     def _place_trigger_on_start(self) -> None:
@@ -337,6 +357,37 @@ class RunnerController:
         self.container_list.submenu_left.connect(self.container_menu.on_row_left)
         self.group_panel.row_hovered.connect(self._show_execute_members)
         self.group_panel.row_left.connect(self.execute_menu.on_row_left)
+        on_dialog_open(self._make_room_for_dialog)
+        self._restack_on_activate = _ArrowAboveActiveList(self._restack_after_activation)
+        for panel in self._all_lists():
+            panel.installEventFilter(self._restack_on_activate)
+
+    def _make_room_for_dialog(self) -> None:
+        """A dialog is opening: close the lists that are only open on hover.
+
+        The pointer is about to leave them for the dialog anyway, and the
+        dialog would open over them. A pinned launcher list stays, and the
+        dialog opens clear of it.
+        """
+        if self._arrow_dragging or not self.trigger.isVisible():
+            return
+        self.hide_timer.stop()
+        self.container_menu.hide()
+        self.execute_menu.hide()
+        if self._one_list_only():
+            for panel in (self.group_panel, self.container_list):
+                if panel.isVisible():
+                    panel.force_hide()  # its close handler restores a pinned list
+            return
+        if self.settings.pinned_open:
+            return
+        for panel in (self.dropdown, self.group_panel):
+            if panel.isVisible():
+                panel.force_hide()
+
+    def _restack_after_activation(self) -> None:
+        if self.trigger.isVisible() and not self._arrow_dragging:
+            self._keep_arrow_on_top()
 
     def _connect_lists(self) -> None:
         dropdown, container, execute, groups = (
@@ -495,10 +546,19 @@ class RunnerController:
         )
 
     def _keep_arrow_on_top(self, *panels: DropdownPanel) -> None:
-        """The arrow stays above the lists that open from it."""
+        """The arrow stays above the lists that open from it.
+
+        A greeting that is showing sits between them: its rim hugs the arrow,
+        and its bubble keeps clear of the lists. On macOS only the raise
+        orders these windows; stackUnder() is for the other platforms.
+        """
         self.trigger.raise_()
         for panel in panels:
             panel.stackUnder(self.trigger)
+        self.greeting.stack_with(self.trigger, self._open_lists())
+
+    def _open_lists(self) -> list[DropdownPanel]:
+        return [panel for panel in self._all_lists() if panel.isVisible()]
 
     # -------------------------------------------------------------- hiding
 
@@ -690,6 +750,8 @@ class RunnerController:
             self.container_list.cancel_close()
 
     def _on_container_list_leave(self) -> None:
+        if not self.container_list.isVisible():
+            return  # a late leave from a list that is already closed
         if _pointer_over(self.container_panel):
             return
         self.container_menu.schedule_hide()
@@ -846,6 +908,10 @@ class RunnerController:
             self.dropdown.cancel_close()
 
     def _on_dropdown_leave(self) -> None:
+        # A list that was just closed can still report the pointer leaving.
+        # That must not start a hide for the list opened in its place.
+        if not self.dropdown.isVisible():
+            return
         if (
             _pointer_over(self.group_panel)
             or _pointer_over(self.container_panel)
@@ -865,6 +931,8 @@ class RunnerController:
             self.group_panel.cancel_close()
 
     def _on_group_leave(self) -> None:
+        if not self.group_panel.isVisible():
+            return  # a late leave from a list that is already closed
         if _pointer_over(self.execute_panel):
             return
         self.execute_menu.schedule_hide()
@@ -1342,6 +1410,7 @@ class RunnerController:
         self.cfg.update_settings(show_startup_greeting=checked)
         if checked:
             self.greeting.show_again(self.trigger)
+            self._keep_arrow_on_top()
         else:
             self.greeting.dismiss_for_session()
         self._follow_trigger()
@@ -1419,6 +1488,7 @@ class RunnerController:
         # The arrow just jumped to the default spot: point it out, and remind
         # them they can resize and move it. Shown whatever the greeting switch says.
         self.greeting.show_again(self.trigger, show_bubble=True, even_under_pointer=True)
+        self._keep_arrow_on_top()
 
     def _save_position(self, x: int, y: int) -> None:
         self.cfg.update_settings(position_x=x, position_y=y)

@@ -9,6 +9,8 @@ a second. It stays gone until Runner is started again.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -106,11 +108,27 @@ def greeting_bubble_rect(
     avail: QRect,
     tail: int = _TAIL,
     gap: int = _GAP,
+    avoid: list[QRect] | None = None,
 ) -> tuple[QRect, str]:
     """Place the bubble (including its tail) beside the arrow, fully on screen.
 
-    The returned side is where the tail sits on the bubble: left, right, top, or bottom.
+    A side that would cover a rect in avoid, such as an open list, is skipped
+    while another side has room. The returned side is where the tail sits on
+    the bubble: left, right, top, or bottom.
     """
+    blocked = [rect for rect in (avoid or []) if rect.isValid()]
+    for clear_only in (True, False) if blocked else (False,):
+        placed = _bubble_side(anchor, box, avail, tail, gap, blocked if clear_only else [])
+        if placed is not None:
+            return placed
+    side = QSize(box.width() + tail, box.height())
+    fallback = QPoint(anchor.left() - gap - side.width(), anchor.center().y() - side.height() // 2)
+    return _clamp_rect(QRect(fallback, side), avail), "right"
+
+
+def _bubble_side(
+    anchor: QRect, box: QSize, avail: QRect, tail: int, gap: int, blocked: list[QRect]
+) -> tuple[QRect, str] | None:
     side = QSize(box.width() + tail, box.height())
     vertical = QSize(box.width(), box.height() + tail)
     candidates = (
@@ -120,14 +138,10 @@ def greeting_bubble_rect(
         (QPoint(anchor.center().x() - vertical.width() // 2, anchor.top() - gap - vertical.height()), "bottom", vertical),
     )
     for pos, tail_side, size in candidates:
-        rect = QRect(pos, size)
-        if _fits(rect, anchor, avail):
-            return rect, tail_side
-        clamped = _clamp_rect(rect, avail)
-        if _fits(clamped, anchor, avail):
-            return clamped, tail_side
-    fallback_pos, fallback_side, fallback_size = candidates[1]
-    return _clamp_rect(QRect(fallback_pos, fallback_size), avail), fallback_side
+        for rect in (QRect(pos, size), _clamp_rect(QRect(pos, size), avail)):
+            if _fits(rect, anchor, avail) and not any(rect.intersects(b) for b in blocked):
+                return rect, tail_side
+    return None
 
 
 def bubble_box_size(font: QFont | None = None) -> QSize:
@@ -211,11 +225,11 @@ class GreetingBubble(QWidget):
         self._opacity = max(0.0, min(1.0, float(opacity)))
         self.update()
 
-    def place_near(self, trigger: QWidget) -> None:
+    def place_near(self, trigger: QWidget, avoid: list[QRect] | None = None) -> None:
         screen = trigger.screen() or QApplication.primaryScreen()
         avail = screen.availableGeometry() if screen is not None else QRect(0, 0, 1440, 900)
         self._box = bubble_box_size(self.font())
-        rect, tail_side = greeting_bubble_rect(trigger.frameGeometry(), self._box, avail)
+        rect, tail_side = greeting_bubble_rect(trigger.frameGeometry(), self._box, avail, avoid=avoid)
         self._tail_side = tail_side
         self.setFixedSize(rect.size())
         self.move(rect.topLeft())
@@ -344,6 +358,8 @@ class StartupGreeting(QObject):
         # Where the pointer was when the hint was asked for. The arrow can land
         # under it; that is not a hover until the pointer moves.
         self._held_pointer: QPoint | None = None
+        # Screen rects the bubble keeps clear of, such as the open lists.
+        self._avoid: Callable[[], list[QRect]] = lambda: []
         self._flash_on = True
         self._timer = QTimer(self)
         self._timer.setInterval(_FLASH_INTERVAL_MS)
@@ -357,6 +373,38 @@ class StartupGreeting(QObject):
     def apply_theme(self) -> None:
         self._bubble.update()
         self._border.update()
+
+    def set_avoid(self, provider: Callable[[], list[QRect]]) -> None:
+        """Where the bubble must not sit: the lists that are open right now."""
+        self._avoid = provider
+
+    def stack_with(self, trigger: QWidget, panels: Iterable[QWidget]) -> None:
+        """Arrow on top, its flashing rim next, then the lists; the bubble above the lists.
+
+        Call after the lists are shown. The rim hugs the arrow, and a list
+        that opens against the arrow would otherwise cover part of it.
+
+        Windows are raised from the bottom up: on macOS stackUnder() does not
+        reorder top-level windows, but raise_() does. stackUnder() is kept for
+        the platforms where it works.
+        """
+        try:
+            border_up = self._border.isVisible()
+            bubble_up = self._bubble.isVisible()
+        except RuntimeError:
+            return
+        if not border_up and not bubble_up:
+            return
+        if bubble_up:
+            self._bubble.place_near(trigger, self._avoid())
+            self._bubble.raise_()
+        if border_up:
+            self._border.raise_()
+            for panel in panels:
+                panel.stackUnder(self._border)
+        trigger.raise_()
+        if border_up:
+            self._border.stackUnder(trigger)
 
     @property
     def bubble(self) -> GreetingBubble:
@@ -531,7 +579,7 @@ class StartupGreeting(QObject):
         except RuntimeError:
             show_bubble = False
         if show_bubble:
-            self._bubble.place_near(trigger)
+            self._bubble.place_near(trigger, self._avoid())
 
     def _attach(self, trigger: QWidget) -> None:
         if self._trigger is trigger:

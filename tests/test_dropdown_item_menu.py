@@ -45,7 +45,9 @@ def test_right_click_offers_edit_and_delete(qapp, qtbot):
     menu = panel._item_menu
     assert menu is not None
     assert [action.text() for action in menu.actions()] == ["Edit", "Delete"]
-    assert menu.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+    # Above the lists: on macOS a popup already is, and the flag would drop it to their level.
+    on_top = bool(menu.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+    assert on_top is (QApplication.instance().platformName() != "cocoa")
     assert panel._in_context_menu is True
 
     # Popup is deferred so a frameless tool window does not dismiss it on macOS.

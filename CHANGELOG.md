@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Container Groups** on the arrow menu opens the container-group list on its own, beside the arrow, the same way **Execute Groups** opens the execute-group list. Hover a container group to open its launchers. It used to open the main popup.
 
+### Fixed
+- A list's right-click menu (**Edit**, **Delete**) could open behind the list on macOS. It now opens above every list.
+- Dialogs, confirmations, and the file browser opened centred on the arrow, covering it and any open list. They now open beside the arrow and lists when the screen has room. Lists that were only open because the pointer was over them close when a dialog opens; a pinned list stays, and the dialog opens clear of it.
+- The greeting's flashing rim could sit under an open list, and its bubble could open where a list was. The rim and bubble now sit above the lists and under the arrow, and the bubble opens on a side with no list.
+- On macOS a list that took focus as it opened, such as a pinned list at start-up, could cover the bottom edge of the arrow. The arrow now goes back on top.
+- With an arrow wider than the launcher list, the execute-groups list beside it opened under the arrow's corner. It now opens clear of the arrow.
+- Choosing **Container Groups** or **Execute Groups** could close that list a moment later, because the launcher list it replaced still reported the pointer leaving.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 

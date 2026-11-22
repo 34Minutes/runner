@@ -586,3 +586,19 @@ def test_container_groups_with_none_saved_opens_nothing(qapp, qtbot, monkeypatch
         assert ctl.mode.name == "MAIN"
     finally:
         _close_all(ctl)
+
+
+def test_a_late_leave_from_the_closed_main_list_keeps_the_container_list(qapp, qtbot, monkeypatch, tmp_path):
+    """macOS can report the pointer leaving a list after that list was closed."""
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    ctl.trigger.show()
+    try:
+        ctl._on_trigger_enter()
+        assert ctl.dropdown.isVisible()
+        ctl.trigger.request_containers.emit()
+        assert not ctl.dropdown.isVisible()
+        ctl.dropdown.hover_leave.emit()
+        assert not ctl.hide_timer.isActive()
+        assert ctl.container_list.isVisible()
+    finally:
+        _close_all(ctl)
