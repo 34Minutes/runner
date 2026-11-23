@@ -38,7 +38,7 @@ class Launcher:
     command: str  # exe path, "calc", url, "python script.py", etc.
     args: str = ""  # additional parameters / command line args
     # On the main hover list. Off, it is still in every execute group and
-    # container it belongs to. Include in dropdown list, Only In Groups, and
+    # container it belongs to. Include in dropdown list, Only in Groups, and
     # Only in Container Group all read and write this one value.
     show_in_main: bool = True
     working_dir: str | None = None

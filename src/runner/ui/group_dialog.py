@@ -2,7 +2,7 @@
 
 The shared row behaviour (click to include, drag to reorder) is in
 member_dialog. This screen adds two checkboxes per row. Concurrent starts the
-launcher together with its neighbours. Only In Groups is the opposite of
+launcher together with its neighbours. Only in Groups is the opposite of
 Include in dropdown list; changing it updates that switch and every container
 group. Show group contents is off until the user turns it on. Only then does
 hovering that group open its launchers.
@@ -26,10 +26,12 @@ from .toggle_switch import ToggleSwitch
 
 SCHEDULE_NOTE = "Scheduled items will not appear in the launcher menu."
 
-_NOTE = "These items will be executed in the order it appears in the list below"
-# Kept for callers and tests that read the original colours from here.
+_NOTE = "Ticked launchers run in the order they appear in the list below."
+CONCURRENT_TIP = "Start this launcher at the same time as the one before it, instead of after it."
+ONLY_TIP = "Keep this launcher out of the main list. It still runs in its groups."
+# The Dark scheme's colours, for callers and tests that read them from here.
 _DRAG_BORDER = "#ffd600"
-_SELECTED_BG = "#3c3c3c"
+_SELECTED_BG = "#415f91"
 _SELECTED_FG = "#f2f2f2"
 
 
@@ -38,7 +40,8 @@ class GroupDialog(MemberPickerDialog):
 
     NOUN = "Execute Group"
     NOTE = _NOTE
-    COLUMNS = ("Launcher", "Concurrent", "Only In Groups")
+    COLUMNS = ("Launcher", "Concurrent", "Only in Groups")
+    COLUMN_TIPS = (MemberPickerDialog.COLUMN_TIPS[0], CONCURRENT_TIP, ONLY_TIP)
     SIZE = (720, 700)
     ROW_HEIGHT = 34
     DRAG_ROLES = ("member", "concurrent", "only")
@@ -120,6 +123,7 @@ class GroupDialog(MemberPickerDialog):
         box.setProperty("role", role)
         box.setChecked(checked)
         cell = _ClickCell(box, on_click=lambda b=box: b.toggle())
+        cell.setToolTip(CONCURRENT_TIP if role == "concurrent" else ONLY_TIP)
         if role == "concurrent":
             box.toggled.connect(lambda state, lid=launcher_id: self._on_concurrent_toggled(lid, state))
         else:

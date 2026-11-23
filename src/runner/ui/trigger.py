@@ -62,6 +62,30 @@ class MenuSlider(QWidget):
         return self._slider
 
 
+class ArrowSubmenu(QMenu):
+    """A submenu of the arrow menu. Choosing a row in it counts as a choice.
+
+    Qt hides the whole menu before it runs the chosen action, and the arrow
+    menu pops itself back open after a hide that was not a choice. Mark the
+    choice on the parent first, so a dialog the row opens is not covered by
+    the menu coming back.
+    """
+
+    def _mark_parent_chosen(self, action: QAction | None) -> None:
+        parent = self.parent()
+        if isinstance(parent, ArrowContextMenu) and action is not None and action.isEnabled():
+            parent._chose_action = True
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        self._mark_parent_chosen(self.actionAt(event.position().toPoint()))
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._mark_parent_chosen(self.activeAction())
+        super().keyPressEvent(event)
+
+
 class ArrowContextMenu(QMenu):
     """Arrow menu that stays open while a toggle is clicked.
 
@@ -290,45 +314,45 @@ class TriggerWidget(QWidget):
         # Optional: slight tooltip
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
-            "Right-click for quick toggles (Pin, Filter, Greeting, Show execute groups — menu auto-closes on mouse leave), "
-            "Add, Manage, Schedules, Execute Groups, Container Groups, Add and Manage groups, Reset position and size, Opacity, Decay rate, Color Schemes, Exit"
+            "Right-click to add and manage launchers, schedules, and groups, "
+            "and for settings (the menu closes when the pointer leaves it)"
         )
 
     def _create_actions(self) -> None:
-        self._action_add = QAction("Add new launcher...", self)
+        self._action_add = QAction("Add Launcher…", self)
         self._action_add.triggered.connect(self.request_add.emit)
 
-        self._action_manage = QAction("Manage launchers...", self)
+        self._action_manage = QAction("Manage Launchers…", self)
         self._action_manage.triggered.connect(self.request_manage.emit)
 
-        self._action_add_schedule = QAction("Add new Schedule...", self)
+        self._action_add_schedule = QAction("Add Schedule…", self)
         self._action_add_schedule.triggered.connect(self.request_add_schedule.emit)
 
-        self._action_manage_schedules = QAction("Manage Schedules...", self)
+        self._action_manage_schedules = QAction("Manage Schedules…", self)
         self._action_manage_schedules.triggered.connect(self.request_manage_schedules.emit)
 
-        self._action_schedules = QAction("Schedules", self)
+        self._action_schedules = QAction("Show Schedules", self)
         self._action_schedules.triggered.connect(self.request_schedules.emit)
 
-        self._action_reset = QAction("Reset position and size", self)
+        self._action_reset = QAction("Reset Position and Size", self)
         self._action_reset.triggered.connect(self.request_reset.emit)
 
-        self._action_add_group = QAction("Add Execute Group", self)
+        self._action_add_group = QAction("Add Execute Group…", self)
         self._action_add_group.triggered.connect(self.request_add_group.emit)
 
-        self._action_manage_groups = QAction("Manage Execute Groups", self)
+        self._action_manage_groups = QAction("Manage Execute Groups…", self)
         self._action_manage_groups.triggered.connect(self.request_manage_groups.emit)
 
-        self._action_groups = QAction("Execute Groups", self)
+        self._action_groups = QAction("Show Execute Groups", self)
         self._action_groups.triggered.connect(self.request_groups.emit)
 
-        self._action_containers = QAction("Container Groups", self)
+        self._action_containers = QAction("Show Container Groups", self)
         self._action_containers.triggered.connect(self.request_containers.emit)
 
-        self._action_add_container = QAction("Add Container Group", self)
+        self._action_add_container = QAction("Add Container Group…", self)
         self._action_add_container.triggered.connect(self.request_add_container.emit)
 
-        self._action_manage_containers = QAction("Manage Container Groups", self)
+        self._action_manage_containers = QAction("Manage Container Groups…", self)
         self._action_manage_containers.triggered.connect(self.request_manage_containers.emit)
 
         self._action_exit = QAction("Exit", self)
@@ -341,10 +365,21 @@ class TriggerWidget(QWidget):
         """
         menu = ArrowContextMenu(self)
         menu.addAction(self._action_add)
-        menu.addAction(self._action_add_schedule)
         menu.addAction(self._action_manage)
-        menu.addAction(self._action_manage_schedules)
         menu.addAction(self._action_reset)
+        menu.addSeparator()
+        # One submenu per kind of group, each with the same three rows.
+        group_menus = []
+        for title, actions in (
+            ("Schedules", (self._action_schedules, self._action_add_schedule, self._action_manage_schedules)),
+            ("Execute Groups", (self._action_groups, self._action_add_group, self._action_manage_groups)),
+            ("Container Groups", (self._action_containers, self._action_add_container, self._action_manage_containers)),
+        ):
+            submenu = ArrowSubmenu(title, menu)
+            for action in actions:
+                submenu.addAction(action)
+            menu.addMenu(submenu)
+            group_menus.append(submenu)
         menu.addSeparator()
 
         # Sliding toggles inside the menu via QWidgetAction.
@@ -396,14 +431,6 @@ class TriggerWidget(QWidget):
             startup_switch.toggled.connect(lambda checked: self.startup_toggled.emit(checked))
             menu.addAction(startup_action)
 
-        menu.addSeparator()
-        menu.addAction(self._action_schedules)
-        menu.addAction(self._action_groups)
-        menu.addAction(self._action_containers)
-        menu.addAction(self._action_add_group)
-        menu.addAction(self._action_add_container)
-        menu.addAction(self._action_manage_groups)
-        menu.addAction(self._action_manage_containers)
         menu.addSeparator()
         opacity = MenuSlider(
             "Opacity",
@@ -494,6 +521,7 @@ class TriggerWidget(QWidget):
         watched = [
             menu,
             scheme_menu,
+            *group_menus,
             pin_switch,
             filter_switch,
             greeting_switch,

@@ -15,6 +15,7 @@ class GroupManagerDialog(GroupListManagerDialog):
 
     TITLE = "Manage Execute Groups"
     DELETE_TITLE = "Delete Execute Group"
+    EMPTY_TEXT = "No execute groups yet. Press Add New… to make one."
 
     SCHEDULED = False
 
@@ -42,4 +43,5 @@ class ScheduleManagerDialog(GroupManagerDialog):
 
     TITLE = "Manage Schedules"
     DELETE_TITLE = "Delete Schedule"
+    EMPTY_TEXT = "No schedules yet. Press Add New… to make one."
     SCHEDULED = True

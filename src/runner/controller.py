@@ -183,10 +183,10 @@ def create_tray(
 
     menu = QMenu()
     for text, slot in (
-        ("Add new launcher...", on_add),
-        ("Manage launchers...", on_manage),
-        ("Reset position and size", on_reset),
-        ("Reload config", on_reload),
+        ("Add Launcher…", on_add),
+        ("Manage Launchers…", on_manage),
+        ("Reset Position and Size", on_reset),
+        ("Reload Config", on_reload),
     ):
         action = QAction(text, menu)
         action.triggered.connect(lambda _checked=False, slot=slot: slot())

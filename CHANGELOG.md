@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Add, Edit, and Manage windows, message boxes, and the date and repeat pickers follow the colour scheme (Dark, Medium, Bright) like the lists do, instead of the system's light look.
+- One button order everywhere: **Cancel** then **Save**. Menu rows and buttons that open a window end in …, and labels use one capitalisation (**Add Launcher…**, **Manage Launchers…**, **Only in Groups**).
+- The arrow menu groups the group actions into three submenus, **Schedules**, **Execute Groups**, and **Container Groups**, each with **Show**, **Add…**, and **Manage…**.
+- The launcher screen: fields use the window's full width; **Run as administrator** and **Show console window** show only on Windows; **Include in dropdown list** sits under the fields; group membership is a tick list per kind, with schedules marked "(schedule)".
+- Manage windows: **Edit**, **Delete**, and **Move** are greyed out until a row is selected, none of them acts as the default button, and an empty list says so.
+- Schedule rows line up whether or not they carry the "next" tag. **Concurrent** and **Only in Groups** explain themselves on hover.
+- The container group screen's switches no longer repeat "Only in Container Group" on every row; the column heading says it once.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 

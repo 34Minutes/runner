@@ -82,6 +82,8 @@ class ToggleSwitch(QAbstractButton):
         painter.setRenderHint(QPainter.Antialiasing, True)
         try:
             scheme = current()
+            if not self.isEnabled():
+                painter.setOpacity(0.4)
             if self.isChecked():
                 track_color = QColor(*scheme.toggle_on)
                 track_border = QColor(*scheme.toggle_on_border)

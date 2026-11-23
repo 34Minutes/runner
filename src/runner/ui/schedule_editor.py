@@ -39,18 +39,20 @@ from .schedule_pickers import DatePickerDialog, IntervalPickerDialog, apply_tota
 ROW_HEIGHT = 34
 VISIBLE_ROWS = 4
 
-# One rounded look for every button in the area, greyed out with the schedule off.
-_QSS = """
-QPushButton { background: palette(button); border: 1px solid palette(mid);
-              border-radius: 6px; padding: 4px 10px; }
-QPushButton:hover { border-color: palette(highlight); }
-QPushButton:disabled { color: palette(mid); border-color: palette(midlight); }
-QPushButton#scheduleDate { text-align: left; }
-QPushButton#scheduleDate[done="true"] { color: palette(mid); }
-QPushButton#scheduleAdd { font-size: 16px; font-weight: 600; padding: 0; }
-QLabel#scheduleNext { color: palette(highlight); font-weight: 600; }
-QLabel#scheduleNext:disabled { color: palette(mid); }
-"""
+NEXT_TAG_WIDTH = 40
+
+
+def _qss() -> str:
+    """The editor's own touches on top of the dialog's look."""
+    colors = theme.dialog_colors()
+    return (
+        "QPushButton#scheduleDate { text-align: left; }"
+        f'QPushButton#scheduleDate[done="true"] {{ color: {colors.muted}; }}'
+        "QPushButton#scheduleAdd { font-size: 16px; font-weight: 600; padding: 0; min-height: 0; }"
+        "QPushButton#scheduleRemove { padding: 0; min-height: 0; }"
+        f"QLabel#scheduleNext {{ color: {colors.default_border}; font-weight: 600; }}"
+        f"QLabel#scheduleNext:disabled {{ color: {colors.muted}; }}"
+    )
 
 
 class ScheduleEditor(QWidget):
@@ -96,7 +98,7 @@ class ScheduleEditor(QWidget):
         scroll.setWidget(self._rows_host)
         scroll.setFixedHeight(VISIBLE_ROWS * (ROW_HEIGHT + 4) + 8)
 
-        self.setStyleSheet(_QSS)
+        self.setStyleSheet(_qss())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(header)
@@ -251,11 +253,14 @@ class ScheduleEditor(QWidget):
         layout = QHBoxLayout(row)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.addWidget(date_button, 1)
+        # Every row keeps room for the tag, so the date buttons line up.
+        tag = QLabel("next" if soonest else "")
+        tag.setObjectName("scheduleNext")
+        tag.setFixedWidth(NEXT_TAG_WIDTH)
+        tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if soonest:
-            tag = QLabel("next")
-            tag.setObjectName("scheduleNext")
             tag.setToolTip("This is the next time the group runs.")
-            layout.addWidget(tag)
+        layout.addWidget(tag)
         layout.addWidget(repeat_button)
         layout.addWidget(remove_button)
         row.setFixedHeight(ROW_HEIGHT)

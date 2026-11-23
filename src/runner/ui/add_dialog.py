@@ -3,16 +3,16 @@
 Fields:
 - Name, Command/Path (+Browse), Parameters/Args, Include in list (enabled)
 - Working directory (+Browse dir)
-- Run as administrator (Windows), Show console (Windows)
+- Run as administrator, Show console window (shown on Windows only)
+- Which container groups and execute groups it is in, as tick lists
 """
 
 from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -32,88 +33,64 @@ from ..config import ConfigManager, Launcher
 
 
 class _MembershipList(QWidget):
-    """Groups this launcher belongs to, with add and remove."""
+    """The groups of one kind, each with a tick for whether this launcher is in it."""
 
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    ROW_HEIGHT = 26
+    MAX_ROWS = 5
+
+    def __init__(self, title: str, empty_text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._ids: list[str] = []
-        self._names: dict[str, str] = {}
-
         self._list = QListWidget()
         self._list.setObjectName(title)
-        self._list.setMaximumHeight(96)
-        self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-
-        self._combo = QComboBox()
-        self._add = QPushButton("Add")
-        self._remove = QPushButton("Remove")
-        self._add.clicked.connect(self._on_add)
-        self._remove.clicked.connect(self._on_remove)
-
-        controls = QHBoxLayout()
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.addWidget(self._combo, 1)
-        controls.addWidget(self._add)
-        controls.addWidget(self._remove)
+        self._list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._list.itemClicked.connect(self._toggle)
+        self._empty = QLabel(empty_text)
+        self._empty.setObjectName("membershipEmpty")
+        self._empty.setEnabled(False)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
         layout.addWidget(QLabel(title))
         layout.addWidget(self._list)
-        layout.addLayout(controls)
+        layout.addWidget(self._empty)
 
     def set_groups(self, groups: list[tuple[str, str]], selected_ids: list[str]) -> None:
         """groups is (id, name) in display order. selected_ids are current members."""
-        self._names = {group_id: name for group_id, name in groups}
-        known = []
-        seen: set[str] = set()
-        for group_id in selected_ids:
-            if group_id in self._names and group_id not in seen:
-                known.append(group_id)
-                seen.add(group_id)
-        self._ids = known
-        self._refresh()
+        chosen = set(selected_ids)
+        self._list.clear()
+        for group_id, name in groups:
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, group_id)
+            # Not user-checkable: the view would flip the box and then report
+            # the click as well. _toggle handles every click on the row once.
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item.setCheckState(Qt.CheckState.Checked if group_id in chosen else Qt.CheckState.Unchecked)
+            item.setSizeHint(QSize(0, self.ROW_HEIGHT))
+            self._list.addItem(item)
+        rows = min(max(len(groups), 1), self.MAX_ROWS)
+        self._list.setFixedHeight(rows * self.ROW_HEIGHT + 6)
+        self._list.setVisible(bool(groups))
+        self._empty.setVisible(not groups)
 
     def selected_ids(self) -> list[str]:
-        return list(self._ids)
+        return [
+            self._list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(self._list.count())
+            if self._list.item(row).checkState() == Qt.CheckState.Checked
+        ]
 
-    def _refresh(self) -> None:
-        current = self._list.currentRow()
-        self._list.clear()
-        for group_id in self._ids:
-            item = QListWidgetItem(self._names.get(group_id, group_id))
-            item.setData(Qt.ItemDataRole.UserRole, group_id)
-            self._list.addItem(item)
-        if self._list.count():
-            self._list.setCurrentRow(min(max(current, 0), self._list.count() - 1))
-
-        chosen = set(self._ids)
-        self._combo.clear()
-        for group_id, name in self._names.items():
-            if group_id not in chosen:
-                self._combo.addItem(name, group_id)
-        self._add.setEnabled(self._combo.count() > 0)
-        self._remove.setEnabled(self._list.count() > 0)
-
-    def _on_add(self) -> None:
-        group_id = self._combo.currentData()
-        if not group_id or group_id in self._ids:
-            return
-        self._ids.append(group_id)
-        self._refresh()
+    def set_checked(self, group_id: str, checked: bool) -> None:
         for row in range(self._list.count()):
             item = self._list.item(row)
-            if item is not None and item.data(Qt.ItemDataRole.UserRole) == group_id:
-                self._list.setCurrentRow(row)
-                break
+            if item.data(Qt.ItemDataRole.UserRole) == group_id:
+                item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
-    def _on_remove(self) -> None:
-        item = self._list.currentItem()
-        if item is None:
-            return
-        group_id = item.data(Qt.ItemDataRole.UserRole)
-        self._ids = [existing for existing in self._ids if existing != group_id]
-        self._refresh()
+    def _toggle(self, item: QListWidgetItem) -> None:
+        """A click anywhere on the row, box or name, ticks or unticks it."""
+        checked = item.checkState() == Qt.CheckState.Checked
+        item.setCheckState(Qt.CheckState.Unchecked if checked else Qt.CheckState.Checked)
 
 
 class AddEditDialog(StayOnTopDialog):
@@ -148,7 +125,7 @@ class AddEditDialog(StayOnTopDialog):
         self._enabled_cb.setChecked(True)
 
         # Browse button for command
-        self._browse_btn = QPushButton("Browse...")
+        self._browse_btn = QPushButton("Browse…")
         self._browse_btn.clicked.connect(self._on_browse)
 
         cmd_row = QWidget()
@@ -159,7 +136,7 @@ class AddEditDialog(StayOnTopDialog):
 
         self._work_dir_edit = QLineEdit()
         self._work_dir_edit.setPlaceholderText("Optional: run with this working directory")
-        self._browse_dir_btn = QPushButton("Browse...")
+        self._browse_dir_btn = QPushButton("Browse…")
         self._browse_dir_btn.clicked.connect(self._on_browse_dir)
 
         work_row = QWidget()
@@ -168,11 +145,16 @@ class AddEditDialog(StayOnTopDialog):
         work_layout.addWidget(self._work_dir_edit, 1)
         work_layout.addWidget(self._browse_dir_btn)
 
-        self._run_as_admin_cb = ToggleSwitch("Run as administrator (Windows)")
-        self._show_console_cb = ToggleSwitch("Show console / terminal (Windows)")
+        # Saved on every platform, but they only do anything on Windows.
+        self._run_as_admin_cb = ToggleSwitch("Run as administrator")
+        self._show_console_cb = ToggleSwitch("Show console window")
 
-        self._container_membership = _MembershipList("Container groups I belong to")
-        self._execute_membership = _MembershipList("Execute groups I belong to")
+        self._container_membership = _MembershipList(
+            "Member of container groups", "No container groups yet."
+        )
+        self._execute_membership = _MembershipList(
+            "Member of execute groups and schedules", "No execute groups or schedules yet."
+        )
         self._load_membership(launcher)
 
         buttons = QDialogButtonBox(
@@ -183,22 +165,44 @@ class AddEditDialog(StayOnTopDialog):
             ok_button.setText("Save")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        for button in (self._browse_btn, self._browse_dir_btn):
+            button.setAutoDefault(False)
 
-        main_layout = QFormLayout()
-        main_layout.addRow("Name:", self._name_edit)
-        main_layout.addRow("Command / Path:", cmd_row)
-        main_layout.addRow("Parameters / Args:", self._args_edit)
-        main_layout.addRow("", self._enabled_cb)
-        main_layout.addRow("Working directory:", work_row)
-        main_layout.addRow("", self._run_as_admin_cb)
-        main_layout.addRow("", self._show_console_cb)
-        main_layout.addRow(self._container_membership)
-        main_layout.addRow(self._execute_membership)
-        main_layout.addRow(buttons)
+        form = QFormLayout()
+        # macOS keeps fields at their natural width by default, which cut the
+        # hints short. Let them take the dialog's width.
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        form.addRow("Name:", self._name_edit)
+        form.addRow("Command / Path:", cmd_row)
+        form.addRow("Parameters / Args:", self._args_edit)
+        form.addRow("Working directory:", work_row)
 
-        self.setLayout(main_layout)
+        toggles = QVBoxLayout()
+        toggles.setSpacing(8)
+        toggles.addWidget(self._enabled_cb)
+        if sys.platform == "win32":
+            toggles.addWidget(self._run_as_admin_cb)
+            toggles.addWidget(self._show_console_cb)
+        else:
+            self._run_as_admin_cb.hide()
+            self._show_console_cb.hide()
+        form.addRow("", toggles)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.addLayout(form)
+        main_layout.addSpacing(8)
+        main_layout.addWidget(self._container_membership)
+        main_layout.addSpacing(4)
+        main_layout.addWidget(self._execute_membership)
+        main_layout.addStretch(1)
+        main_layout.addWidget(buttons)
+
+        for field in (self._name_edit, self._command_edit, self._args_edit, self._work_dir_edit):
+            field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._name_edit.setPlaceholderText("What the list shows, e.g. Brave")
         hint = self.sizeHint()
-        self.resize(max(520, hint.width() + 24), max(560, hint.height() + 12))
+        self.resize(max(560, hint.width() + 24), hint.height() + 12)
 
         if launcher:
             self._name_edit.setText(launcher.name)
@@ -227,7 +231,10 @@ class AddEditDialog(StayOnTopDialog):
             for group in cfg.config.container_groups
             if any(member.launcher_id == launcher_id for member in group.members)
         ]
-        executes = [(group.id, group.name) for group in cfg.config.groups]
+        executes = [
+            (group.id, f"{group.name}  (schedule)" if group.scheduled else group.name)
+            for group in cfg.config.groups
+        ]
         execute_ids = [
             group.id
             for group in cfg.config.groups

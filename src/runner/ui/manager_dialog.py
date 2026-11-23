@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QListWidget,
     QListWidgetItem,
     QPushButton,
     QVBoxLayout,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from ..config import ConfigManager, Launcher
 from .add_dialog import AddEditDialog
+from .manage_list import ManageList, keep_buttons_in_step
 from .stay_on_top import StayOnTopDialog, question
 
 
@@ -32,20 +32,19 @@ class ManagerDialog(StayOnTopDialog):
         self._cfg = cfg
         self._launchers: list[Launcher] = list(cfg.config.launchers)  # working copy
 
-        self._list = QListWidget()
-        self._list.setAlternatingRowColors(True)
-        self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list = ManageList("No launchers yet. Press Add New… to make one.")
 
         # Side buttons
-        self._btn_edit = QPushButton("Edit...")
+        self._btn_edit = QPushButton("Edit…")
         self._btn_delete = QPushButton("Delete")
         self._btn_up = QPushButton("Move Up")
         self._btn_down = QPushButton("Move Down")
-        self._btn_add = QPushButton("Add New...")
+        self._btn_add = QPushButton("Add New…")
 
         self._connect_signals()
         self._refresh_list()
         self._rebuild_layout()
+        keep_buttons_in_step(self._list, self._btn_edit, self._btn_delete, self._btn_up, self._btn_down, self._btn_add)
 
     def _rebuild_layout(self):
         # Horizontal: list + buttons

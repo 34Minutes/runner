@@ -27,13 +27,9 @@ def next_quarter_hour(now: datetime | None = None) -> datetime:
 
 
 def _style(dialog: QWidget, hint: QLabel, background: str) -> None:
+    """The dialog look, on the background the dial or rollers are drawn for."""
     scheme = theme.current()
-    dialog.setStyleSheet(
-        f"QDialog {{ background: {background}; }}"
-        f"QPushButton {{ background: {scheme.row_bg}; color: {scheme.row_fg};"
-        f" border: 1px solid {scheme.row_border}; border-radius: 4px; padding: 4px 12px; }}"
-        f"QPushButton:hover {{ background: {scheme.hover_bg}; color: {scheme.hover_fg}; }}"
-    )
+    dialog.setStyleSheet(theme.dialog_qss() + f"QDialog {{ background: {background}; }}")
     hint.setStyleSheet(f"color: {scheme.hint_fg}; font-size: 12px;")
     hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
     hint.setWordWrap(True)
@@ -89,6 +85,7 @@ class IntervalPickerDialog(StayOnTopDialog):
         self.roller.selected.connect(self._choose)
         hint = QLabel("Roll to how often it should run again, then press Select.")
         self.no_repeat = QPushButton("Don't repeat")
+        self.no_repeat.setAutoDefault(False)
         self.no_repeat.clicked.connect(lambda: self._choose(0))
         row = QHBoxLayout()
         row.addStretch(1)

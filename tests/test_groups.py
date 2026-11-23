@@ -217,7 +217,7 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     assert dialog.windowTitle() == "Add Execute Group"
     qtbot.waitExposed(dialog)
     headers = [dialog._table.horizontalHeaderItem(column).text() for column in range(3)]
-    assert headers == ["Launcher", "Concurrent", "Only In Groups"]
+    assert headers == ["Launcher", "Concurrent", "Only in Groups"]
     notes = [label.text() for label in dialog.findChildren(QLabel)]
     assert _NOTE in notes
     assert dialog._show_contents.text() == "Show group contents"
@@ -225,9 +225,9 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     # A new execute group is not scheduled: its schedule area is greyed out with no + button.
     assert dialog.schedule_switch.isChecked() is False
     assert [button.text() for button in dialog.findChildren(QPushButton) if button.isVisible()] == [
-        "Add new Launcher",
-        "Save",
+        "Add Launcher…",
         "Cancel",
+        "Save",
     ]
     assert dialog.display_ids() == [alpha.id, beta.id, gamma.id]
 
@@ -392,24 +392,16 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    # Your spec: Add new Schedule under Add new launcher, Manage Schedules under
-    # Manage launchers, and Schedules above Execute Groups.
+    # Launchers first, then one submenu per kind of group, Schedules on top.
     assert labels[:5] == [
-        "Add new launcher...",
-        "Add new Schedule...",
-        "Manage launchers...",
-        "Manage Schedules...",
-        "Reset position and size",
-    ]
-    assert labels[-15:] == [
+        "Add Launcher…",
+        "Manage Launchers…",
+        "Reset Position and Size",
         "---",
         "Schedules",
-        "Execute Groups",
-        "Container Groups",
-        "Add Execute Group",
-        "Add Container Group",
-        "Manage Execute Groups",
-        "Manage Container Groups",
+    ]
+    assert labels[5:8] == ["Execute Groups", "Container Groups", "---"]
+    assert labels[-7:] == [
         "---",
         "Opacity",
         "Decay rate",
@@ -418,6 +410,16 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "---",
         "Exit",
     ]
+    submenus = {
+        action.text(): [row.text() for row in action.menu().actions()]
+        for action in menu.actions()
+        if action.menu() is not None and action.text() != "Color Schemes"
+    }
+    assert submenus == {
+        "Schedules": ["Show Schedules", "Add Schedule…", "Manage Schedules…"],
+        "Execute Groups": ["Show Execute Groups", "Add Execute Group…", "Manage Execute Groups…"],
+        "Container Groups": ["Show Container Groups", "Add Container Group…", "Manage Container Groups…"],
+    }
 
     trigger.request_schedules.connect(lambda: seen.append("schedules"))
     trigger.request_add_schedule.connect(lambda: seen.append("add schedule"))
@@ -927,7 +929,7 @@ def test_reset_label_reads_position_and_size(qapp, qtbot):
     menu = menus[-1]
     qtbot.addWidget(menu)
     texts = [action.text() for action in menu.actions()]
-    assert "Reset position and size" in texts
+    assert "Reset Position and Size" in texts
     assert not any("&" in text for text in texts)
     menu.close()
 

@@ -11,6 +11,7 @@ class ContainerManagerDialog(GroupListManagerDialog):
 
     TITLE = "Manage Container Groups"
     DELETE_TITLE = "Delete Container Group"
+    EMPTY_TEXT = "No container groups yet. Press Add New… to make one."
 
     def _saved(self):
         return self._cfg.config.container_groups

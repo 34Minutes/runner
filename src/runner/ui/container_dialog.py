@@ -15,6 +15,8 @@ from .member_dialog import MemberPickerDialog, _ClickCell
 from .stay_on_top import warning
 from .toggle_switch import ToggleSwitch
 
+ONLY_TIP = "Keep this launcher out of the main list. Tick it in the list first."
+
 _NOTE = (
     "These items open in a submenu when you hover this container group. "
     "They are not run together."
@@ -31,6 +33,10 @@ class ContainerDialog(MemberPickerDialog):
     NOUN = "Container Group"
     NOTE = _NOTE
     COLUMNS = ("Launcher", "Only in Container Group")
+    COLUMN_TIPS = (
+        MemberPickerDialog.COLUMN_TIPS[0],
+        ONLY_TIP,
+    )
     SIZE = (760, 480)
     ROW_HEIGHT = 36
     DRAG_ROLES = ("member", "only")
@@ -46,12 +52,14 @@ class ContainerDialog(MemberPickerDialog):
         return launcher is not None and not launcher.show_in_main
 
     def _fill_row(self, row: int, launcher: Launcher, member: bool) -> None:
-        switch = ToggleSwitch("Only in Container Group")
+        # The column heading names the switch, so the switch has no label.
+        switch = ToggleSwitch()
         switch.setProperty("launcher_id", launcher.id)
         switch.setProperty("role", "only")
         switch.setChecked(self._hidden_from_main(launcher))
         switch.setEnabled(member)
         cell = _SwitchCell(switch, on_click=lambda lid=launcher.id: self._on_only_clicked(lid))
+        cell.setToolTip(ONLY_TIP)
         self._paint(cell, member)
         self._table.setCellWidget(row, 1, cell)
 

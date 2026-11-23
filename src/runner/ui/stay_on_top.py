@@ -34,6 +34,8 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QLineEdit, QMenu, QMessageBox, QWidget
 
+from .theme import style_dialog
+
 # Above NSModalPanelWindowLevel (8), below NSPopUpMenuWindowLevel (101).
 _NS_STATUS_WINDOW_LEVEL = 25
 _MARK_PROP = "_runnerStayAbove"
@@ -358,6 +360,7 @@ class StayOnTopDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         mark_stay_on_top(self)
+        style_dialog(self)
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
@@ -375,6 +378,7 @@ def warning(parent: QWidget | None, title: str, text: str) -> None:
         parent,
     )
     mark_stay_on_top(box)
+    style_dialog(box)
     box.exec()
 
 
@@ -384,8 +388,11 @@ def question(
     text: str,
     buttons: QMessageBox.StandardButton,
 ) -> QMessageBox.StandardButton:
-    box = QMessageBox(QMessageBox.Icon.Question, title, text, buttons, parent)
+    # No icon: the system's question mark is drawn dark and disappears on
+    # the Dark and Medium schemes, and the question says enough on its own.
+    box = QMessageBox(QMessageBox.Icon.NoIcon, title, text, buttons, parent)
     mark_stay_on_top(box)
+    style_dialog(box)
     return QMessageBox.StandardButton(box.exec())
 
 
@@ -410,6 +417,7 @@ def choice(
     box.setDefaultButton(accept)
     box.setEscapeButton(reject)
     mark_stay_on_top(box)
+    style_dialog(box)
     box.exec()
     return box.clickedButton() is accept
 

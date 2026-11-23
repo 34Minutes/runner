@@ -191,7 +191,8 @@ def test_container_dialog_saves_click_order_and_the_switch(qapp, qtbot, tmp_path
     click_name(alpha.id)
     assert dialog.display_ids() == [beta.id, alpha.id, ]
     assert _SELECTED_BG in dialog.name_cell(beta.id).styleSheet()
-    assert dialog.only_switch(alpha.id).box.text() == "Only in Container Group"
+    # The column heading names the switch, so each row's switch has no label.
+    assert dialog.only_switch(alpha.id).box.text() == ""
     # Alpha is already off the main list, so the shared switch starts on.
     assert dialog.only_switch(alpha.id).box.isChecked() is True
 
@@ -305,18 +306,22 @@ def test_launcher_screen_adds_and_removes_both_kinds_of_group(qapp, qtbot, tmp_p
     dialog = AddEditDialog(alpha, cfg=mgr)
     qtbot.addWidget(dialog)
     labels = [label.text() for label in dialog.findChildren(QLabel)]
-    assert "Container groups I belong to" in labels
-    assert "Execute groups I belong to" in labels
+    assert "Member of container groups" in labels
+    assert "Member of execute groups and schedules" in labels
     assert dialog._container_membership.selected_ids() == [folder.id]
     assert dialog._execute_membership.selected_ids() == [run.id]
 
-    dialog._container_membership._on_add()
+    # A click anywhere on a row ticks or unticks it.
+    def click_row(membership, row):
+        listing = membership._list
+        listing.itemClicked.emit(listing.item(row))
+
+    click_row(dialog._container_membership, 1)
     assert dialog._container_membership.selected_ids() == [folder.id, extra.id]
-    dialog._execute_membership._on_add()
+    click_row(dialog._execute_membership, 1)
     assert dialog._execute_membership.selected_ids() == [run.id, later.id]
 
-    dialog._container_membership._list.setCurrentRow(0)
-    dialog._container_membership._on_remove()
+    click_row(dialog._container_membership, 0)
     assert dialog._container_membership.selected_ids() == [extra.id]
 
     dialog.accept()

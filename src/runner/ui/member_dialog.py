@@ -149,6 +149,8 @@ class MemberPickerDialog(StayOnTopDialog):
     NOUN = "Group"
     NOTE = ""
     COLUMNS: tuple[str, ...] = ("Launcher",)
+    # Hover help for each column heading, in COLUMNS order.
+    COLUMN_TIPS: tuple[str, ...] = ("Tick a launcher to include it. Drag a ticked one to reorder.",)
     SIZE = (680, 480)
     ROW_HEIGHT = 34
     # Cells in a row that fade while that row is lifted.
@@ -186,6 +188,10 @@ class MemberPickerDialog(StayOnTopDialog):
 
         self._table = QTableWidget(0, len(self.COLUMNS), self)
         self._table.setHorizontalHeaderLabels(list(self.COLUMNS))
+        for column, tip in enumerate(self.COLUMN_TIPS):
+            header_item = self._table.horizontalHeaderItem(column)
+            if header_item is not None and tip:
+                header_item.setToolTip(tip)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         self._table.setAlternatingRowColors(True)
@@ -197,19 +203,22 @@ class MemberPickerDialog(StayOnTopDialog):
         for column in range(1, len(self.COLUMNS)):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
 
-        add_button = QPushButton("Add new Launcher")
+        add_button = QPushButton("Add Launcher…")
+        add_button.setAutoDefault(False)
         add_button.clicked.connect(self._on_add_launcher)
         save_button = QPushButton("Save")
         save_button.setDefault(True)
         save_button.clicked.connect(self.accept)
         cancel_button = QPushButton("Cancel")
+        cancel_button.setAutoDefault(False)
         cancel_button.clicked.connect(self.reject)
 
+        # Cancel before Save, the way every other Runner dialog has them.
         buttons = QHBoxLayout()
         buttons.addWidget(add_button)
         buttons.addStretch(1)
-        buttons.addWidget(save_button)
         buttons.addWidget(cancel_button)
+        buttons.addWidget(save_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Name:"))

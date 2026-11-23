@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
-    QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import ConfigManager
+from .manage_list import ManageList, keep_buttons_in_step
 from .stay_on_top import StayOnTopDialog, question
 
 
@@ -27,6 +27,7 @@ class GroupListManagerDialog(StayOnTopDialog):
     # Set by each subclass.
     TITLE = "Manage Groups"
     DELETE_TITLE = "Delete Group"
+    EMPTY_TEXT = "Nothing here yet. Press Add New… to make one."
 
     def __init__(self, cfg: ConfigManager, parent=None) -> None:
         super().__init__(parent)
@@ -35,15 +36,13 @@ class GroupListManagerDialog(StayOnTopDialog):
         self._cfg = cfg
         self._groups = list(self._saved())
 
-        self._list = QListWidget()
-        self._list.setAlternatingRowColors(True)
-        self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list = ManageList(self.EMPTY_TEXT)
 
-        self._btn_edit = QPushButton("Edit...")
+        self._btn_edit = QPushButton("Edit…")
         self._btn_delete = QPushButton("Delete")
         self._btn_up = QPushButton("Move Up")
         self._btn_down = QPushButton("Move Down")
-        self._btn_add = QPushButton("Add New...")
+        self._btn_add = QPushButton("Add New…")
 
         self._btn_edit.clicked.connect(self._on_edit)
         self._btn_delete.clicked.connect(self._on_delete)
@@ -74,6 +73,7 @@ class GroupListManagerDialog(StayOnTopDialog):
         outer.addLayout(bottom)
 
         self._refresh_list()
+        keep_buttons_in_step(self._list, self._btn_edit, self._btn_delete, self._btn_up, self._btn_down, self._btn_add)
 
     # ---------------------------------------------------- subclass hooks
 
