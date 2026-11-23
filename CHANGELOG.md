@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - Per-launcher icons (auto + custom).
 
+## [1.1.1] - 2026-11-23
+
+### Added
+- The date dial prints the full date and time it shows underneath it, for example "Tuesday 24 November 2026 · 09:30", and updates it as the rings turn.
+
+### Fixed
+- The launcher screen puts **Cancel** before **Save** on Windows and Linux too, as it does on macOS.
+
 ## [1.1.0] - 2026-11-23
 
 ### Changed
