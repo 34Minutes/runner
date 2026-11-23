@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.1.0] - 2026-11-23
+
 ### Changed
 - Add, Edit, and Manage windows, message boxes, and the date and repeat pickers follow the colour scheme (Dark, Medium, Bright) like the lists do, instead of the system's light look.
 - One button order everywhere: **Cancel** then **Save**. Menu rows and buttons that open a window end in …, and labels use one capitalisation (**Add Launcher…**, **Manage Launchers…**, **Only in Groups**).
@@ -16,9 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Schedule rows line up whether or not they carry the "next" tag. **Concurrent** and **Only in Groups** explain themselves on hover.
 - Container groups can be dragged into a new order in **Show Container Groups**, and that order is saved. A container row only changes place; it can't be dropped into another container group, and other containers' submenus stay shut while one is dragged.
 - The container group screen's switches no longer repeat "Only in Container Group" on every row; the column heading says it once.
-
-### Planned
-- Per-launcher icons (auto + custom).
 
 ## [1.0.14] - 2026-11-22
 
