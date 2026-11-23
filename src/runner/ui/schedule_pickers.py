@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ..config import ScheduleEntry
+from ..schedule import format_full
 from . import theme
 from .date_dial import MetalDial
 from .interval_roller import PLACES, IntervalRoller, digits
@@ -42,15 +43,23 @@ class DatePickerDialog(StayOnTopDialog):
         super().__init__(parent)
         self.setWindowTitle("Choose date and time")
         self.setModal(True)
-        self.resize(480, 540)
+        self.resize(480, 580)
         self._chosen: datetime | None = None
         self.dial = MetalDial(when or next_quarter_hour(), scheme=theme.current())
         self.dial.selected.connect(self._choose)
+        # The full date the dial shows, kept up to date as the rings turn.
+        self.readout = QLabel(format_full(self.dial.value()))
+        self.readout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dial.changed.connect(lambda when: self.readout.setText(format_full(when)))
         hint = QLabel("Turn the rings to the date and time, then press the centre to choose it.")
         layout = QVBoxLayout(self)
         layout.addWidget(self.dial, 1)
+        layout.addWidget(self.readout)
         layout.addWidget(hint)
         _style(self, hint, self.dial.palette_.background.name())
+        self.readout.setStyleSheet(
+            f"color: {self.dial.palette_.accent.name()}; font-size: 20px; font-weight: 600;"
+        )
         self.dial.setFocus()
 
     @property

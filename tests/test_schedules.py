@@ -357,6 +357,14 @@ def test_pressing_the_dial_centre_chooses_the_date(qapp, qtbot):
     assert dialog.result() == dialog.DialogCode.Accepted
 
 
+def test_the_full_date_under_the_dial_follows_the_rings(qapp, qtbot):
+    dialog = DatePickerDialog(datetime(2026, 11, 24, 9, 30))
+    qtbot.addWidget(dialog)
+    assert dialog.readout.text() == "Tuesday 24 November 2026 · 09:30"
+    dialog.dial.set_value(datetime(2027, 3, 5, 18, 5))
+    assert dialog.readout.text() == "Friday 5 March 2027 · 18:05"
+
+
 def test_the_select_key_and_dont_repeat_choose_the_interval(qapp, qtbot):
     entry = _entry(datetime(2026, 1, 1), weeks=1, hours=6)
     dialog = IntervalPickerDialog(entry_total(entry))

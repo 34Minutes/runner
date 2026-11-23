@@ -100,6 +100,11 @@ def format_when(when: datetime, *, with_year: bool = True) -> str:
     return f"{when:%a} {when.day} {when:%b}{year} · {when:%H:%M}"
 
 
+def format_full(when: datetime) -> str:
+    """'Tuesday 24 November 2026 · 09:30', written out in full under the dial."""
+    return f"{when:%A} {when.day} {when:%B} {when.year} · {when:%H:%M}"
+
+
 def scheduled_groups(groups: list[Group]) -> list[Group]:
     return [group for group in groups if group.scheduled]
 
