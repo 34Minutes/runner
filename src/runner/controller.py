@@ -44,7 +44,7 @@ from .config import (
 from .elevation import warn_if_elevated
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .launcher import launch
-from .moves import member_launchers, visible_main_tokens
+from .moves import container_token, member_launchers, merge_visible_order, visible_main_tokens
 from .schedule import execute_groups, format_when, group_next_run, scheduled_groups
 from .scheduler import Scheduler
 from .ui.add_dialog import AddEditDialog
@@ -297,6 +297,9 @@ class RunnerController:
         # Container rows on their own, drawn as they are in the main popup.
         self.container_list.set_list_copy(placeholder="Filter container groups...", empty_hint="")
         self.container_list.set_heading("Container Groups")
+        # Its rows are all container rows, which only drag in a mixed list.
+        # It has no peers, so a row can only change place, never go into another.
+        self.container_list.set_mix_rows(True)
 
         # Scheduled execute groups, each with its next run. A click edits it.
         self.schedule_list.set_list_copy(placeholder="Filter schedules...", empty_hint="")
@@ -441,6 +444,7 @@ class RunnerController:
         dropdown.submenu_delete_requested.connect(self._on_container_delete)
         self.container_list.submenu_edit_requested.connect(self._on_container_edit)
         self.container_list.submenu_delete_requested.connect(self._on_container_delete)
+        self.container_list.rows_reordered.connect(self._on_container_list_reordered)
         container.reordered.connect(self._on_container_reordered)
         execute.reordered.connect(self._on_execute_members_reordered)
 
@@ -1124,10 +1128,24 @@ class RunnerController:
                 self._execute_host(), button, prefer_right=self._execute_prefer_right()
             )
 
+    def _on_container_list_reordered(self, tokens: list[str]) -> None:
+        """Container Groups was reordered by drag. Save it as the container order."""
+        prefix = container_token("")
+        moved = [token[len(prefix):] for token in tokens if token.startswith(prefix)]
+        # A filter can hide rows. Those keep their places; only the shown ones move.
+        shown = set(moved)
+        current = [group.id for group in self.cfg.config.container_groups]
+        self.cfg.reorder_container_groups(merge_visible_order([(gid, gid in shown) for gid in current], moved))
+
     def _show_container_menu(self, group_id: str, *, force: bool = False) -> None:
         menu, panel = self.container_menu, self.container_panel
         # This panel is the source while a launcher is dragged out of it.
         if panel.is_dragging():
+            return
+        # A container row being dragged only changes place. Opening another
+        # container's submenu under it would offer a drop it cannot make.
+        if any(lst.dragging_submenu() for lst in (self.dropdown, self.container_list)):
+            menu.hide()
             return
         host = self._container_host()
         group = self._container_by_id(group_id)

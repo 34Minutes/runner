@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The launcher screen: fields use the window's full width; **Run as administrator** and **Show console window** show only on Windows; **Include in dropdown list** sits under the fields; group membership is a tick list per kind, with schedules marked "(schedule)".
 - Manage windows: **Edit**, **Delete**, and **Move** are greyed out until a row is selected, none of them acts as the default button, and an empty list says so.
 - Schedule rows line up whether or not they carry the "next" tag. **Concurrent** and **Only in Groups** explain themselves on hover.
+- Container groups can be dragged into a new order in **Show Container Groups**, and that order is saved. A container row only changes place; it can't be dropped into another container group, and other containers' submenus stay shut while one is dragged.
 - The container group screen's switches no longer repeat "Only in Container Group" on every row; the column heading says it once.
 
 ### Planned

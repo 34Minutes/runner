@@ -612,3 +612,51 @@ def test_a_late_leave_from_the_closed_main_list_keeps_the_container_list(qapp, q
         assert ctl.container_list.isVisible()
     finally:
         _close_all(ctl)
+
+
+def test_container_list_rows_drag_to_a_new_place_and_save(qapp, qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import QEvent
+
+    from tests.test_menu_drag import _send_mouse
+
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    try:
+        ctl.trigger.show()
+        ctl._show_container_list()
+        qtbot.waitUntil(lambda: ctl.container_list.isVisible(), timeout=2000)
+        ctl.container_list.update_height_for_content()
+        qapp.processEvents()
+        projects_id, notes_id = (group.id for group in ctl.cfg.config.container_groups)
+        projects = ctl.container_list.submenu_button(projects_id)
+        notes = ctl.container_list.submenu_button(notes_id)
+        start = projects.mapToGlobal(projects.rect().center())
+        below = notes.mapToGlobal(notes.rect().bottomLeft())
+        below.setY(below.y() + 6)
+        try:
+            _send_mouse(projects, QEvent.Type.MouseButtonPress, start, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+            _send_mouse(projects, QEvent.Type.MouseMove, below, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+            assert ctl.container_list.dragging_submenu() is True
+            # Passing over another container does not open its submenu to drop into.
+            ctl._show_container_menu(notes_id)
+            assert ctl.container_panel.isVisible() is False
+            _send_mouse(projects, QEvent.Type.MouseButtonRelease, below, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+        finally:
+            ctl.container_list._cancel_drag()
+        assert [group.name for group in ctl.cfg.config.container_groups] == ["Notes", "Projects"]
+        # Both are still their own groups, each with its one launcher.
+        assert [len(group.members) for group in ctl.cfg.config.container_groups] == [1, 1]
+    finally:
+        _close_all(ctl)
+
+
+def test_container_list_reorder_keeps_filtered_out_rows_in_place(qapp, monkeypatch, tmp_path):
+    ctl = _controller(qapp, monkeypatch, tmp_path)
+    try:
+        extra = ContainerGroup.new("Extra")
+        ctl.cfg.config.container_groups.append(extra)
+        projects, notes, _ = (group.id for group in ctl.cfg.config.container_groups)
+        # Only Projects and Extra were shown (a filter hid Notes); Extra moved above Projects.
+        ctl._on_container_list_reordered([f"container:{extra.id}", f"container:{projects}"])
+        assert [group.id for group in ctl.cfg.config.container_groups] == [extra.id, notes, projects]
+    finally:
+        _close_all(ctl)
