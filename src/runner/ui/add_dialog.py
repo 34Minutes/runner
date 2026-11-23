@@ -13,7 +13,6 @@ import sys
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -157,14 +156,19 @@ class AddEditDialog(StayOnTopDialog):
         )
         self._load_membership(launcher)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        if ok_button is not None:
-            ok_button.setText("Save")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        # Laid out by hand, not with QDialogButtonBox: that follows each
+        # platform's order, which puts Save first on Windows and Linux. Every
+        # Runner dialog has Cancel then Save.
+        save_button = QPushButton("Save")
+        save_button.setDefault(True)
+        save_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setAutoDefault(False)
+        cancel_button.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(save_button)
         for button in (self._browse_btn, self._browse_dir_btn):
             button.setAutoDefault(False)
 
@@ -196,7 +200,7 @@ class AddEditDialog(StayOnTopDialog):
         main_layout.addSpacing(4)
         main_layout.addWidget(self._execute_membership)
         main_layout.addStretch(1)
-        main_layout.addWidget(buttons)
+        main_layout.addLayout(buttons)
 
         for field in (self._name_edit, self._command_edit, self._args_edit, self._work_dir_edit):
             field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
