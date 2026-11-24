@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `runner ctl`: other programs, such as scripts or an LLM, can add, change and delete their own launchers, execute groups and container groups. It talks to the running Runner over its private socket, or edits the config file when Runner is closed. Items made in Runner can't be changed from outside, nothing is run from outside, and only you can switch a schedule on. See the README.
+
+### Fixed
+- Running the test suite no longer removes a running Runner's socket. Before this, opening Runner again after a test run could start a second copy.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 

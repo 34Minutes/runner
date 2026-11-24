@@ -68,6 +68,52 @@ On macOS and Linux only you can read the file (0600), because launcher arguments
 
 You can edit the JSON or use the in-app dialogs. Launchers, execute groups, and container groups are in that file. The config version is 2; a version 1 file is converted when Runner loads it.
 
+## Changing Runner from other programs (`runner ctl`)
+
+Scripts and LLM tools can add, change and delete launchers, execute groups and container groups without opening Runner's windows. `runner ctl` talks to the running Runner over its private socket (only your user account can open it). When Runner isn't running it edits the config file directly, with the same rules.
+
+```bash
+runner ctl --as claude launcher upsert --name "Build & deploy" --command ~/Projects/runner/scripts/build-mac.sh --args=--deploy --cwd ~/Projects/runner
+runner ctl --as claude group upsert --name Release --launcher "Build & deploy"
+runner ctl --as claude --json launcher list --mine
+runner ctl guide
+```
+
+`runner ctl guide` prints the full guide ([src/runner/ctl_guide.md](src/runner/ctl_guide.md)): the rules, every command and field, the JSON requests, exit codes, pitfalls and examples. It is written so an LLM can follow it on its own. `--help` after any command lists its options.
+
+The rules, because a launcher is a command Runner runs:
+
+- Every change is made as a source (`--as`, default `cli`). Only that source can change or delete what it made. Anything made in Runner itself can't be changed from outside.
+- Nothing here runs a launcher or a group. Running stays with you.
+- A launcher can't be set to run as administrator from outside.
+- A group can be given dates, but only you can turn its Schedule switch on. A scheduled group, and the command of any launcher one runs, can't be changed until you turn the schedule off.
+- While a Runner window is open, changes are refused (reads still work), so the window can't save over them.
+
+### Putting `runner` on the PATH
+
+The Mac app's own program does `runner ctl`. Link it into a folder on your PATH once, and `runner ctl` works from any terminal and for any LLM tool:
+
+```bash
+mkdir -p ~/.local/bin && ln -sf /Applications/Runner.app/Contents/MacOS/Runner ~/.local/bin/runner
+```
+
+In a development install, `.venv/bin/runner` and `.venv/bin/runner-ctl` do the same. The Windows `.exe` is built without a console, so it doesn't print `runner ctl` output; use a development install there for now.
+
+### Telling your LLM about it
+
+An LLM working in another project won't know Runner exists. Paste this into its standing instructions: for Claude Code, your global `~/.claude/CLAUDE.md`; for other tools, their custom or system instructions.
+
+```markdown
+## Runner (my desktop launcher)
+I use Runner, a launcher app, to start programs, scripts, files and URLs with one click.
+When I ask for a launcher, a button, a shortcut or a one-click way to run something,
+make it in Runner with `runner ctl` (if `runner` isn't found:
+`/Applications/Runner.app/Contents/MacOS/Runner ctl`).
+- Before your first use in a session, run `runner ctl guide` and follow it.
+- Always pass `--as claude` (your own name), use `upsert`, and use absolute paths.
+- You can't run what you make. Tell me its name and whether it's a launcher or a group.
+```
+
 ## Installation (development)
 
 ```bash

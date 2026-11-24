@@ -6,7 +6,7 @@ windows to RunnerController.
 
 from __future__ import annotations
 
-import hashlib
+import json
 import os
 import sys
 from collections.abc import Callable
@@ -16,8 +16,10 @@ from PySide6.QtCore import QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
+from . import instance
 from .config import ConfigManager, Launcher
 from .controller import RunnerController
+from .instance import MAX_REQUEST_BYTES, REQUEST_TIMEOUT_MS, SINGLE_INSTANCE_SERVER, _single_instance_name  # noqa: F401
 from .ui.theme import use
 
 if sys.platform == "win32":
@@ -25,32 +27,6 @@ if sys.platform == "win32":
 else:
     win_utils = None  # type: ignore
 
-def _single_instance_name() -> str:
-    """Where the single-instance socket lives. Private to this user.
-
-    The name carries a hash of the user name, so two people signed in to one
-    machine each get their own Runner. On Linux the socket goes in
-    XDG_RUNTIME_DIR, a folder only this user can open; the shared /tmp would
-    let another user claim the name first and stop Runner from starting.
-    macOS already puts it in the per-user TMPDIR. On Windows it is a named
-    pipe, and the session mutex decides which copy runs.
-    """
-    try:
-        import getpass
-
-        user = getpass.getuser()
-    except (ImportError, KeyError, OSError):
-        user = str(os.getuid()) if hasattr(os, "getuid") else "user"
-    digest = hashlib.sha256(user.encode("utf-8")).hexdigest()[:12]
-    name = f"Runner_SingleInstance_v2_{digest}"
-    if sys.platform.startswith("linux"):
-        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
-        if runtime and os.path.isdir(runtime):
-            return os.path.join(runtime, name)
-    return name
-
-
-SINGLE_INSTANCE_SERVER = _single_instance_name()
 
 
 def _start_in_home_folder() -> None:
@@ -108,8 +84,15 @@ def _signal_running_copy() -> bool:
     return True
 
 
-def _listen_for_other_copies(on_show: Callable[[], None]) -> QLocalServer:
-    """Any later copy connects here. Any message means 'show yourself'."""
+def _listen_for_other_copies(
+    on_show: Callable[[], None],
+    on_request: Callable[[object], dict] | None = None,
+) -> QLocalServer:
+    """Later copies and `runner ctl` connect here.
+
+    A message that starts with "{" is a JSON request for on_request, answered
+    on the same connection. Anything else, or nothing, means "show yourself".
+    """
     server = QLocalServer()
     # Only this user can connect.
     server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
@@ -121,15 +104,86 @@ def _listen_for_other_copies(on_show: Callable[[], None]) -> QLocalServer:
             file=sys.stderr,
         )
 
+    clients: set[_Client] = set()
+    server._clients = clients  # each lives until it is answered or hangs up
+
     def on_new_connection() -> None:
         while server.hasPendingConnections():
-            client = server.nextPendingConnection()
-            client.readAll()
-            client.close()
-            on_show()
+            clients.add(_Client(server.nextPendingConnection(), on_show, on_request, clients))
 
     server.newConnection.connect(on_new_connection)
     return server
+
+
+class _Client:
+    """One connection: a JSON request to answer, or a later copy to show for."""
+
+    def __init__(self, socket: QLocalSocket, on_show, on_request, clients: set) -> None:
+        self.socket, self.on_show, self.on_request = socket, on_show, on_request
+        self.clients = clients
+        self.buffer = bytearray()
+        self.done = False
+        socket.readyRead.connect(self._read)
+        socket.disconnected.connect(self._gone)
+        QTimer.singleShot(instance.REQUEST_TIMEOUT_MS, self._time_up)
+        self._read()
+
+    def _read(self) -> None:
+        if self.done:
+            return
+        self.buffer += bytes(self.socket.readAll().data())
+        if not self.buffer:
+            return
+        if not self.buffer.lstrip().startswith(b"{"):
+            self._show()
+            return
+        if len(self.buffer) > MAX_REQUEST_BYTES:
+            self._answer({"ok": False, "error": "That request is too big."})
+        elif b"\n" in self.buffer:
+            line = bytes(self.buffer).split(b"\n", 1)[0]
+            try:
+                request = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError) as exc:
+                self._answer({"ok": False, "error": f"Not JSON: {exc}"})
+                return
+            if self.on_request is None:
+                self._answer({"ok": False, "error": "Runner is still starting. Try again."})
+                return
+            try:
+                reply = self.on_request(request)
+            except Exception as exc:  # noqa: BLE001 - one bad request must not take Runner down
+                reply = {"ok": False, "error": f"Runner could not do that: {exc}"}
+            self._answer(reply)
+
+    def _answer(self, reply: dict) -> None:
+        self.done = True
+        self.socket.write(json.dumps(reply, ensure_ascii=False).encode("utf-8") + b"\n")
+        self.socket.flush()
+        self.socket.disconnectFromServer()
+
+    def _show(self) -> None:
+        self.done = True
+        self.socket.close()
+        self.on_show()
+
+    def _gone(self) -> None:
+        # An older copy may write "show" and hang up before it is read.
+        try:
+            if not self.done:
+                self.buffer += bytes(self.socket.readAll().data())
+                if not self.buffer.lstrip().startswith(b"{"):
+                    self._show()
+                self.done = True
+            self.socket.deleteLater()
+        except RuntimeError:  # Qt already deleted the socket, at shutdown
+            self.done = True
+        self.clients.discard(self)
+
+    def _time_up(self) -> None:
+        if not self.done:
+            self.done = True
+            self.socket.abort()
+        self.clients.discard(self)
 
 
 def _test_quit_ms(argv: list[str]) -> int:
@@ -143,6 +197,10 @@ def _test_quit_ms(argv: list[str]) -> int:
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "ctl":
+        from .ctl import main as ctl_main
+
+        return ctl_main(sys.argv[2:])
     _start_in_home_folder()
     app = QApplication(sys.argv)
 
@@ -162,7 +220,12 @@ def main() -> int:
         if controller is not None:
             controller.bring_forward()
 
-    server = _listen_for_other_copies(show_running_copy)
+    def answer_request(request: object) -> dict:
+        if controller is None:
+            return {"ok": False, "error": "Runner is still starting. Try again."}
+        return controller.answer_outside_request(request)
+
+    server = _listen_for_other_copies(show_running_copy, answer_request)
     app._local_server = server  # keep the server alive with the app
 
     app.setApplicationName("Runner")

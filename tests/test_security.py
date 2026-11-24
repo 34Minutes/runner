@@ -66,6 +66,8 @@ def test_single_instance_server_is_owner_only(qapp, monkeypatch):
             return True  # never touch the real socket
 
     monkeypatch.setattr(main_mod, "QLocalServer", Recording)
+    # Not the real name: removing a stale socket would cut off the Runner in use.
+    monkeypatch.setattr(main_mod, "SINGLE_INSTANCE_SERVER", "RunnerTest_owner_only")
     main_mod._listen_for_other_copies(lambda: None)
     assert created[0].socketOptions() & QLocalServer.SocketOption.UserAccessOption
 

@@ -45,6 +45,7 @@ from .elevation import warn_if_elevated
 from .groups import GROUP_STEP_GAP_MS, execution_steps, run_group_steps
 from .launcher import launch
 from .moves import container_token, member_launchers, merge_visible_order, visible_main_tokens
+from .api import RunnerApi, is_write
 from .schedule import execute_groups, format_when, group_next_run, scheduled_groups
 from .scheduler import Scheduler
 from .ui.add_dialog import AddEditDialog
@@ -1701,6 +1702,29 @@ class RunnerController:
         self.trigger.show()
         self.trigger.raise_()
         self.trigger.activateWindow()
+
+    # ------------------------------------------------- outside requests
+
+    def answer_outside_request(self, request: object) -> dict:
+        """A request from `runner ctl`, through the private socket. See runner.api."""
+        if is_write(request) and QApplication.activeModalWidget() is not None:
+            # A dialog holds its own copy of what it edits and would save over the change.
+            return {
+                "ok": False,
+                "error": "Runner has a window open. Close it in Runner, then try again.",
+            }
+        self.flush_pending_save()
+        outcome = RunnerApi(self.cfg).execute(request)
+        if outcome.changed:
+            self._after_outside_change()
+        return outcome.reply
+
+    def _after_outside_change(self) -> None:
+        fill_main_dropdown(self.dropdown, self.cfg)
+        self._refresh_open_list()
+        if self.container_menu.open_id and self._container_by_id(self.container_menu.open_id) is None:
+            self.container_menu.hide()
+        self._sync_groups_after_change()
 
     # -------------------------------------------------------------- reload
 

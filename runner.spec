@@ -195,7 +195,8 @@ a = Analysis(
     pathex=["src", "scripts"],
     binaries=[],
     # Runner's license and the third-party notices travel with every build.
-    datas=[("LICENSE", "."), ("THIRD-PARTY-NOTICES.txt", ".")],
+    # ctl_guide.md is what `runner ctl guide` prints.
+    datas=[("LICENSE", "."), ("THIRD-PARTY-NOTICES.txt", "."), ("src/runner/ctl_guide.md", "runner")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

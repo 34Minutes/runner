@@ -44,6 +44,10 @@ class Launcher:
     working_dir: str | None = None
     run_as_admin: bool = False
     show_console: bool = False
+    # Set when a program outside Runner made it through `runner ctl`: the name
+    # that program gave. Only that program may change or delete it from
+    # outside. None for everything made in Runner itself.
+    source: str | None = None
 
     @classmethod
     def new(cls, name: str, command: str, **kwargs: Any) -> Launcher:
@@ -107,6 +111,7 @@ class Group:
     # A scheduled group's row in the Schedules list: a click opens it for
     # editing (the default), or runs it now when this is on.
     click_runs: bool = False
+    source: str | None = None  # see Launcher.source
 
     @classmethod
     def new(cls, name: str, members: list[GroupMember] | None = None) -> Group:
@@ -127,6 +132,7 @@ class ContainerGroup:
     id: str
     name: str
     members: list[ContainerMember] = field(default_factory=list)
+    source: str | None = None  # see Launcher.source
 
     @classmethod
     def new(cls, name: str, members: list[ContainerMember] | None = None) -> ContainerGroup:
