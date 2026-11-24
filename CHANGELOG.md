@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Help** on the arrow's right-click menu, above Exit: a guide to using Runner, and to setting other projects up for it.
+- `runner project`: any code project can have **Build**, **Merge**, **Push** and **Release** launchers. The project describes itself in `.runner/project.toml` (`runner project init` writes one, `runner project check` says what's missing, `runner project launchers` makes the launchers), and the scripts ship inside Runner, so they work the same everywhere. `runner project guide` explains it for LLMs.
+
+### Changed
+- Runner's own push, merge and release scripts are now the shared `runner project` scripts, set up by `.runner/project.toml`. Script logs moved to `~/Library/Logs/Runner/scripts/`. `scripts/build-mac.sh` no longer sends its own notification; `runner project build` does.
+
 ### Planned
 - Per-launcher icons (auto + custom).
 

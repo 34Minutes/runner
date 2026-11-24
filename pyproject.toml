@@ -45,7 +45,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"runner" = ["assets/*", "ctl_guide.md"]
+"runner" = ["assets/*", "ctl_guide.md", "project_guide.md", "help.md", "project_scripts/*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

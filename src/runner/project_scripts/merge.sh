@@ -1,29 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
-# Fast-forward main to the branch you're on, then switch to main.
-#
-# Usage: ./scripts/merge.sh [--into BRANCH]   (default: main)
+# Fast-forward the main branch to the branch you're on, then switch to it.
+# Run it as: runner project merge
 #
 # Only a fast-forward: main must not have moved on since the branch began.
 # Anything else stops with the reason and changes nothing: you're on main
 # already, uncommitted changes, nothing new on the branch, or main has
-# commits the branch lacks (rebase it first). Nothing is pushed. A
-# notification says how it ended; the run is logged to
-# ~/Library/Logs/Runner Scripts/merge.log.
+# commits the branch lacks (rebase it first). Nothing is pushed.
 
-target="main"
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --into) target="${2:?--into needs a branch}"; shift 2 ;;
-    -h|--help) sed -n '4,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
-  esac
-done
-
-source "$(dirname "${BASH_SOURCE[0]}")/lib/run.sh"
-start_run "Runner merge" merge
-cd "$REPO_ROOT"
+source "$(dirname "${BASH_SOURCE[0]}")/run.sh"
+start_run merge
+target="$RUNNER_MAIN_BRANCH"
 
 STEP="Checking the branches"
 branch="$(git symbolic-ref --short -q HEAD)" || fail "Not on a branch. Switch to the branch you want to merge."

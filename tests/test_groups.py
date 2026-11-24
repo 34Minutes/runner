@@ -401,13 +401,14 @@ def test_arrow_menu_puts_group_actions_above_exit(qapp, qtbot):
         "Schedules",
     ]
     assert labels[5:8] == ["Execute Groups", "Container Groups", "---"]
-    assert labels[-7:] == [
+    assert labels[-8:] == [
         "---",
         "Opacity",
         "Decay rate",
         "---",
         "Color Schemes",
         "---",
+        "Help",
         "Exit",
     ]
     submenus = {

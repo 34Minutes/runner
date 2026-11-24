@@ -15,8 +15,6 @@ downloads/
 eggs/
 .eggs/
 lib/
-# ...but not the shell helpers the scripts share.
-!scripts/lib/
 lib64/
 parts/
 sdist/

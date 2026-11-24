@@ -92,13 +92,14 @@ def test_color_schemes_item_sits_above_exit_on_the_arrow_menu(qapp, qtbot):
         for action in menu.actions()
         if action.isSeparator() or action.text()
     ]
-    assert labels[-7:] == [
+    assert labels[-8:] == [
         "---",
         "Opacity",
         "Decay rate",
         "---",
         "Color Schemes",
         "---",
+        "Help",
         "Exit",
     ]
     scheme_action = next(action for action in menu.actions() if action.text() == "Color Schemes")

@@ -249,6 +249,7 @@ class TriggerWidget(QWidget):
     request_add_container = Signal()
     request_manage_containers = Signal()
     request_reset = Signal()
+    request_help = Signal()
     request_exit = Signal()
     color_scheme_selected = Signal(str)
     pin_toggled = Signal(bool)
@@ -354,6 +355,9 @@ class TriggerWidget(QWidget):
 
         self._action_manage_containers = QAction("Manage Container Groups…", self)
         self._action_manage_containers.triggered.connect(self.request_manage_containers.emit)
+
+        self._action_help = QAction("Help", self)
+        self._action_help.triggered.connect(self.request_help.emit)
 
         self._action_exit = QAction("Exit", self)
         self._action_exit.triggered.connect(self.request_exit.emit)
@@ -483,6 +487,7 @@ class TriggerWidget(QWidget):
         menu.addMenu(scheme_menu)
 
         menu.addSeparator()
+        menu.addAction(self._action_help)
         menu.addAction(self._action_exit)
 
         # Auto-hide the entire menu when the mouse moves away from it (no click required to dismiss).

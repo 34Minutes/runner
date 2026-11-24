@@ -8,6 +8,10 @@ with a click.
 
 Print this guide any time with `runner ctl guide`.
 
+**Setting up a code project** with Build, Merge, Push and Release launchers?
+That has its own guide and commands: `runner project guide`. Use this guide
+for launchers and groups in general.
+
 ## Before you start
 
 1. **Find the command.** Try these in order and use the first that works:

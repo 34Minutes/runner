@@ -89,6 +89,19 @@ The rules, because a launcher is a command Runner runs:
 - A group can be given dates, but only you can turn its Schedule switch on. A scheduled group, and the command of any launcher one runs, can't be changed until you turn the schedule off.
 - While a Runner window is open, changes are refused (reads still work), so the window can't save over them.
 
+### Project scripts (`runner project`)
+
+`runner project` gives a code project four launchers, **Build**, **Merge**, **Push** and **Release**, run by scripts that ship inside Runner ([src/runner/project_scripts/](src/runner/project_scripts/)). A project describes itself in `.runner/project.toml`: its main branch, remote, version file, changelog, and lint, test and build commands. Runner's own file is [.runner/project.toml](.runner/project.toml).
+
+```bash
+runner project init                    # write .runner/project.toml with what it detects
+runner project check                   # ok / note / FIX for each part, until "Ready."
+runner project launchers --as claude   # a "<name> Scripts" container with the launchers
+runner project guide                   # the full guide, written for LLMs
+```
+
+Each script checks first and stops with the reason rather than guessing, logs each run to `~/Library/Logs/Runner/scripts/<name>/`, and ends with a notification. They need bash, so macOS and Linux only. **Help** on the arrow's right-click menu explains all of this for people.
+
 ### Putting `runner` on the PATH
 
 The Mac app's own program does `runner ctl`. Link it into a folder on your PATH once, and `runner ctl` works from any terminal and for any LLM tool:
@@ -109,9 +122,11 @@ I use Runner, a launcher app, to start programs, scripts, files and URLs with on
 When I ask for a launcher, a button, a shortcut or a one-click way to run something,
 make it in Runner with `runner ctl` (if `runner` isn't found:
 `/Applications/Runner.app/Contents/MacOS/Runner ctl`).
+When I ask to set a project up for Runner, or for build, merge, push or release
+launchers, follow `runner project guide`.
 - Before your first use in a session, run `runner ctl guide` and follow it.
 - Always pass `--as claude` (your own name), use `upsert`, and use absolute paths.
-- You can't run what you make. Tell me its name and whether it's a launcher or a group.
+- You can't run what you make. Tell me its name and where to find it in Runner.
 ```
 
 ## Installation (development)

@@ -55,6 +55,7 @@ from .ui.dropdown import DropdownPanel, LockedPairMotion, SubmenuButton
 from .ui.greeting import StartupGreeting, clamp_trigger_to_screen, ensure_visible_trigger_size
 from .ui.group_dialog import GroupDialog
 from .ui.group_manager import GroupManagerDialog, ScheduleManagerDialog
+from .ui.help_dialog import HelpWindow
 from .ui.launch_button import LaunchButton
 from .ui.manager_dialog import ManagerDialog
 from .ui.stay_on_top import on_dialog_open
@@ -249,6 +250,7 @@ class RunnerController:
         self._arrow_dragging = False
 
         self._build_widgets()
+        self.help_window: HelpWindow | None = None
         # Started once the arrow is up. Runs missed while Runner was closed are skipped.
         self.scheduler = Scheduler(lambda: self.cfg.config.groups, self._run_scheduled)
         self._place_trigger_on_start()
@@ -464,6 +466,7 @@ class RunnerController:
         trigger.request_add.connect(lambda: self.show_add_dialog())
         trigger.request_manage.connect(self.show_manager_dialog)
         trigger.request_reset.connect(self.reset_position_and_size)
+        trigger.request_help.connect(self.show_help)
         trigger.request_exit.connect(self.app.quit)
         trigger.request_add_group.connect(lambda: self.show_group_dialog())
         trigger.request_manage_groups.connect(self.show_group_manager)
@@ -1702,6 +1705,16 @@ class RunnerController:
         self.trigger.show()
         self.trigger.raise_()
         self.trigger.activateWindow()
+
+    # -------------------------------------------------------------- help
+
+    def show_help(self) -> None:
+        """The Help window, from the arrow menu. One at a time; a second Help brings it forward."""
+        if self.help_window is None:
+            self.help_window = HelpWindow(self.trigger)
+        self.help_window.show()
+        self.help_window.raise_()
+        self.help_window.activateWindow()
 
     # ------------------------------------------------- outside requests
 
