@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.1.2] - 2026-11-24
+
 ### Added
 - A schedule can be set to run when clicked in the Schedules list instead of opening for editing (a switch in its dialog, under the Schedule switch). Right-click Edit still opens it.
 - The date dial has a Minutes switch and a Now button in its top-left corner. Minutes hides the minute ring so times land on the hour, and is remembered. Now spins every ring back to the current date and time.
 - The written-out date under the dial can be typed over. Press Enter and the dial spins to it; a date it can't read is explained underneath.
-
-### Planned
-- Per-launcher icons (auto + custom).
 
 ## [1.1.1] - 2026-11-23
 
