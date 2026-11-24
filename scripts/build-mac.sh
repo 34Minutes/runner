@@ -9,7 +9,9 @@ set -euo pipefail
 #   ./scripts/build-mac.sh --skip-tests  build without the lint check and tests first
 #
 # Works from any folder. The version comes from pyproject.toml; runner.spec
-# reads the same value for the bundle's Info.plist.
+# reads the same value for the bundle's Info.plist. A macOS notification says
+# when it finishes, or which step failed, for runs started without a terminal
+# (for example from a Runner launcher).
 
 DEPLOY=0
 RUN_TESTS=1
@@ -18,7 +20,7 @@ for arg in "$@"; do
     --deploy) DEPLOY=1 ;;
     --skip-tests) RUN_TESTS=0 ;;
     -h|--help)
-      sed -n '4,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '4,14p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -27,6 +29,24 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+# ------------------------------------------------------------ notifications
+
+# Run from a Runner launcher this script has no terminal, and --deploy quits
+# Runner partway through, so the script reports how it ended itself.
+STEP="Starting"
+notify() {
+  local title="$1" message="$2"
+  # Quotes would end the AppleScript string early.
+  title="${title//\"/\'}"
+  message="${message//\"/\'}"
+  osascript -e "display notification \"$message\" with title \"$title\"" >/dev/null 2>&1 || true
+}
+on_failure() {
+  local code=$?
+  notify "Runner build failed" "$STEP failed (exit $code). Run scripts/build-mac.sh in a terminal to see why."
+}
+trap on_failure ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -51,6 +71,7 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
   echo "ERROR: Project venv not found at $VENV_DIR" >&2
   echo "Create it first, from $PROJECT_ROOT:" >&2
   echo "  python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'" >&2
+  notify "Runner build failed" "The project's .venv is missing."
   exit 1
 fi
 # Use the venv's Python directly, whatever venv the calling shell has active.
@@ -63,8 +84,10 @@ echo "==> Python: $PY ($("$PY" --version 2>&1))"
 echo "==> PyInstaller: $("$PY" -m PyInstaller --version)"
 
 if [ "$RUN_TESTS" -eq 1 ]; then
+  STEP="Lint check"
   echo "==> Lint (ruff)..."
   "$PY" -m ruff check src tests
+  STEP="Tests"
   echo "==> Running tests (some briefly open windows)..."
   # The GUI tests use the normal macOS display. Set QT_QPA_PLATFORM yourself
   # to override, for example on a headless machine.
@@ -73,6 +96,7 @@ if [ "$RUN_TESTS" -eq 1 ]; then
   "$PY" -m pytest -q --capture=sys
 fi
 
+STEP="Building Runner.app"
 echo "==> Building Runner.app..."
 # The spec strips unused Qt modules, plugins, and translations, and writes
 # Info.plist (LSUIElement, names, version, bundle id).
@@ -80,12 +104,15 @@ echo "==> Building Runner.app..."
 
 if [ ! -d "$APP" ]; then
   echo "ERROR: PyInstaller finished but $APP is missing" >&2
+  notify "Runner build failed" "PyInstaller finished but Runner.app is missing."
   exit 1
 fi
 
+STEP="Signing"
 echo "==> Ad-hoc signing (lets the app run locally; not a Developer ID signature)..."
 codesign --force --deep --sign - "$APP"
 
+STEP="Making the disk image"
 echo "==> Creating $DMG..."
 # The disk image holds the app, its license, and the third-party notices.
 DMG_DIR="$PROJECT_ROOT/build/dmg"
@@ -103,11 +130,13 @@ if [ "$DEPLOY" -eq 0 ]; then
   echo
   echo "To install on this Mac: ./scripts/build-mac.sh --deploy"
   echo "To give someone else: send dist/Runner.dmg."
+  notify "Runner build finished" "Runner $VERSION is built in dist/."
   exit 0
 fi
 
 # ------------------------------------------------------------------ deploy
 
+STEP="Deploying"
 echo "==> Deploying to $INSTALLED..."
 
 # Ask the installed copy to quit, so it saves its arrow position, then wait.
@@ -145,3 +174,4 @@ mv "$STAGING" "$INSTALLED"
 echo "==> Starting $INSTALLED..."
 open "$INSTALLED"
 echo "==> Deployed Runner $VERSION."
+notify "Runner deployed" "Runner $VERSION is installed and running."
