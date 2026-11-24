@@ -10,8 +10,8 @@ set -euo pipefail
 #
 # Works from any folder. The version comes from pyproject.toml; runner.spec
 # reads the same value for the bundle's Info.plist. A macOS notification says
-# when it finishes, or which step failed, for runs started without a terminal
-# (for example from a Runner launcher).
+# when it finishes, or which step failed, and the run is logged to
+# ~/Library/Logs/Runner Scripts/build-mac.log (see scripts/lib/run.sh).
 
 DEPLOY=0
 RUN_TESTS=1
@@ -30,23 +30,11 @@ for arg in "$@"; do
   esac
 done
 
-# ------------------------------------------------------------ notifications
-
+# A log of the run and a notification at the end: scripts/lib/run.sh.
 # Run from a Runner launcher this script has no terminal, and --deploy quits
 # Runner partway through, so the script reports how it ended itself.
-STEP="Starting"
-notify() {
-  local title="$1" message="$2"
-  # Quotes would end the AppleScript string early.
-  title="${title//\"/\'}"
-  message="${message//\"/\'}"
-  osascript -e "display notification \"$message\" with title \"$title\"" >/dev/null 2>&1 || true
-}
-on_failure() {
-  local code=$?
-  notify "Runner build failed" "$STEP failed (exit $code). Run scripts/build-mac.sh in a terminal to see why."
-}
-trap on_failure ERR
+source "$(dirname "${BASH_SOURCE[0]}")/lib/run.sh"
+start_run "Runner build" build-mac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -71,8 +59,7 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
   echo "ERROR: Project venv not found at $VENV_DIR" >&2
   echo "Create it first, from $PROJECT_ROOT:" >&2
   echo "  python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'" >&2
-  notify "Runner build failed" "The project's .venv is missing."
-  exit 1
+  fail "The project's .venv is missing."
 fi
 # Use the venv's Python directly, whatever venv the calling shell has active.
 PY="$VENV_DIR/bin/python"
@@ -104,8 +91,7 @@ echo "==> Building Runner.app..."
 
 if [ ! -d "$APP" ]; then
   echo "ERROR: PyInstaller finished but $APP is missing" >&2
-  notify "Runner build failed" "PyInstaller finished but Runner.app is missing."
-  exit 1
+  fail "PyInstaller finished but Runner.app is missing."
 fi
 
 STEP="Signing"
@@ -130,7 +116,7 @@ if [ "$DEPLOY" -eq 0 ]; then
   echo
   echo "To install on this Mac: ./scripts/build-mac.sh --deploy"
   echo "To give someone else: send dist/Runner.dmg."
-  notify "Runner build finished" "Runner $VERSION is built in dist/."
+  succeed "Runner $VERSION is built in dist/."
   exit 0
 fi
 
@@ -174,4 +160,4 @@ mv "$STAGING" "$INSTALLED"
 echo "==> Starting $INSTALLED..."
 open "$INSTALLED"
 echo "==> Deployed Runner $VERSION."
-notify "Runner deployed" "Runner $VERSION is installed and running."
+succeed "Runner $VERSION is deployed and running."
