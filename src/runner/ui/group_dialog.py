@@ -9,7 +9,9 @@ hovering that group open its launchers.
 
 The Schedule switch turns the group into a schedule: it runs on the dates in
 the schedule area below the table instead of from the Execute Groups list,
-and shows only in the Schedules list. Turned off, it is an execute group
+and shows only in the Schedules list. While it is on, a second switch picks
+what a click on its row in that list does: open it for editing, or run it
+now. Turned off, it is an execute group
 again and its dates are kept, greyed out.
 """
 
@@ -25,6 +27,10 @@ from .stay_on_top import warning
 from .toggle_switch import ToggleSwitch
 
 SCHEDULE_NOTE = "Scheduled items will not appear in the launcher menu."
+CLICK_RUNS_TIP = (
+    "On: clicking this schedule in the Schedules list runs it now.\n"
+    "Off: clicking it opens it for editing. Right-click always offers Edit."
+)
 
 _NOTE = "Ticked launchers run in the order they appear in the list below."
 CONCURRENT_TIP = "Start this launcher at the same time as the one before it, instead of after it."
@@ -85,14 +91,20 @@ class GroupDialog(MemberPickerDialog):
         return [row]
 
     def _bottom_widgets(self, group: Group | None) -> list[QWidget]:
-        self.schedule_editor = ScheduleEditor(group.schedule if group is not None else [], self)
+        self.schedule_editor = ScheduleEditor(group.schedule if group is not None else [], self, cfg=self._cfg)
         self.schedule_editor.set_active(self._start_scheduled)
-        return [self.schedule_editor]
+        # Only for a schedule: what a click on its row in the Schedules list does.
+        self.click_runs_switch = ToggleSwitch("Clicking it in the Schedules list runs it now (off: opens it to edit)")
+        self.click_runs_switch.setToolTip(CLICK_RUNS_TIP)
+        self.click_runs_switch.setChecked(group is not None and group.click_runs)
+        self.click_runs_switch.setVisible(self._start_scheduled)
+        return [self.click_runs_switch, self.schedule_editor]
 
     def _on_schedule_toggled(self, checked: bool) -> None:
         editor = getattr(self, "schedule_editor", None)
         if editor is not None:
             editor.set_active(checked)
+        self.click_runs_switch.setVisible(checked)
 
     def _saved_groups(self) -> list[Group]:
         return self._cfg.config.groups
@@ -156,17 +168,20 @@ class GroupDialog(MemberPickerDialog):
         show_contents = self._show_contents.isChecked()
         scheduled = self.schedule_switch.isChecked()
         schedule = self.schedule_editor.entries()
+        click_runs = self.click_runs_switch.isChecked()
         if self._original is not None:
             self._original.name = name
             self._original.members = members
             self._original.show_contents = show_contents
             self._original.scheduled = scheduled
             self._original.schedule = schedule
+            self._original.click_runs = click_runs
             self._result = self._original
         else:
             created = Group.new(name, members)
             created.show_contents = show_contents
             created.scheduled = scheduled
             created.schedule = schedule
+            created.click_runs = click_runs
             self._result = created
         super().accept()

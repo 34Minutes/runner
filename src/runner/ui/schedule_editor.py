@@ -31,10 +31,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import ScheduleEntry
+from ..config import ConfigManager, ScheduleEntry
 from ..schedule import describe_repeat, format_when, next_run
 from . import theme
-from .schedule_pickers import DatePickerDialog, IntervalPickerDialog, apply_total, entry_total, next_quarter_hour
+from .schedule_pickers import DatePickerDialog, IntervalPickerDialog, apply_total, entry_total, next_hour, next_quarter_hour
 
 ROW_HEIGHT = 34
 VISIBLE_ROWS = 4
@@ -64,9 +64,11 @@ class ScheduleEditor(QWidget):
         parent: QWidget | None = None,
         *,
         now: Callable[[], datetime] = datetime.now,
+        cfg: ConfigManager | None = None,
     ) -> None:
         super().__init__(parent)
         self._now = now
+        self._cfg = cfg  # remembers the dial's Minutes switch, when given
         self._entries: list[ScheduleEntry] = [deepcopy(entry) for entry in entries or []]
         self._new_ids: list[str] = []  # added since the dialog opened, newest first
         self._active = True
@@ -173,7 +175,15 @@ class ScheduleEditor(QWidget):
     # ----------------------------------------------------------- pickers
 
     def _pick_date(self, when: datetime | None) -> datetime | None:
-        dialog = DatePickerDialog(when or next_quarter_hour(self._now()), self.window())
+        cfg = self._cfg
+        show_minutes = cfg.config.settings.dial_show_minutes if cfg is not None else True
+        if when is None:
+            when = next_quarter_hour(self._now())
+            if not show_minutes:
+                when = next_hour(when)
+        dialog = DatePickerDialog(when, self.window(), show_minutes=show_minutes, now=self._now)
+        if cfg is not None:
+            dialog.minutes_toggled.connect(lambda shown: cfg.update_settings(dial_show_minutes=shown))
         return dialog.chosen if dialog.exec() else None
 
     def _pick_interval(self, total: int) -> int | None:

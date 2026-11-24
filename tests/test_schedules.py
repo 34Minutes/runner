@@ -3,10 +3,12 @@
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from runner.config import AppConfig, ConfigManager, Group, GroupMember, Launcher, ScheduleEntry
 from runner.schedule import (
+    parse_when,
     NO_REPEAT,
     add_months,
     describe_repeat,
@@ -322,6 +324,27 @@ def test_add_new_schedule_starts_with_the_switch_on_and_saves_dates(qapp, qtbot,
     assert [entry.start for entry in group.schedule] == ["2026-11-24T09:00"]
 
 
+def test_the_click_switch_shows_only_for_a_schedule_and_is_saved(qapp, qtbot, tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path, monkeypatch)
+    dialog = GroupDialog(cfg)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert dialog.click_runs_switch.isHidden()
+    dialog.schedule_switch.setChecked(True)
+    assert dialog.click_runs_switch.isVisible()
+    assert dialog.click_runs_switch.isChecked() is False  # a click opens it, by default
+    dialog.click_runs_switch.setChecked(True)
+    dialog._name_edit.setText("Nightly")
+    dialog.accept()
+    group = dialog.result_group
+    assert group.click_runs is True
+
+    again = GroupDialog(cfg, group)
+    qtbot.addWidget(again)
+    again.show()
+    assert again.click_runs_switch.isVisible() and again.click_runs_switch.isChecked()
+
+
 def test_turning_a_schedule_back_into_an_execute_group_keeps_its_dates(qapp, qtbot, tmp_path, monkeypatch):
     cfg = _cfg(tmp_path, monkeypatch)
     group = _scheduled(_entry(datetime(2026, 11, 24, 9)))
@@ -363,6 +386,73 @@ def test_the_full_date_under_the_dial_follows_the_rings(qapp, qtbot):
     assert dialog.readout.text() == "Tuesday 24 November 2026 · 09:30"
     dialog.dial.set_value(datetime(2027, 3, 5, 18, 5))
     assert dialog.readout.text() == "Friday 5 March 2027 · 18:05"
+
+
+def test_typed_dates_are_read_with_the_rest_from_the_dial():
+    base = datetime(2026, 11, 24, 9, 30)
+    assert parse_when("Tuesday 24 November 2026 · 09:30", base) == base
+    assert parse_when("5 March 2027 18:05", base) == datetime(2027, 3, 5, 18, 5)
+    assert parse_when("24/12/2026 7pm", base) == datetime(2026, 12, 24, 19, 0)
+    assert parse_when("2027-01-02 8:15", base) == datetime(2027, 1, 2, 8, 15)
+    assert parse_when("14:45", base) == datetime(2026, 11, 24, 14, 45)
+    assert parse_when("dec 3rd at 7.15am", base) == datetime(2026, 12, 3, 7, 15)
+    for bad in ("", "fish", "31 Feb", "25:00", "13pm"):
+        with pytest.raises(ValueError):
+            parse_when(bad, base)
+
+
+def _settle(dial) -> None:
+    for _ in range(400):
+        if not any(ring.moving() for ring in dial.rings):
+            return
+        dial._last_tick = dial._clock.elapsed() - 16
+        dial._tick()
+
+
+def test_typing_a_date_spins_the_dial_there(qapp, qtbot):
+    dialog = DatePickerDialog(datetime(2026, 11, 24, 9, 30), now=lambda: datetime(2026, 11, 24, 8))
+    qtbot.addWidget(dialog)
+    dialog.type_date("5 March 2027 18:05")
+    assert any(ring.moving() for ring in dialog.dial.rings)  # it turns, not jumps
+    _settle(dialog.dial)
+    assert dialog.dial.value() == datetime(2027, 3, 5, 18, 5)
+    assert dialog.readout.text() == "Friday 5 March 2027 · 18:05"
+    assert not dialog.problem.isVisibleTo(dialog)
+
+    dialog.type_date("31 Feb")
+    assert dialog.problem.isVisibleTo(dialog) and "no day 31" in dialog.problem.text()
+    dialog.type_date("1 Jan 2050")
+    assert "Choose a year from 2026 to 2037." == dialog.problem.text()
+    assert dialog.dial.value() == datetime(2027, 3, 5, 18, 5)
+
+
+def test_now_spins_back_to_the_current_time(qapp, qtbot):
+    now = datetime(2026, 11, 24, 8, 41)
+    dialog = DatePickerDialog(datetime(2028, 6, 2, 21, 10), now=lambda: now)
+    qtbot.addWidget(dialog)
+    dialog.now_button.click()
+    assert any(ring.moving() for ring in dialog.dial.rings)
+    _settle(dialog.dial)
+    assert dialog.dial.value() == now
+
+
+def test_the_minutes_switch_hides_the_minute_ring(qapp, qtbot):
+    dialog = DatePickerDialog(datetime(2026, 11, 24, 9, 0), show_minutes=False)
+    qtbot.addWidget(dialog)
+    seen = []
+    dialog.minutes_toggled.connect(seen.append)
+    assert not dialog.minutes_switch.isChecked() and dialog.dial.minute not in dialog.dial.rings
+    dialog.minutes_switch.setChecked(True)
+    assert dialog.dial.minute in dialog.dial.rings and seen == [True]
+    dialog.minutes_switch.setChecked(False)
+    assert dialog.dial.value().minute == 0 and seen == [True, False]
+    # Typing minutes brings the ring back so they are kept.
+    dialog.type_date("10:20")
+    assert dialog.minutes_switch.isChecked()
+    # A date with minutes opens with the ring shown, whatever the setting.
+    other = DatePickerDialog(datetime(2026, 11, 24, 9, 30), show_minutes=False)
+    qtbot.addWidget(other)
+    assert other.minutes_switch.isChecked()
 
 
 def test_the_select_key_and_dont_repeat_choose_the_interval(qapp, qtbot):
@@ -436,6 +526,26 @@ def test_clicking_a_schedule_opens_it_for_editing(qapp, qtbot, monkeypatch, tmp_
     try:
         ctl.trigger.request_schedules.emit()
         ctl.schedule_list._launch_buttons()[0].click()
+        assert opened == [timed]
+    finally:
+        _close(ctl)
+
+
+def test_a_schedule_set_to_run_on_click_runs_instead_of_opening(qapp, qtbot, monkeypatch, tmp_path):
+    ctl, _by_hand, timed = _controller(qapp, monkeypatch, tmp_path)
+    timed.click_runs = True
+    ctl.trigger.show()
+    opened, started = [], []
+    monkeypatch.setattr(ctl, "show_group_dialog", lambda group=None, **_: opened.append(group))
+    monkeypatch.setattr(ctl, "_start_group", lambda group, notice: started.append(group.name))
+    try:
+        ctl.trigger.request_schedules.emit()
+        row = ctl.schedule_list._launch_buttons()[0]
+        assert "Click to run it now" in ctl._schedule_row_tooltip(row.launcher)
+        row.click()
+        assert started == ["Timed"] and opened == []
+        # Right-click Edit still opens it.
+        ctl.schedule_list.edit_requested.emit(row.launcher)
         assert opened == [timed]
     finally:
         _close(ctl)

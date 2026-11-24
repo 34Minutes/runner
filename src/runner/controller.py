@@ -454,7 +454,7 @@ class RunnerController:
         groups.reordered.connect(self.cfg.reorder_groups)
 
         schedules = self.schedule_list
-        schedules.launch_requested.connect(self._on_group_edit)  # a click edits its dates
+        schedules.launch_requested.connect(self._on_schedule_click)  # edits it, or runs it
         schedules.edit_requested.connect(self._on_group_edit)
         schedules.delete_requested.connect(self._on_group_delete)
 
@@ -546,7 +546,7 @@ class RunnerController:
             lines.append(f"Runs {len(group.members)} launcher{'' if len(group.members) == 1 else 's'}")
             if group.show_contents:
                 lines.append("Hover to see its launchers")
-        lines.append("Click to edit its dates")
+        lines.append("Click to run it now" if group is not None and group.click_runs else "Click to edit its dates")
         lines.append("Right-click to edit or delete")
         return "\n".join(lines)
 
@@ -1385,6 +1385,19 @@ class RunnerController:
             self.execute_menu.hide()
         else:
             self._collapse_open_lists()
+        self._start_group(group, "Started")
+
+    def _on_schedule_click(self, row: Launcher) -> None:
+        """A click in the Schedules list: open the schedule, or run it if it is set to."""
+        group = self._group_by_id(row.id)
+        if group is None:
+            return
+        if not group.click_runs:
+            self.show_group_dialog(group)
+            return
+        self._collapse_open_lists()
+        if self.schedule_list.isVisible() and not self.settings.pinned_open:
+            self.schedule_list.force_hide()
         self._start_group(group, "Started")
 
     def _run_scheduled(self, group: Group) -> None:

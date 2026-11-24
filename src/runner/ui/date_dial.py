@@ -183,10 +183,13 @@ class MetalDial(QWidget):
     LIFT_SPEED = 11.0
 
     def __init__(self, when: dt.datetime | None = None, *, show_minutes=True,
-                 scheme: theme.ColorScheme = theme.DARK, parent=None):
+                 scheme: theme.ColorScheme = theme.DARK, first_year: int | None = None, parent=None):
         super().__init__(parent)
         when = when or dt.datetime.now()
-        self.years = list(range(when.year, when.year + 12))
+        # Twelve years from this year, or from the date shown if that is earlier,
+        # so Now can always reach today.
+        start = min(when.year, first_year if first_year is not None else dt.datetime.now().year)
+        self.years = list(range(start, start + 12))
         self.year = Ring("Year", [str(y) for y in self.years], 1, 0, 1)
         self.month = Ring("Month", MONTHS, 1, 1, 2)
         self.day = Ring("Day", [str(d) for d in range(1, 32)], 1, 0, 3)
@@ -273,6 +276,10 @@ class MetalDial(QWidget):
         self.minute.jump_to(when.minute if self._show_minutes else 0)
         self.changed.emit(self.value())
         self.update()
+
+    def can_show(self, when: dt.datetime) -> bool:
+        """Whether the year ring has when's year."""
+        return when.year in self.years
 
     def spin_to(self, when: dt.datetime):
         """Turn every ring to `when`, outer rings slowest, so the dial visibly

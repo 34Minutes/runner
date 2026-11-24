@@ -104,6 +104,9 @@ class Group:
     # list, and shows only in the Schedules list. Turned off, its dates are kept.
     scheduled: bool = False
     schedule: list[ScheduleEntry] = field(default_factory=list)
+    # A scheduled group's row in the Schedules list: a click opens it for
+    # editing (the default), or runs it now when this is on.
+    click_runs: bool = False
 
     @classmethod
     def new(cls, name: str, members: list[GroupMember] | None = None) -> Group:
@@ -332,6 +335,8 @@ class Settings:
     # False until the one-time enlarge below has been saved. Old config files
     # omit this, so they pick up the larger arrow once and then keep any resize.
     applied_visible_trigger_size: bool = False
+    # Whether the date dial shows its minute ring. Off, times land on the hour.
+    dial_show_minutes: bool = True
 
 
 @dataclass
