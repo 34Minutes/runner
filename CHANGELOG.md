@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.2.0] - 2026-11-24
+
 ### Added
 - `runner ctl`: other programs, such as scripts or an LLM, can add, change and delete their own launchers, execute groups and container groups. It talks to the running Runner over its private socket, or edits the config file when Runner is closed. Items made in Runner can't be changed from outside, nothing is run from outside, and only you can switch a schedule on. See the README.
 - Scripts for the jobs run over and over: `scripts/push.sh`, `scripts/merge.sh` (fast-forward into main) and `scripts/release.sh` (bump, date the changelog, commit, tag and, after asking, publish). Each checks first and stops with the reason rather than guessing, logs to `~/Library/Logs/Runner Scripts/`, and ends with a macOS notification. `build-mac.sh` shares the same notifications and log.
 
 ### Fixed
 - Running the test suite no longer removes a running Runner's socket. Before this, opening Runner again after a test run could start a second copy.
-
-### Planned
-- Per-launcher icons (auto + custom).
 
 ## [1.1.2] - 2026-11-24
 
