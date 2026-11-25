@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - Per-launcher icons (auto + custom).
 
+## [2.0.0] - 2026-11-25
+
+### Changed
+- Improved Dark and Medium colour-scheme contrast to meet WCAG AA (≥ 4.5:1), restored visible keyboard focus outlines in dialogs, and made container submenu rows keyboard-navigable with arrow keys and Enter.
+- Added accessible names and descriptions to custom UI controls (trigger arrow, lists, toggle switches, date dial, interval rollers, and launch buttons).
+- Added a multi-resolution macOS app icon (`assets/icon.icns`) to `runner.spec` and made `scripts/build-mac.sh --deploy` rollback-safe when replacing `/Applications/Runner.app`.
+- Expanded Ruff lint checks (`F`, `B`, `UP`, `SIM`) and split `src/runner/controller.py` into focused coordinator modules (`tray.py`, `dialog_coordinator.py`, `launch_coordinator.py`, `drag_coordinator.py`, and `popup_coordinator.py`).
+
+### Security
+- Added cross-process advisory file locking and unique `0600` temp-file writes in `ConfigManager.save()`, and wrapped `runner ctl` offline config edits in the same lock.
+- Tightened URL/protocol matching and macOS `open --` handling in `launcher.py`, capped IPC socket read chunks in `main.py`, and passed `osascript` arguments via `argv` in all shell templates.
+
+### Fixed
+- Replaced SVG dialog checkbox icons (broken in packaged builds where `QtSvg` is stripped) with pure-Python PNGs stored in a per-user `0700` temp directory.
+- Restricted `runner ctl` offline fallback to `ServerNotFoundError` / `ConnectionRefusedError` instead of editing the config file on socket timeouts.
+- Blocked `runner ctl` from deleting active scheduled groups or launchers inside them, and documented `--as` namespace isolation in `ctl_guide.md`.
+- Refreshed the Help window when switching colour schemes, guarded macOS window-level `ctypes` calls, fixed the Windows dev-mode startup registry command, and handled malformed launcher arguments or inaccessible paths cleanly.
+
 ## [1.3.0] - 2026-11-25
 
 ### Added
