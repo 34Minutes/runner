@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Per-launcher icons (auto + custom).
+
+## [1.3.0] - 2026-11-25
+
 ### Added
 - **Help** on the arrow's right-click menu, above Exit: each feature in a line, and the commands an LLM needs to set Runner up for you.
 - `runner template`: script templates to copy into any code project: `build`, `merge` (fast-forward into main), `push`, `release` (bump, date the changelog, commit, tag and, after asking, push) and `test-once` (one test run at a time, skipped when the code already passed). A copy is the project's own script, with its settings at the top; Runner doesn't run or read it. `runner template list`, `show NAME`, `copy NAME... --to DIR`.
@@ -17,9 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - A release could start its own tests over and over without end, piling up test windows and Python crashes. Its tests ran a demo release that found Runner's own project and ran the full suite again. Each script's settings are now in the script itself, so nothing points back to Runner, and a test that times out stops everything it started.
-
-### Planned
-- Per-launcher icons (auto + custom).
 
 ## [1.2.0] - 2026-11-24
 
