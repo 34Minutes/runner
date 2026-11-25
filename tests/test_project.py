@@ -1,6 +1,7 @@
 """`runner project`: the project file, the version bump, the scripts, and Help."""
 
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -77,12 +78,30 @@ def _project(tmp_path, *, project_file=PROJECT_FILE, changelog=CHANGELOG, packag
 
 
 def _run(root, *args, logs=None):
-    """`runner project ...` as a launcher would start it, quietly."""
-    env = dict(os.environ, RUNNER_SCRIPTS_QUIET="1", PYTHONPATH=str(ROOT / "src"))
+    """`runner project ...` as a launcher would start it, quietly, on the demo project only.
+
+    Nothing from a `runner project` run that started these tests may reach
+    it: RUNNER_PROJECT left in the environment once pointed the demo's
+    release at Runner itself, which ran these tests again, without end.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RUNNER_")}
+    env.update(RUNNER_SCRIPTS_QUIET="1", PYTHONPATH=str(ROOT / "src"))
     env["RUNNER_SCRIPTS_LOG_DIR"] = str(logs or root.parent / "logs")
-    done = subprocess.run([sys.executable, "-m", "runner", "project", *args], cwd=root, env=env,
-                          capture_output=True, text=True, timeout=60)
-    return done.returncode, done.stdout + done.stderr
+    cmd = [sys.executable, "-m", "runner", "project", *args, "--project", str(root)]
+    # Its own process group, so a timeout stops the scripts and anything
+    # they started, not only the first process.
+    proc = subprocess.Popen(cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, start_new_session=(os.name != "nt"))
+    try:
+        out, _ = proc.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+        proc.communicate()
+        raise
+    return proc.returncode, out
 
 
 # ------------------------------------------------------------------ the project file
@@ -257,6 +276,17 @@ def test_a_failing_test_command_stops_a_release_before_anything_changes(tmp_path
     code, out = _run(root, "release", "--patch", "--publish")
     assert code != 0 and "Tests failed (exit 3)" in out
     assert _git(root, "status", "--porcelain") == "" and _git(root, "tag") == ""
+
+
+@needs_bash
+def test_the_projects_commands_cant_find_the_project_that_started_them(tmp_path):
+    """A test command that runs `runner project` must not land back in this project."""
+    root = _project(tmp_path, remote=False,
+                    project_file=PROJECT_FILE.replace('build = "echo built > built.txt"',
+                                                      'build = "env | grep ^RUNNER_ > seen.txt || true"'))
+    code, out = _run(root, "build")
+    assert code == 0, out
+    assert (root / "seen.txt").read_text() == ""
 
 
 @needs_bash

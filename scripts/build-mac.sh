@@ -64,14 +64,11 @@ echo "==> Python: $PY ($("$PY" --version 2>&1))"
 echo "==> PyInstaller: $("$PY" -m PyInstaller --version)"
 
 if [ "$RUN_TESTS" -eq 1 ]; then
-  echo "==> Lint (ruff)..."
-  "$PY" -m ruff check src tests
-  echo "==> Running tests (some briefly open windows)..."
-  # The GUI tests use the normal macOS display. Set QT_QPA_PLATFORM yourself
-  # to override, for example on a headless machine.
-  # --capture=sys lets Qt's own error messages through. A Qt abort kills the
-  # process, and pytest's default capture would lose the reason.
-  "$PY" -m pytest -q --capture=sys
+  # Lint and tests, one run at a time, and skipped when this code already
+  # passed (RUNNER_TESTS_FORCE=1 runs them anyway). The GUI tests use the
+  # normal macOS display. Set QT_QPA_PLATFORM yourself to override, for
+  # example on a headless machine.
+  "$PY" scripts/run_tests.py
 fi
 echo "==> Building Runner.app..."
 # The spec strips unused Qt modules, plugins, and translations, and writes

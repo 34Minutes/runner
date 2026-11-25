@@ -30,9 +30,11 @@ keep_unreleased = ["Planned"]
 [commands]
 # Shell commands, run from the project's folder. Leave one empty to skip it.
 # Release runs lint, then test; a failure stops the release before anything changes.
-lint = ".venv/bin/python -m ruff check src tests"
-# --capture=sys lets Qt's own error messages through if a test aborts.
-test = ".venv/bin/python -m pytest -q --capture=sys"
+# Empty: run_tests.py lints first, as part of the test run.
+lint = ""
+# Lint and pytest, one run at a time, skipped if this code already passed.
+# See scripts/run_tests.py (--force to run anyway).
+test = ".venv/bin/python scripts/run_tests.py"
 # The Build launcher runs this.
 build = "./scripts/build-mac.sh --deploy"
 

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Runner's own push, merge and release scripts are now the shared `runner project` scripts, set up by `.runner/project.toml`. Script logs moved to `~/Library/Logs/Runner/scripts/`. `scripts/build-mac.sh` no longer sends its own notification; `runner project build` does.
+- `scripts/run_tests.py` now runs the lint check and tests for the Release and Build launchers and `build-mac.sh`. Only one run at a time; a second one stops at once. It skips the run when this exact code already passed, and a version bump alone doesn't count as a change (`--force` or `RUNNER_TESTS_FORCE=1` runs them anyway).
+
+### Fixed
+- A release could start its own tests over and over without end, piling up test windows and Python crashes. The project's commands inherited `RUNNER_PROJECT`, so the tests' demo release ran on Runner itself and started the full suite again. The project's commands no longer see the scripts' variables, the tests clear them, and a test that times out now stops everything it started.
 
 ### Planned
 - Per-launcher icons (auto + custom).

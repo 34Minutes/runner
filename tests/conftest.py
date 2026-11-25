@@ -27,6 +27,16 @@ def _never_touch_the_real_config(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _forget_the_project_that_started_the_tests(monkeypatch):
+    """`runner project release` runs these tests with RUNNER_PROJECT set to
+    Runner itself. A test that runs `runner project` must never find it."""
+    import os
+
+    for name in [k for k in os.environ if k.startswith("RUNNER_")]:
+        monkeypatch.delenv(name)
+
+
+@pytest.fixture(autouse=True)
 def _keep_the_working_folder(monkeypatch):
     """main() moves to the home folder. Put the test run back where it was."""
     import os

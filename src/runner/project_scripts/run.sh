@@ -79,11 +79,23 @@ succeed() {
   notify "$RUN_TITLE" "$1"
 }
 
+# The variables `runner project` passes to these scripts. The project's own
+# commands don't get them: a test that starts `runner project ...` would
+# otherwise find this project through RUNNER_PROJECT, run this project's
+# tests again from inside them, and so on without end.
+_RUNNER_SCRIPT_VARS=(RUNNER_PROJECT RUNNER_PROJECT_ROOT RUNNER_PROJECT_NAME RUNNER_MAIN_BRANCH
+  RUNNER_REMOTE RUNNER_TAG_PATTERN RUNNER_LINT RUNNER_TEST RUNNER_BUILD RUNNER_PUBLISHES
+  RUNNER_SELF RUNNER_SELF_MODULE RUNNER_SCRIPTS_LOG_DIR RUNNER_SCRIPTS_QUIET)
+
 # run_command NAME COMMAND: a command from the project file, in the project folder.
 run_command() {
   STEP="$1"
   echo "==> $1: $2"
-  bash -c "$2"
+  local unset_args=() var
+  for var in "${_RUNNER_SCRIPT_VARS[@]}"; do
+    unset_args+=(-u "$var")
+  done
+  env "${unset_args[@]}" bash -c "$2"
 }
 
 # runner_self ARGS...: call `runner` back, for the parts written in Python.
