@@ -422,7 +422,7 @@ def test_typing_a_date_spins_the_dial_there(qapp, qtbot):
     dialog.type_date("31 Feb")
     assert dialog.problem.isVisibleTo(dialog) and "no day 31" in dialog.problem.text()
     dialog.type_date("1 Jan 2050")
-    assert "Choose a year from 2026 to 2037." == dialog.problem.text()
+    assert dialog.problem.text() == "Choose a year from 2026 to 2037."
     assert dialog.dial.value() == datetime(2027, 3, 5, 18, 5)
 
 

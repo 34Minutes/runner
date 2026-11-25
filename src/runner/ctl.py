@@ -66,7 +66,17 @@ def send(request: dict[str, Any], *, timeout_ms: int = REQUEST_TIMEOUT_MS) -> tu
     socket = QLocalSocket()
     socket.connectToServer(SINGLE_INSTANCE_SERVER)
     if not socket.waitForConnected(500):
-        return _offline(request), False
+        err = socket.error()
+        socket.abort()
+        if err in (
+            QLocalSocket.LocalSocketError.ServerNotFoundError,
+            QLocalSocket.LocalSocketError.ConnectionRefusedError,
+        ):
+            return _offline(request), False
+        raise NoAnswer(
+            "Runner is running but did not accept the connection in time. "
+            "Close any open Runner window and try again."
+        )
     socket.write(json.dumps(request).encode("utf-8") + b"\n")
     socket.waitForBytesWritten(timeout_ms)
     data = bytearray()
@@ -91,7 +101,9 @@ def send(request: dict[str, Any], *, timeout_ms: int = REQUEST_TIMEOUT_MS) -> tu
 def _offline(request: dict[str, Any]) -> dict[str, Any]:
     from .config import ConfigManager
 
-    return RunnerApi(ConfigManager()).handle(request)
+    cfg = ConfigManager()
+    with cfg.locked():
+        return RunnerApi(cfg).handle(request)
 
 
 # ------------------------------------------------------------------ command line

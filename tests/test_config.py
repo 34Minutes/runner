@@ -224,7 +224,7 @@ def test_unreadable_file_is_moved_aside_and_reported(tmp_path, monkeypatch):
 
     # A second corrupt file gets its own backup. The first is not overwritten.
     (test_dir / "config.json").write_text("[1, 2")
-    ConfigManager().config
+    _ = ConfigManager().config
     assert len(list(test_dir.glob("config.*.bak.json"))) == 2
 
 
@@ -263,7 +263,7 @@ def test_update_settings_can_defer_the_write(tmp_path, monkeypatch):
     """Sliders change settings on every tick and write the file once at the end."""
     test_dir = _isolated(tmp_path, monkeypatch, "RunnerDeferred")
     mgr = ConfigManager()
-    mgr.config  # creates the file
+    _ = mgr.config  # creates the file
     before = (test_dir / "config.json").read_text()
 
     mgr.update_settings(save=False, opacity_percent=55)

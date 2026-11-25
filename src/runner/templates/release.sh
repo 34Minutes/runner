@@ -54,13 +54,11 @@ exec > >(tee -a "$LOG") 2>&1
 echo "==> $TITLE, $(date '+%Y-%m-%d %H:%M:%S'), in $ROOT"
 
 _quiet() { [ "${SCRIPTS_QUIET:-0}" = "1" ]; }
-# AppleScript strings end at a double quote, so they become single quotes.
-_as() { local text="$1"; printf '%s' "${text//\"/\'}"; }
 
 notify() {
   _quiet && return 0
   if command -v osascript >/dev/null 2>&1; then
-    osascript -e "display notification \"$(_as "$2")\" with title \"$(_as "$1")\"" >/dev/null 2>&1 || true
+    osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$1" "$2" >/dev/null 2>&1 || true
   elif command -v notify-send >/dev/null 2>&1; then
     notify-send "$1" "$2" >/dev/null 2>&1 || true
   fi
@@ -86,19 +84,21 @@ run() { STEP="$1"; echo "==> $1: $2"; bash -c "$2"; }
 confirm() {
   _quiet && return 1
   command -v osascript >/dev/null 2>&1 || return 1
-  osascript -e "display dialog \"$(_as "$1")\" buttons {\"Cancel\", \"$(_as "$2")\"} \
-default button \"Cancel\" cancel button \"Cancel\" with title \"$(_as "$TITLE")\"" >/dev/null 2>&1
+  osascript -e 'on run argv' \
+    -e 'display dialog (item 1 of argv) buttons {"Cancel", (item 2 of argv)} default button "Cancel" cancel button "Cancel" with title (item 3 of argv)' \
+    -e 'end run' -- "$1" "$2" "$TITLE" >/dev/null 2>&1
 }
 
 # choose PROMPT ITEM...: prints the item picked, or nothing for Cancel.
 choose() {
   _quiet && return 0
   command -v osascript >/dev/null 2>&1 || return 0
-  local prompt="$1" items="" item answer
+  local prompt="$1" answer
   shift
-  for item in "$@"; do items="$items${items:+, }\"$(_as "$item")\""; done
-  answer="$(osascript -e "choose from list {$items} with prompt \"$(_as "$prompt")\" \
-with title \"$(_as "$TITLE")\" default items {\"$(_as "$1")\"}" 2>/dev/null || true)"
+  answer="$(osascript -e 'on run argv' \
+    -e 'set opts to items 3 thru -1 of argv' \
+    -e 'choose from list opts with prompt (item 1 of argv) with title (item 2 of argv) default items {item 1 of opts}' \
+    -e 'end run' -- "$prompt" "$TITLE" "$@" 2>/dev/null || true)"
   [ "$answer" = "false" ] || printf '%s' "$answer"
 }
 

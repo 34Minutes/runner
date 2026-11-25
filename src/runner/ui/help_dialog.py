@@ -50,6 +50,16 @@ class HelpWindow(StayOnTopDialog):
         self.browser.setOpenExternalLinks(True)
         self.browser.setMarkdown(help_text())
         self.browser.document().setDocumentMargin(4)
+        self.apply_theme()
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.close)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.browser, 1)
+        layout.addWidget(buttons)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+
+    def apply_theme(self) -> None:
+        theme.style_dialog(self)
         colors = theme.dialog_colors()
         self.browser.setStyleSheet(
             f"QTextBrowser {{ background: {colors.field}; color: {colors.text};"
@@ -57,9 +67,3 @@ class HelpWindow(StayOnTopDialog):
             f" font-size: 14px; }}"
         )
         _shade_code_blocks(self.browser, colors.field_alt)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.close)
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.browser, 1)
-        layout.addWidget(buttons)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)

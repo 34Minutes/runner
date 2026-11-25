@@ -21,6 +21,7 @@ from .config import ConfigManager, Launcher
 from .controller import RunnerController
 from .instance import MAX_REQUEST_BYTES, REQUEST_TIMEOUT_MS, SINGLE_INSTANCE_SERVER, _single_instance_name  # noqa: F401
 from .ui.theme import use
+import contextlib
 
 if sys.platform == "win32":
     from .utils import windows as win_utils  # type: ignore
@@ -37,10 +38,8 @@ def _start_in_home_folder() -> None:
     current folder, so a downloaded notepad.exe would run in place of the real
     one. Launchers with no working directory also start here.
     """
-    try:
+    with contextlib.suppress(OSError):
         os.chdir(Path.home())
-    except OSError:
-        pass
 
 
 def seed_test_data_if_needed(cfg: ConfigManager) -> None:
@@ -131,7 +130,9 @@ class _Client:
     def _read(self) -> None:
         if self.done:
             return
-        self.buffer += bytes(self.socket.readAll().data())
+        remaining = MAX_REQUEST_BYTES + 1 - len(self.buffer)
+        if remaining > 0:
+            self.buffer += bytes(self.socket.read(remaining).data())
         if not self.buffer:
             return
         if not self.buffer.lstrip().startswith(b"{"):

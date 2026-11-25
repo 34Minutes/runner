@@ -294,21 +294,24 @@ def _set_mac_window_level(widget: QWidget, level: int) -> None:
     import ctypes
     from ctypes import c_long, c_void_p
 
-    view = int(widget.winId() or 0)
-    if not view:
+    try:
+        view = int(widget.winId() or 0)
+        if not view:
+            return
+        objc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
+        objc.sel_registerName.restype = c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        get_window = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p))
+        set_level = ctypes.cast(
+            objc.objc_msgSend,
+            ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, c_long),
+        )
+        window = get_window(c_void_p(view), objc.sel_registerName(b"window"))
+        if not window:
+            return
+        set_level(window, objc.sel_registerName(b"setLevel:"), level)
+    except (OSError, AttributeError, ValueError):
         return
-    objc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
-    objc.sel_registerName.restype = c_void_p
-    objc.sel_registerName.argtypes = [ctypes.c_char_p]
-    get_window = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p))
-    set_level = ctypes.cast(
-        objc.objc_msgSend,
-        ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, c_long),
-    )
-    window = get_window(c_void_p(view), objc.sel_registerName(b"window"))
-    if not window:
-        return
-    set_level(window, objc.sel_registerName(b"setLevel:"), level)
 
 
 def _set_windows_topmost(widget: QWidget) -> None:

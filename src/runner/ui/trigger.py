@@ -17,6 +17,7 @@ import sys
 from ..config import AppConfig
 from .theme import SCHEMES, current, resolve
 from .toggle_switch import ToggleSwitch
+import contextlib
 
 # The arrow has to stay visible enough to drag the slider back up.
 OPACITY_MIN_PERCENT = 20
@@ -52,6 +53,7 @@ class MenuSlider(QWidget):
         self._slider.setValue(value)
         self._slider.setInvertedAppearance(invert)
         self._slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._slider.setAccessibleName(label)
         self._slider.setFixedWidth(120)
         self._slider.valueChanged.connect(self.changed.emit)
         layout.addWidget(name)
@@ -312,6 +314,10 @@ class TriggerWidget(QWidget):
         self.move(config.settings.position_x, config.settings.position_y)
         self.setWindowOpacity(clamp_opacity_percent(config.settings.opacity_percent) / 100)
 
+        self.setAccessibleName("Runner launcher trigger")
+        self.setAccessibleDescription(
+            "Hover to open the launcher list, drag to move, or right-click for settings"
+        )
         # Optional: slight tooltip
         self.setToolTip(
             "Runner — hover the arrow to open launcher list\n"
@@ -547,10 +553,8 @@ class TriggerWidget(QWidget):
 
         def _detach_menu_filter() -> None:
             for widget in watched:
-                try:
+                with contextlib.suppress(RuntimeError):
                     widget.removeEventFilter(mouse_filter)
-                except RuntimeError:
-                    pass
 
         # Keep strong refs on the menu so the filter/timer aren't GC'd prematurely
         menu._mouse_filter = mouse_filter
@@ -584,7 +588,7 @@ class TriggerWidget(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
-            edge = self._get_resize_edge(event.pos())
+            edge = self._get_resize_edge(event.position().toPoint())
             if edge:
                 self._resizing = True
                 self._resize_edge = edge
@@ -625,7 +629,7 @@ class TriggerWidget(QWidget):
                 self.dragged.emit(new_pos.x(), new_pos.y())
             event.accept()
         else:
-            self._update_resize_cursor(event.pos())
+            self._update_resize_cursor(event.position().toPoint())
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]

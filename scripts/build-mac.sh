@@ -129,12 +129,23 @@ if pgrep -f "python.*-m runner|runner/main.py|\.venv/bin/runner" >/dev/null; the
   echo "         Quit it (right-click the arrow > Exit) or the installed app will not open." >&2
 fi
 
-# Copy beside the old app first, then swap, so a failed copy leaves the old one in place.
+# Copy beside the old app first, then swap with rollback if mv fails.
 STAGING="/Applications/.Runner.app.new"
-rm -rf "$STAGING"
+BACKUP="/Applications/.Runner.app.old"
+rm -rf "$STAGING" "$BACKUP"
 ditto "$APP" "$STAGING"
-rm -rf "$INSTALLED"
-mv "$STAGING" "$INSTALLED"
+if [ -d "$INSTALLED" ]; then
+  mv "$INSTALLED" "$BACKUP"
+fi
+if ! mv "$STAGING" "$INSTALLED"; then
+  echo "ERROR: could not move new Runner.app into place; restoring previous copy." >&2
+  if [ -d "$BACKUP" ]; then
+    mv "$BACKUP" "$INSTALLED"
+  fi
+  rm -rf "$STAGING"
+  exit 1
+fi
+rm -rf "$BACKUP"
 
 echo "==> Starting $INSTALLED..."
 # open passes this shell's environment on. QT_QPA_PLATFORM=offscreen (set

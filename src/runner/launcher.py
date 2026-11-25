@@ -15,15 +15,18 @@ Supports:
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
 from .config import Launcher
+
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://")
 
 
 def _is_url_or_protocol(cmd: str) -> bool:
@@ -31,7 +34,7 @@ def _is_url_or_protocol(cmd: str) -> bool:
     return (
         cmd.startswith(("http://", "https://", "ftp://", "mailto:", "file:"))
         or cmd.startswith("ms-")  # ms-settings, ms-calendar, etc.
-        or "://" in cmd[:10]
+        or bool(_SCHEME_RE.match(cmd))
     )
 
 
@@ -71,8 +74,11 @@ def _command_words(command: str) -> list[str]:
     path chosen with Browse... always works. Otherwise the field is split like
     a shell would, so "python3 tool.py" runs python3 with tool.py.
     """
-    if Path(command).exists():
-        return [command]
+    try:
+        if Path(command).exists():
+            return [command]
+    except OSError:
+        pass
     try:
         words = _split(command)
     except ValueError:
@@ -137,7 +143,11 @@ def _is_mac_app(command: str, words: Sequence[str]) -> bool:
     """
     if command.rstrip("/").lower().endswith(".app"):
         return True
-    if Path(command).exists() or "/" in command:
+    try:
+        exists = Path(command).exists()
+    except OSError:
+        exists = False
+    if exists or "/" in command:
         return False
     return shutil.which(words[0]) is None
 
@@ -153,13 +163,19 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
         raise ValueError("Empty command")
 
     args_str = launcher.args.strip() if launcher.args else ""
-    args_list = [_expand_arg(arg) for arg in _split(args_str)] if args_str else []
+    try:
+        args_list = [_expand_arg(arg) for arg in _split(args_str)] if args_str else []
+    except ValueError as exc:
+        raise ValueError(f"Invalid arguments: {exc}") from None
 
     cwd = None
     if launcher.working_dir:
         cwd = os.path.expandvars(os.path.expanduser(launcher.working_dir))
-        if cwd and not Path(cwd).exists():
-            cwd = None  # fall back
+        try:
+            if cwd and not Path(cwd).exists():
+                cwd = None  # fall back
+        except OSError:
+            cwd = None
     env = _child_env()
 
     # URL / protocol / registered shell command -> let the OS handle it
@@ -167,8 +183,9 @@ def launch(launcher: Launcher) -> subprocess.Popen | None:
         if sys.platform == "win32":
             os.startfile(command)  # type: ignore[attr-defined]
             return None
-        opener = "open" if sys.platform == "darwin" else "xdg-open"
-        return subprocess.Popen([opener, command], cwd=cwd, env=env)
+        if sys.platform == "darwin":
+            return subprocess.Popen(["open", "--", command], cwd=cwd, env=env)
+        return subprocess.Popen(["xdg-open", command], cwd=cwd, env=env)
 
     words = _command_words(command)
 

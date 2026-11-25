@@ -505,12 +505,14 @@ def test_dropdown_filter_hint_keypress_force_ensure(qapp, qtbot):
     tiny_left_screen = MagicMock()
     tiny_left_screen.availableGeometry.return_value = QRect(0, 0, 200, 800)  # narrow so wide dropdown clamps
     panel.setFixedWidth(300)  # wider than avail to trigger left clamp in position
-    with patch("runner.ui.dropdown.QApplication.screenAt", return_value=tiny_left_screen):
-        with patch.object(panel, "_update_height_for_content", lambda: None):
-            panel._frame.setFixedHeight(100)
-            panel.position_adjacent(fake_trigger)
-            # x should have been clamped to avail.left()
-            assert panel.x() >= 0
+    with (
+        patch("runner.ui.dropdown.QApplication.screenAt", return_value=tiny_left_screen),
+        patch.object(panel, "_update_height_for_content", lambda: None),
+    ):
+        panel._frame.setFixedHeight(100)
+        panel.position_adjacent(fake_trigger)
+        # x should have been clamped to avail.left()
+        assert panel.x() >= 0
 
 
 def test_trigger_mouse_resize_drag_hover(qapp, qtbot):
@@ -536,10 +538,14 @@ def test_trigger_mouse_resize_drag_hover(qapp, qtbot):
     trigger._update_resize_cursor(QPoint(1, 1))  # sets cursor, no assert needed
 
     # Mouse press near edge -> _resizing
-    edge_pos = QPoint(2, 2)
+    from PySide6.QtCore import QPointF
+
+    edge_pos = QPointF(2, 2)
+    edge_global = QPointF(trigger.mapToGlobal(QPoint(2, 2)))
     press = QMouseEvent(
         QEvent.Type.MouseButtonPress,
         edge_pos,
+        edge_global,
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
@@ -549,10 +555,12 @@ def test_trigger_mouse_resize_drag_hover(qapp, qtbot):
     assert trigger._resize_edge in ("topleft", "left", "top")
 
     # Simulate move during resize (calls _perform_resize)
-    move_pos = QPoint(5, 5)
+    move_pos = QPointF(5, 5)
+    move_global = QPointF(trigger.mapToGlobal(QPoint(5, 5)))
     move_evt = QMouseEvent(
         QEvent.Type.MouseMove,
         move_pos,
+        move_global,
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
@@ -565,6 +573,7 @@ def test_trigger_mouse_resize_drag_hover(qapp, qtbot):
     release = QMouseEvent(
         QEvent.Type.MouseButtonRelease,
         move_pos,
+        move_global,
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,

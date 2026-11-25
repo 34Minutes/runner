@@ -9,10 +9,17 @@ before creating widgets, and again before asking open widgets to restyle.
 
 from __future__ import annotations
 
+import hashlib
+import math
+import os
 import re
+import struct
+import sys
 import tempfile
+import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import contextlib
 
 
 @dataclass(frozen=True)
@@ -78,12 +85,12 @@ DARK = ColorScheme(
     search_border="rgba(70, 70, 75, 180)",
     search_focus="rgba(90, 120, 180, 200)",
     scroll_handle="rgba(120, 120, 125, 160)",
-    hint_fg="#888",
+    hint_fg="#94949a",
     row_bg="rgba(55, 55, 60, 200)",
     row_fg="#eee",
     row_border="rgba(90, 90, 95, 180)",
-    hover_bg="rgba(70, 110, 170, 210)",
-    hover_fg="#eee",
+    hover_bg="rgba(58, 98, 158, 210)",
+    hover_fg="#ffffff",
     hover_border="rgba(100, 140, 200, 220)",
     pressed_bg="rgba(50, 85, 140, 230)",
     pressed_fg="#eee",
@@ -183,8 +190,8 @@ MEDIUM = ColorScheme(
     hover_border="rgba(156, 180, 200, 225)",
     pressed_bg="rgba(72, 96, 118, 238)",
     pressed_fg="#f4f6f8",
-    selected_bg="rgba(112, 134, 156, 232)",
-    selected_fg="#f7f8fa",
+    selected_bg="rgba(82, 106, 130, 232)",
+    selected_fg="#ffffff",
     selected_border="rgba(170, 190, 208, 230)",
     selected_hover_bg="rgba(90, 118, 142, 238)",
     selected_hover_fg="#ffffff",
@@ -202,8 +209,8 @@ MEDIUM = ColorScheme(
     toggle_knob=(236, 236, 238),
     toggle_knob_ring=(190, 192, 198, 120),
     dialog_drag_border="#c6a35e",
-    dialog_selected_bg="#70869c",
-    dialog_selected_fg="#f7f8fa",
+    dialog_selected_bg="#526a82",
+    dialog_selected_fg="#ffffff",
     tray_icon="#7f96ab",
 )
 
@@ -267,6 +274,16 @@ QPushButton:hover {{
     background-color: {hover_bg};
     color: {hover_fg};
     border: 1px solid {hover_border};
+}}
+QPushButton[kbSelected="true"] {{
+    background-color: {selected_bg};
+    color: {selected_fg};
+    border: 1px solid {selected_border};
+}}
+QPushButton[kbSelected="true"]:hover {{
+    background-color: {selected_hover_bg};
+    color: {selected_hover_fg};
+    border: 1px solid {selected_hover_border};
 }}
 QPushButton[dragging="true"],
 QPushButton[dragging="true"]:hover,
@@ -416,7 +433,7 @@ def solid(colour: str) -> str:
 def mix(a: str, b: str, t: float) -> str:
     """t of the way from colour a to colour b, as #rrggbb."""
     ca, cb = _channels(a), _channels(b)
-    return _hex(tuple(round(x + (y - x) * t) for x, y in zip(ca, cb)))  # type: ignore[arg-type]
+    return _hex(tuple(round(x + (y - x) * t) for x, y in zip(ca, cb, strict=True)))  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
@@ -473,23 +490,89 @@ def dialog_colors(scheme: ColorScheme | None = None) -> DialogColors:
     )
 
 
-def _icon_file(name: str, svg: str) -> str:
-    """Write a small SVG once and return its path for a stylesheet url()."""
-    folder = Path(tempfile.gettempdir()) / "runner-ui-icons"
+def _user_icon_dir() -> Path:
+    """Per-user private temp folder for generated UI icons."""
+    try:
+        import getpass
+
+        user = getpass.getuser()
+    except (ImportError, KeyError, OSError):
+        user = str(os.getuid()) if hasattr(os, "getuid") else "user"
+    token = hashlib.sha256(user.encode("utf-8")).hexdigest()[:12]
+    folder = Path(tempfile.gettempdir()) / f"runner-ui-icons-{token}"
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "win32":
+        with contextlib.suppress(OSError):
+            os.chmod(folder, 0o700)
+    return folder
+
+
+def _dist_to_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    dx, dy = bx - ax, by - ay
+    len_sq = dx * dx + dy * dy
+    t = 0.0 if len_sq == 0.0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / len_sq))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _encode_png_rgba(width: int, height: int, pixels: bytearray) -> bytes:
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+    stride = width * 4
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        raw.extend(pixels[y * stride : (y + 1) * stride])
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw), level=9))
+        + chunk(b"IEND", b"")
+    )
+
+
+def _checkmark_png(colour: str) -> bytes:
+    """14x14 anti-aliased RGBA PNG checkmark. PNG is built into QtGui (no qsvg plugin needed)."""
+    r, g, b = _channels(colour)
+    w = h = 14
+    pixels = bytearray(w * h * 4)
+    half_stroke = 1.0
+    for y in range(h):
+        py = y + 0.5
+        for x in range(w):
+            px = x + 0.5
+            d = min(
+                _dist_to_segment(px, py, 3.0, 7.4, 5.8, 10.1),
+                _dist_to_segment(px, py, 5.8, 10.1, 11.0, 4.0),
+            )
+            cov = max(0.0, min(1.0, half_stroke + 0.5 - d))
+            if cov > 0.0:
+                idx = (y * w + x) * 4
+                pixels[idx : idx + 4] = bytes((r, g, b, round(cov * 255)))
+    return _encode_png_rgba(w, h, pixels)
+
+
+def _icon_file(name: str, data: bytes) -> str:
+    """Write a small PNG once into a private per-user dir and return its path for url()."""
+    folder = _user_icon_dir()
     path = folder / name
     if not path.exists():
-        folder.mkdir(parents=True, exist_ok=True)
-        path.write_text(svg, encoding="utf-8")
+        fd, tmp_name = tempfile.mkstemp(dir=folder, prefix=".icon.", suffix=".tmp")
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp_path, path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
     return path.as_posix()
 
 
 def check_icon(colour: str) -> str:
-    svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14">'
-        f'<path d="M3 7.4 L5.8 10.1 L11 4" fill="none" stroke="{colour}" stroke-width="2"'
-        ' stroke-linecap="round" stroke-linejoin="round"/></svg>'
-    )
-    return _icon_file(f"check-{colour.lstrip('#')}.svg", svg)
+    return _icon_file(f"check-{colour.lstrip('#')}.png", _checkmark_png(colour))
 
 
 _DIALOG_QSS = """
@@ -515,14 +598,14 @@ QPushButton:pressed {{ background: {default}; color: {default_text}; }}
 QPushButton:default {{ background: {default}; color: {default_text}; border-color: {default_border}; }}
 QPushButton:default:hover {{ background: {button_hover}; color: {button_hover_text}; }}
 QPushButton:disabled {{ background: {window}; color: {disabled}; border-color: {field_border}; }}
-QPushButton:focus {{ outline: none; }}
+QPushButton:focus {{ border: 2px solid {focus}; padding: 4px 13px; }}
 
 QListWidget, QTableWidget, QScrollArea, QAbstractScrollArea {{
     background: {field}; alternate-background-color: {field_alt}; color: {text};
     border: 1px solid {field_border}; border-radius: 5px;
     selection-background-color: {selection}; selection-color: {selection_text};
-    outline: none;
 }}
+QListWidget:focus, QTableWidget:focus {{ border: 1px solid {focus}; }}
 QListWidget::item {{ padding: 4px 6px; }}
 QListWidget::item:selected {{ background: {selection}; color: {selection_text}; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}

@@ -30,12 +30,26 @@ class SubmenuButton(QPushButton):
         self.setObjectName("submenuRow")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(28)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName(f"{name} container group")
+        self.setAccessibleDescription(
+            "Press Enter or Right arrow, or hover, to open its launchers"
+        )
+        self._kb_selected = False
         self.apply_theme()
         self.setToolTip("Hover to open\nDrag up or down to reorder\nRight-click to edit or delete")
 
     def apply_theme(self) -> None:
         self.setStyleSheet(submenu_qss())
+
+    def set_keyboard_selected(self, selected: bool) -> None:
+        self._kb_selected = selected
+        self.setProperty("kbSelected", "true" if selected else "false")
+        self.style().polish(self)
+        self.update()
+
+    def is_keyboard_selected(self) -> bool:
+        return self._kb_selected
 
     def enterEvent(self, event: QEvent) -> None:  # type: ignore[override]
         self.hovered.emit(self.item_id)

@@ -57,5 +57,5 @@ qt_api = "pyside6"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-# Pyflakes checks only: unused imports and variables, undefined names.
-select = ["F"]
+# Pyflakes, bugbear, pyupgrade, and simplify checks.
+select = ["F", "B", "UP", "SIM"]

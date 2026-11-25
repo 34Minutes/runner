@@ -85,7 +85,7 @@ def describe_repeat(entry: ScheduleEntry) -> str:
     """'Every 1 week', 'Every 1 day and 12 hours', or 'Does not repeat'."""
     parts = [
         f"{value} {singular if value == 1 else plural}"
-        for value, (plural, singular) in zip(interval_parts(entry), UNIT_NAMES)
+        for value, (plural, singular) in zip(interval_parts(entry), UNIT_NAMES, strict=True)
         if value
     ]
     if not parts:

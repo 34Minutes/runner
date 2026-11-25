@@ -5,22 +5,27 @@ Only imported/used on win32.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
-from typing import Optional
 
 
-def _get_executable_path() -> str:
-    """Return the path to the running executable.
-    When frozen (PyInstaller onefile), this is the .exe.
-    Falls back gracefully for development.
+def _get_startup_command() -> str:
+    """Return the command string for the Windows HKCU Run entry.
+
+    When frozen (PyInstaller), runs the bundled .exe directly. In development,
+    invokes pythonw.exe (or sys.executable) with the script path so Windows
+    does not rely on .py file associations.
     """
     if getattr(sys, "frozen", False):
-        # PyInstaller onefile or onedir
-        return sys.executable
-    # Development: point at the script or pythonw. For startup we prefer the console-less experience.
-    # Users normally run the bundled exe, so this path is mainly for dev testing.
-    return os.path.abspath(sys.argv[0])
+        return f'"{sys.executable}"'
+    exe = sys.executable
+    if exe.lower().endswith("python.exe"):
+        pythonw = exe[:-10] + "pythonw.exe"
+        if os.path.exists(pythonw):
+            exe = pythonw
+    script = os.path.abspath(sys.argv[0])
+    return f'"{exe}" "{script}"'
 
 
 def add_to_startup() -> bool:
@@ -33,15 +38,12 @@ def add_to_startup() -> bool:
     except ImportError:
         return False
 
-    exe = _get_executable_path()
-    # Quote if the path contains spaces (standard for Run keys)
-    if " " in exe and not (exe.startswith('"') and exe.endswith('"')):
-        exe = f'"{exe}"'
+    cmd = _get_startup_command()
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-            winreg.SetValueEx(key, "Runner", 0, winreg.REG_SZ, exe)
+            winreg.SetValueEx(key, "Runner", 0, winreg.REG_SZ, cmd)
         return True
     except OSError:
         return False
@@ -56,11 +58,11 @@ def remove_from_startup() -> bool:
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-            try:
-                winreg.DeleteValue(key, "Runner")
-            except FileNotFoundError:
-                pass  # already gone
+        with (
+            winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key,
+            contextlib.suppress(FileNotFoundError),  # already gone
+        ):
+            winreg.DeleteValue(key, "Runner")
         return True
     except OSError:
         return False
@@ -78,7 +80,7 @@ def ensure_startup_entry(enabled: bool) -> bool:
 
 # --- Single instance (mutex) support ---
 
-_single_instance_mutex_handle: Optional[int] = None
+_single_instance_mutex_handle: int | None = None
 
 
 def acquire_single_instance_mutex() -> bool:

@@ -18,6 +18,7 @@ class LaunchButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(28)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName(launcher.name)
         self._kb_selected = False
         self._apply_style()
         # Future: add icon on left

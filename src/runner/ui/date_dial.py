@@ -229,6 +229,10 @@ class MetalDial(QWidget):
         self.setMinimumSize(360, 360)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("Date and time dial")
+        self.setAccessibleDescription(
+            "Use Up and Down to pick a ring, Left and Right to step, Enter or Space to select"
+        )
 
     # ---------- settings ----------
     def set_scheme(self, scheme: theme.ColorScheme):
@@ -300,7 +304,7 @@ class MetalDial(QWidget):
             keep = min(self.day.index, n - 1)
             self.day.items = [str(d) for d in range(1, n + 1)]
             self.day.jump_to(keep)
-        for speed, (ring, index) in zip((4.5, 5.5, 6.5, 7.5, 8.5), targets.items()):
+        for speed, (ring, index) in zip((4.5, 5.5, 6.5, 7.5, 8.5), targets.items(), strict=True):
             ring.velocity = 0.0
             ring.target = ring.rotation_for(index)
             ring.spring = speed

@@ -257,8 +257,20 @@ class RunnerApi:
         item = self._find(kind, ref)
         self._check_owner(kind, source, item)
         if kind == "launcher":
+            scheduled = [g.name for g in self.cfg.config.groups if g.scheduled and _has(g, item.id)]
+            if scheduled:
+                raise ApiError(
+                    f"{item.name!r} runs on a schedule ({', '.join(scheduled)}), so it "
+                    "can't be deleted from outside Runner. "
+                    "Turn that schedule's Schedule switch off in Runner first."
+                )
             self.cfg.remove_launcher(item.id)
         elif kind == "group":
+            if item.scheduled:
+                raise ApiError(
+                    f"{item.name!r} is scheduled, so it can't be deleted from outside Runner. "
+                    "Turn its Schedule switch off in Runner first."
+                )
             self.cfg.remove_group(item.id)
         else:
             self.cfg.remove_container_group(item.id)

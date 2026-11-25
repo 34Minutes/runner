@@ -71,13 +71,13 @@ MAX_TOTAL = PLACES[0] * UNITS[0].radix - 1
 
 def digits(total: int) -> list[int]:
     out = []
-    for place, unit in zip(PLACES, UNITS):
+    for place, unit in zip(PLACES, UNITS, strict=True):
         out.append((total // place) % unit.radix)
     return out
 
 
 def describe(total: int) -> str:
-    parts = [f"{d} {u.singular}{'' if d == 1 else 's'}" for d, u in zip(digits(total), UNITS) if d]
+    parts = [f"{d} {u.singular}{'' if d == 1 else 's'}" for d, u in zip(digits(total), UNITS, strict=True) if d]
     if not parts:
         return "No interval"
     if len(parts) == 1:
@@ -153,6 +153,10 @@ class IntervalRoller(QWidget):
         super().__init__(parent)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(440, 220)
+        self.setAccessibleName("Repeat interval roller")
+        self.setAccessibleDescription(
+            "Use Left and Right to pick a unit, Up and Down to step, Enter or Space to select"
+        )
         self.rollers = [Roller(i, u) for i, u in enumerate(UNITS)]
         self._total = 0
         self.focus_roller = len(self.rollers) - 2  # hours
@@ -190,11 +194,11 @@ class IntervalRoller(QWidget):
         return self._total
 
     def values(self) -> dict[str, int]:
-        return {u.name: d for u, d in zip(UNITS, digits(self._total))}
+        return {u.name: d for u, d in zip(UNITS, digits(self._total), strict=True)}
 
     def set_total(self, total: int, animate: bool = True):
         self._total = max(0, min(MAX_TOTAL, total))
-        for r, d in zip(self.rollers, digits(self._total)):
+        for r, d in zip(self.rollers, digits(self._total), strict=True):
             r.show_digit(d)
             if not animate:
                 r.pos = float(r.committed)
@@ -317,7 +321,7 @@ class IntervalRoller(QWidget):
 
     def _roller_at(self, pos: QPointF) -> Roller | None:
         _, slots, _ = self._layout()
-        for r, s in zip(self.rollers, slots):
+        for r, s in zip(self.rollers, slots, strict=True):
             if s.adjusted(-4, -self.TOP, 4, 4).contains(pos):
                 return r
         return None
@@ -433,8 +437,8 @@ class IntervalRoller(QWidget):
         self._paint_bezel(p, bezel, slots)
         self._paint_key(p, key)
 
-        resting = [(r, s) for r, s in zip(self.rollers, slots) if r.lift <= 0.001]
-        raised = [(r, s) for r, s in zip(self.rollers, slots) if r.lift > 0.001]
+        resting = [(r, s) for r, s in zip(self.rollers, slots, strict=True) if r.lift <= 0.001]
+        raised = [(r, s) for r, s in zip(self.rollers, slots, strict=True) if r.lift > 0.001]
         for r, s in resting:
             self._paint_drum(p, r, s, radius, lit=False)
         for r, s in raised:
@@ -505,7 +509,7 @@ class IntervalRoller(QWidget):
         p.setFont(font)
         ink = _mix(pal.shadow, QColor(0, 0, 0), 0.6)
         lit = QColor(255, 255, 255, 120)
-        for r, s in zip(self.rollers, slots):
+        for r, s in zip(self.rollers, slots, strict=True):
             box = QRectF(s.left() - 10, bezel.top() + 4, s.width() + 20, self.TOP - 10)
             flags = Qt.AlignmentFlag.AlignCenter
             p.setPen(lit)

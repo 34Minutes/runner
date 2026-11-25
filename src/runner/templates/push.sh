@@ -40,13 +40,11 @@ exec > >(tee -a "$LOG") 2>&1
 echo "==> $TITLE, $(date '+%Y-%m-%d %H:%M:%S'), in $ROOT"
 
 _quiet() { [ "${SCRIPTS_QUIET:-0}" = "1" ]; }
-# AppleScript strings end at a double quote, so they become single quotes.
-_as() { local text="$1"; printf '%s' "${text//\"/\'}"; }
 
 notify() {
   _quiet && return 0
   if command -v osascript >/dev/null 2>&1; then
-    osascript -e "display notification \"$(_as "$2")\" with title \"$(_as "$1")\"" >/dev/null 2>&1 || true
+    osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$1" "$2" >/dev/null 2>&1 || true
   elif command -v notify-send >/dev/null 2>&1; then
     notify-send "$1" "$2" >/dev/null 2>&1 || true
   fi
@@ -72,8 +70,9 @@ run() { STEP="$1"; echo "==> $1: $2"; bash -c "$2"; }
 confirm() {
   _quiet && return 1
   command -v osascript >/dev/null 2>&1 || return 1
-  osascript -e "display dialog \"$(_as "$1")\" buttons {\"Cancel\", \"$(_as "$2")\"} \
-default button \"Cancel\" cancel button \"Cancel\" with title \"$(_as "$TITLE")\"" >/dev/null 2>&1
+  osascript -e 'on run argv' \
+    -e 'display dialog (item 1 of argv) buttons {"Cancel", (item 2 of argv)} default button "Cancel" cancel button "Cancel" with title (item 3 of argv)' \
+    -e 'end run' -- "$1" "$2" "$TITLE" >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------- the push

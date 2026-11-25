@@ -102,8 +102,12 @@ def test_a_scheduled_group_and_its_launchers_commands_are_locked(cfg):
     cfg.config.groups[0].scheduled = True  # the user switched it on in Runner
     assert "Turn its Schedule switch off" in _refused(api, {
         "op": "group.update", "source": "c", "ref": "Nightly", "data": {"launchers": []}})
+    assert "Turn its Schedule switch off" in _refused(api, {
+        "op": "group.delete", "source": "c", "ref": "Nightly"})
     assert "runs on a schedule (Nightly)" in _refused(api, {
         "op": "launcher.update", "source": "c", "ref": "Job", "data": {"command": "other"}})
+    assert "runs on a schedule (Nightly)" in _refused(api, {
+        "op": "launcher.delete", "source": "c", "ref": "Job"})
     _ok(api, {"op": "launcher.update", "source": "c", "ref": "Job", "data": {"name": "Job 2"}})
 
 
@@ -204,7 +208,7 @@ def test_a_request_goes_through_the_socket_and_a_plain_message_still_shows(qapp,
         server.close()
 
 
-def test_with_runner_closed_the_config_file_is_changed_directly(cfg, monkeypatch, capsys):
+def test_with_runner_closed_the_config_file_is_changed_directly(qapp, cfg, monkeypatch, capsys):
     monkeypatch.setattr(ctl, "SINGLE_INSTANCE_SERVER", f"RunnerTest_{uuid.uuid4().hex[:10]}")
     code = ctl.main(["--as", "claude", "--json", "launcher", "add", "--name", "Offline", "--command", "o"])
     out = capsys.readouterr()
@@ -269,3 +273,29 @@ def test_as_and_json_work_after_the_command_too():
     plain = ctl.build_parser().parse_args(["launcher", "list"])
     assert (late.source, late.json) == (early.source, early.json) == ("claude", True)
     assert (plain.source, plain.json) == ("cli", False)
+
+
+def test_send_does_not_fall_back_to_offline_on_socket_timeout(qapp, monkeypatch):
+    from PySide6.QtNetwork import QLocalSocket
+
+    class SlowSocket:
+        LocalSocketError = QLocalSocket.LocalSocketError
+
+        def connectToServer(self, _name):
+            pass
+
+        def waitForConnected(self, _ms):
+            return False
+
+        def error(self):
+            return QLocalSocket.LocalSocketError.SocketTimeoutError
+
+        def abort(self):
+            pass
+
+    offline_called = []
+    monkeypatch.setattr("PySide6.QtNetwork.QLocalSocket", SlowSocket)
+    monkeypatch.setattr(ctl, "_offline", lambda req: offline_called.append(req) or {"ok": True})
+    with pytest.raises(ctl.NoAnswer):
+        ctl.send({"op": "ping"})
+    assert offline_called == []

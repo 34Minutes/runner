@@ -1632,6 +1632,8 @@ class RunnerController:
         for panel in self._all_lists():
             panel.apply_theme()
         self.greeting.apply_theme()
+        if self.help_window is not None:
+            self.help_window.apply_theme()
         self.tray.setIcon(tray_icon())
 
     def _on_color_scheme(self, scheme_id: str) -> None:

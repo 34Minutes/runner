@@ -57,7 +57,7 @@ def test_each_scheme_has_its_own_dialog_colours():
 
 def test_disabled_reads_dimmer_than_text_in_every_scheme():
     def distance(a, b):
-        return sum(abs(x - y) for x, y in zip(theme._channels(a), theme._channels(b)))
+        return sum(abs(x - y) for x, y in zip(theme._channels(a), theme._channels(b), strict=True))
 
     for scheme in theme.SCHEMES:
         colors = theme.dialog_colors(scheme)
@@ -71,11 +71,53 @@ def test_solid_and_mix():
 
 
 def test_check_icon_is_written_once(tmp_path, monkeypatch):
+    import stat
+    from pathlib import Path
+
     monkeypatch.setattr(theme.tempfile, "gettempdir", lambda: str(tmp_path))
     path = theme.check_icon("#ffffff")
-    assert path.endswith(".svg")
-    assert "<svg" in open(path, encoding="utf-8").read()
+    assert path.endswith(".png")
+    data = Path(path).read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    if sys.platform != "win32":
+        assert stat.S_IMODE(Path(path).parent.stat().st_mode) == 0o700
     assert theme.check_icon("#ffffff") == path
+
+
+def test_dialog_qss_preserves_keyboard_focus_rings():
+    qss = theme.dialog_qss()
+    assert "outline: none" not in qss
+    assert "QPushButton:focus" in qss
+    assert "QListWidget:focus" in qss
+
+
+def test_custom_widgets_have_accessible_names(qapp, qtbot):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from runner.ui.date_dial import MetalDial
+    from runner.ui.dropdown import DropdownPanel
+    from runner.ui.interval_roller import IntervalRoller
+    from runner.ui.toggle_switch import ToggleSwitch
+
+    trigger = TriggerWidget(AppConfig())
+    dial = MetalDial()
+    roller = IntervalRoller()
+    switch = ToggleSwitch("Pin open")
+    panel = DropdownPanel(AppConfig())
+    for widget in (trigger, dial, roller, switch, panel):
+        qtbot.addWidget(widget)
+        assert widget.accessibleName()
+
+    # Container rows are keyboard-navigable and open on Right or Enter.
+    panel.set_submenu_items([("c1", "Tools")])
+    panel.rebuild_buttons([Launcher.new("Alpha", "alpha")])
+    panel.show()
+    opened = []
+    panel.submenu_hovered.connect(opened.append)
+    panel.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier))
+    panel.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier))
+    assert opened == ["c1"]
 
 
 # ------------------------------------------------- 2. one button order

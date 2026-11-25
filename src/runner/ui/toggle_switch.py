@@ -22,6 +22,7 @@ class ToggleSwitch(QAbstractButton):
     def __init__(self, text: str = "", parent=None):
         super().__init__(parent)
         self.setText(text)
+        self.setAccessibleName(text)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -131,6 +132,10 @@ class ToggleSwitch(QAbstractButton):
                 painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, self.text())
         finally:
             painter.end()  # ensure we don't leave an active painter (prevents backingstore/painter state crashes)
+
+    def setText(self, text: str):
+        super().setText(text)
+        self.setAccessibleName(text)
 
     def setChecked(self, checked: bool):
         super().setChecked(checked)

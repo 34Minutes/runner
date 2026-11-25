@@ -24,7 +24,8 @@ def test_is_url_or_protocol():
     assert launcher_mod._is_url_or_protocol("mailto:foo@bar.com")
     assert launcher_mod._is_url_or_protocol("ms-settings:privacy")
     assert launcher_mod._is_url_or_protocol("file:///tmp/foo")
-    assert launcher_mod._is_url_or_protocol("foo://bar")  # short proto, :// within [:10]
+    assert launcher_mod._is_url_or_protocol("foo://bar")  # valid RFC-3986 scheme
+    assert not launcher_mod._is_url_or_protocol("-a://evil")
     assert not launcher_mod._is_url_or_protocol("calc")
     assert not launcher_mod._is_url_or_protocol("/usr/bin/firefox")
 
@@ -60,7 +61,7 @@ def test_launch_url_non_windows(mock_popen):
     with patch("sys.platform", "darwin"):
         l = Launcher.new("Web", "https://example.com")
         launcher_mod.launch(l)
-        mock_popen.assert_called()
+        assert mock_popen.call_args[0][0] == ["open", "--", "https://example.com"]
 
 
 @patch("runner.launcher.subprocess.Popen")
@@ -121,13 +122,12 @@ def test_is_python_script_edge():
 # --- Win32 specific branches (exercised via platform patch + mocks so they run on any OS for coverage) ---
 
 def test_launch_url_windows():
-    with patch("sys.platform", "win32"):
-        # create=True lets us add the win32-only attr to the os module object for this test
-        with patch("runner.launcher.os.startfile", create=True) as mock_start:
-            l = Launcher.new("Web", "https://example.com")
-            res = launcher_mod.launch(l)
-            assert res is None
-            mock_start.assert_called_once_with("https://example.com")
+    # create=True lets us add the win32-only attr to the os module object for this test
+    with patch("sys.platform", "win32"), patch("runner.launcher.os.startfile", create=True) as mock_start:
+        l = Launcher.new("Web", "https://example.com")
+        res = launcher_mod.launch(l)
+        assert res is None
+        mock_start.assert_called_once_with("https://example.com")
 
 
 def _on_path(name):
@@ -180,11 +180,13 @@ def test_launch_win32_shell_execute_failure_is_reported():
     """A typo used to vanish inside cmd.exe. Now Windows' refusal is an error."""
     fake_ctypes = MagicMock()
     fake_ctypes.windll.shell32.ShellExecuteW.return_value = 2  # ERROR_FILE_NOT_FOUND
-    with patch("sys.platform", "win32"), \
-         patch("runner.launcher.shutil.which", return_value=None), \
-         patch.dict("sys.modules", {"ctypes": fake_ctypes}):
-        with pytest.raises(OSError, match="could not start 'brav'"):
-            launcher_mod.launch(Launcher.new("Typo", "brav"))
+    with (
+        patch("sys.platform", "win32"),
+        patch("runner.launcher.shutil.which", return_value=None),
+        patch.dict("sys.modules", {"ctypes": fake_ctypes}),
+        pytest.raises(OSError, match="could not start 'brav'"),
+    ):
+        launcher_mod.launch(Launcher.new("Typo", "brav"))
 
 
 def test_shell_execute_child_does_not_get_bundle_qt_paths(monkeypatch):
@@ -229,9 +231,8 @@ def test_run_as_admin_failure_raises():
     """A declined UAC prompt or a missing file is reported, not silently dropped."""
     fake_ctypes = MagicMock()
     fake_ctypes.windll.shell32.ShellExecuteW.return_value = 5  # SE_ERR_ACCESSDENIED
-    with patch.dict("sys.modules", {"ctypes": fake_ctypes}):
-        with pytest.raises(OSError):
-            launcher_mod._launch_as_admin_windows(["tool.exe"], None)
+    with patch.dict("sys.modules", {"ctypes": fake_ctypes}), pytest.raises(OSError):
+        launcher_mod._launch_as_admin_windows(["tool.exe"], None)
 
 
 def test_run_as_admin_quotes_arguments_with_spaces():
@@ -300,11 +301,13 @@ def test_frozen_build_runs_scripts_with_python_from_path(mock_popen):
 
 
 def test_frozen_build_without_python_raises():
-    with patch("sys.platform", "darwin"), \
-         patch("runner.launcher.sys.frozen", True, create=True), \
-         patch("runner.launcher.shutil.which", return_value=None):
-        with pytest.raises(FileNotFoundError):
-            launcher_mod.launch(Launcher.new("Script", "/tmp/tool.py"))
+    with (
+        patch("sys.platform", "darwin"),
+        patch("runner.launcher.sys.frozen", True, create=True),
+        patch("runner.launcher.shutil.which", return_value=None),
+        pytest.raises(FileNotFoundError),
+    ):
+        launcher_mod.launch(Launcher.new("Script", "/tmp/tool.py"))
 
 
 @patch("runner.launcher.subprocess.Popen")

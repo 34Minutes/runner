@@ -9,6 +9,9 @@ import json
 import os
 import shutil
 import sys
+import tempfile
+import threading
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -237,7 +240,7 @@ def _schedule_from(raw: Any, *, label: str, problems: list[str]) -> list[Schedul
         if entry is None or entry.id in seen:
             continue
         try:
-            entry.when
+            _ = entry.when
         except ValueError:
             problems.append(f"{where} has an unreadable date and was skipped.")
             continue
@@ -466,10 +469,60 @@ def _make_private(path: Path, mode: int) -> None:
     """chmod on macOS and Linux. Windows keeps %APPDATA% private by itself."""
     if sys.platform == "win32":
         return
-    try:
+    with suppress(OSError):
         os.chmod(path, mode)
-    except OSError:
-        pass
+
+
+_LOCK_STATE = threading.local()
+
+
+@contextmanager
+def _config_lock(config_dir: Path):
+    """Reentrant per-thread advisory lock serializing config writes across processes."""
+    config_dir.mkdir(parents=True, exist_ok=True)
+    _make_private(config_dir, 0o700)
+    lock_path = (config_dir / ".config.lock").resolve()
+    held: dict[Path, int] = getattr(_LOCK_STATE, "held", None)
+    if held is None:
+        held = {}
+        _LOCK_STATE.held = held
+    if held.get(lock_path, 0) > 0:
+        held[lock_path] += 1
+        try:
+            yield
+        finally:
+            held[lock_path] -= 1
+        return
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        _make_private(lock_path, 0o600)
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        held[lock_path] = 1
+        try:
+            yield
+        finally:
+            held.pop(lock_path, None)
+            if sys.platform == "win32":
+                import msvcrt
+
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 class ConfigManager:
@@ -528,19 +581,31 @@ class ConfigManager:
             self.load_problems = problems
         return cfg
 
+    @contextmanager
+    def locked(self):
+        """Hold the cross-process config lock across a read-modify-write sequence."""
+        with _config_lock(self.config_dir):
+            yield
+
     def save(self, config: AppConfig | None = None) -> None:
         if config is None:
             config = self.config
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-        _make_private(self.config_dir, 0o700)
-        tmp_path = self.config_path.with_suffix(".json.tmp")
-        # Launcher arguments can hold tokens or passwords. Only this user can
-        # read the file, whatever the umask or the home folder's permissions.
-        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            _make_private(tmp_path, 0o600)  # in case an old .tmp file was there
-            json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
-        tmp_path.replace(self.config_path)
+        with _config_lock(self.config_dir):
+            # Unique temp file avoids races with concurrent writers and symlink
+            # attacks. mkstemp creates the file with 0o600 on POSIX.
+            fd, tmp_name = tempfile.mkstemp(
+                dir=self.config_dir, prefix=".config.", suffix=".tmp"
+            )
+            tmp_path = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    _make_private(tmp_path, 0o600)
+                    json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, self.config_path)
+            except BaseException:
+                with suppress(OSError):
+                    tmp_path.unlink(missing_ok=True)
+                raise
         self._config = config
 
     def _create_default(self) -> AppConfig:

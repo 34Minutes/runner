@@ -39,6 +39,7 @@ from .dropdown_drag import _DRAG_LIFT_X, DragReorderMixin
 from .dropdown_motion import PanelMotionMixin
 from .locked_pair import _HIDE_DECAY_MS, LockedPairMotion
 from .rows import SubmenuButton, _RowGhost
+import contextlib
 
 # A list is allowed at least this tall before it scrolls, more when the screen has room.
 _MIN_MAX_LIST_H = 420
@@ -187,8 +188,10 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         self._heading.setStyleSheet(heading_qss())
         self._heading.hide()
 
+        self.setAccessibleName("Launcher list")
         self._search_edit = QLineEdit(self._frame)
         self._search_edit.setPlaceholderText("Filter launchers...")
+        self._search_edit.setAccessibleName("Filter launchers")
         self._search_edit.setStyleSheet(search_qss())
         self._search_edit.textChanged.connect(self._apply_filter)
         self._search_edit.installEventFilter(self)
@@ -244,6 +247,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         """Small corner label above the rows. Empty text hides it."""
         self._heading.setText(text)
         self._heading.setVisible(bool(text))
+        self.setAccessibleName(text or "Launcher list")
         if self.isVisible():
             self._update_height_for_content()
 
@@ -255,6 +259,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         """Filter box placeholder and the text shown when the list is empty."""
         self._empty_hint = empty_hint
         self._search_edit.setPlaceholderText(placeholder)
+        self._search_edit.setAccessibleName(placeholder.rstrip("."))
 
     def set_submenu_items(self, items: list[tuple[str, str]]) -> None:
         """Rows shown above the launchers. Each is (id, name). Hover opens a side list."""
@@ -495,6 +500,8 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
                 match = q == "" or q in w.item_name.lower()
                 was_visible = w.isVisible()
                 w.setVisible(match)
+                if match:
+                    self._visible_buttons.append(w)
                 if was_visible and not match:
                     self.submenu_left.emit(w.item_id)
             elif isinstance(w, QLabel):
@@ -617,10 +624,8 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             return
         previous = self._item_menu
         if previous is not None:
-            try:
+            with contextlib.suppress(RuntimeError):
                 previous.aboutToHide.disconnect(self._on_item_menu_hidden)
-            except RuntimeError:
-                pass
             previous.close()
 
         launcher = button.launcher
@@ -646,10 +651,8 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             return
         previous = self._item_menu
         if previous is not None:
-            try:
+            with contextlib.suppress(RuntimeError):
                 previous.aboutToHide.disconnect(self._on_item_menu_hidden)
-            except RuntimeError:
-                pass
             previous.close()
 
         item_id = button.item_id
@@ -684,10 +687,8 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
 
     def _clear_keyboard_selection(self) -> None:
         if self._current_button is not None:
-            try:
+            with contextlib.suppress(RuntimeError):  # row already deleted
                 self._current_button.set_keyboard_selected(False)
-            except RuntimeError:  # row already deleted
-                pass
         self._current_button = None
 
     def _set_keyboard_current(self, btn: LaunchButton | None) -> None:
@@ -699,17 +700,15 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         if btn is not None:
             btn.set_keyboard_selected(True)
             # Ensure it's scrolled into view (important for long lists)
-            try:
+            with contextlib.suppress(RuntimeError):  # row already deleted
                 self._scroll.ensureWidgetVisible(btn)
-            except RuntimeError:  # row already deleted
-                pass
 
-    def _get_visible_launch_buttons(self) -> list[LaunchButton]:
-        """Return currently visible LaunchButtons (post filter)."""
+    def _get_visible_launch_buttons(self) -> list[LaunchButton | SubmenuButton]:
+        """Return currently visible keyboard-navigable rows (launchers and containers)."""
         # Prefer the maintained list; fall back to live scan if needed
         if self._visible_buttons:
             return [b for b in self._visible_buttons if b.isVisible()]
-        return [b for b in self._buttons if isinstance(b, LaunchButton) and b.isVisible()]
+        return [b for b in self._buttons if isinstance(b, (LaunchButton, SubmenuButton)) and b.isVisible()]
 
     def _select_first_visible(self) -> None:
         vis = self._get_visible_launch_buttons()
@@ -906,10 +905,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         gap = 4
 
         def place(on_right: bool) -> QRect:
-            if on_right:
-                x = host_geo.right() + gap
-            else:
-                x = host_geo.left() - gap - target_w
+            x = host_geo.right() + gap if on_right else host_geo.left() - gap - target_w
             return QRect(x, anchor_top, target_w, target_h)
 
         rect = place(prefer_right)
@@ -970,7 +966,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
             return
 
         if key in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Home, Qt.Key.Key_End,
-                   Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                   Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Right):
             vis = self._get_visible_launch_buttons()
             if not vis:
                 super().keyPressEvent(event)
@@ -998,10 +994,21 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
                 self._select_last_visible()
                 event.accept()
                 return
+            if (
+                key == Qt.Key.Key_Right
+                and isinstance(self._current_button, SubmenuButton)
+                and self._current_button.isVisible()
+            ):
+                self.submenu_hovered.emit(self._current_button.item_id)
+                event.accept()
+                return
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if self._current_button is not None and self._current_button.isVisible():
-                    # Emit launch for the keyboard-chosen item
-                    self._on_button_clicked(self._current_button.launcher)
+                    if isinstance(self._current_button, SubmenuButton):
+                        self.submenu_hovered.emit(self._current_button.item_id)
+                    else:
+                        # Emit launch for the keyboard-chosen item
+                        self._on_button_clicked(self._current_button.launcher)
                 event.accept()
                 return
 
@@ -1031,26 +1038,28 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
                 self.row_left.emit(obj.launcher.id)
         if isinstance(obj, (LaunchButton, SubmenuButton)) and self._handle_reorder_event(obj, event):
             return True
-        if obj is self._search_edit and event.type() == QEvent.Type.KeyPress:
-            if isinstance(event, QKeyEvent):
-                if event.key() == Qt.Key.Key_Escape:
-                    if self._search_edit.text():
-                        self._search_edit.clear()
-                        return True
-                if event.key() == Qt.Key.Key_Down:
-                    # From filter box, Down jumps into the list (first result)
-                    vis = self._get_visible_launch_buttons()
-                    if vis:
-                        self._set_keyboard_current(vis[0])
-                        # Move focus so further arrows stay in our keyPress path if needed
-                        try:
-                            vis[0].setFocus(Qt.FocusReason.OtherFocusReason)
-                        except RuntimeError:  # row already deleted
-                            pass
-                        return True  # consume so it doesn't insert text
-                if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                    # Enter launches only a row the user has already moved to.
-                    if self._current_button is not None and self._current_button.isVisible():
-                        self._on_button_clicked(self._current_button.launcher)
-                        return True
+        if obj is self._search_edit and event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            if event.key() == Qt.Key.Key_Escape and self._search_edit.text():
+                self._search_edit.clear()
+                return True
+            if event.key() == Qt.Key.Key_Down:
+                # From filter box, Down jumps into the list (first result)
+                vis = self._get_visible_launch_buttons()
+                if vis:
+                    self._set_keyboard_current(vis[0])
+                    # Move focus so further arrows stay in our keyPress path if needed
+                    with contextlib.suppress(RuntimeError):  # row already deleted
+                        vis[0].setFocus(Qt.FocusReason.OtherFocusReason)
+                    return True  # consume so it doesn't insert text
+            if (
+                event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and self._current_button is not None
+                and self._current_button.isVisible()
+            ):
+                # Enter launches or opens only a row the user has already moved to.
+                if isinstance(self._current_button, SubmenuButton):
+                    self.submenu_hovered.emit(self._current_button.item_id)
+                else:
+                    self._on_button_clicked(self._current_button.launcher)
+                return True
         return super().eventFilter(obj, event)

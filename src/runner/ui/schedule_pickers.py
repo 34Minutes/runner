@@ -215,7 +215,7 @@ class DatePickerDialog(StayOnTopDialog):
 def entry_total(entry: ScheduleEntry) -> int:
     """The roller's single number for an entry's repeat."""
     parts = (entry.months, entry.weeks, entry.days, entry.hours, entry.minutes)
-    return sum(value * place for value, place in zip(parts, PLACES))
+    return sum(value * place for value, place in zip(parts, PLACES, strict=True))
 
 
 def apply_total(entry: ScheduleEntry, total: int) -> None:

@@ -36,14 +36,16 @@ Runner enforces these. A refused request prints the reason and exits 1.
 
 - **You can only change what your source made.** Anything the user made in
   Runner, or another source made, is read-only to you. You can still *use*
-  it: put the user's launchers in your groups by name.
+  it: put the user's launchers in your groups by name. Note that `--as` is
+  cooperative namespace isolation between tools running under the same user
+  account, not cryptographic authentication.
 - **You can't run anything.** There is no run command. The user starts
   launchers and groups themselves.
 - **No administrator rights.** `run_as_admin` can't be set from outside.
 - **Only the user schedules.** You can give a group dates (`--date`), but
   only the user can turn its Schedule switch on, in Runner. Once a group is
-  scheduled you can't change it, or the command, args or folder of any
-  launcher it runs, until the user turns the schedule off.
+  scheduled you can't change or delete it, or delete or change the command,
+  args or folder of any launcher it runs, until the user turns the schedule off.
 - **Not while Runner has a window open.** Changes are refused while one of
   Runner's own windows (an edit screen, a manager) is open, because it would
   save over them. Ask the user to close it and try again. Reading still works.

@@ -332,7 +332,7 @@ else:
         app = BUNDLE(
             coll,
             name="Runner.app",
-            icon=None,
+            icon="assets/icon.icns" if Path("assets/icon.icns").is_file() else None,
             bundle_identifier="com.dougie.runner",
             info_plist={
                 "LSUIElement": True,

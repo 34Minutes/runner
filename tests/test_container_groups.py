@@ -617,7 +617,7 @@ def test_a_late_leave_from_the_closed_main_list_keeps_the_container_list(qapp, q
 def test_container_list_rows_drag_to_a_new_place_and_save(qapp, qtbot, monkeypatch, tmp_path):
     from PySide6.QtCore import QEvent
 
-    from tests.test_menu_drag import _send_mouse
+    from test_menu_drag import _send_mouse
 
     ctl = _controller(qapp, monkeypatch, tmp_path)
     try:
