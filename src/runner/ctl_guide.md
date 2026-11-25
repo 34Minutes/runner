@@ -8,9 +8,9 @@ with a click.
 
 Print this guide any time with `runner ctl guide`.
 
-**Setting up a code project** with Build, Merge, Push and Release launchers?
-That has its own guide and commands: `runner project guide`. Use this guide
-for launchers and groups in general.
+**Build, merge, push or release scripts for a code project?** Copy a
+template with `runner template copy NAME --to DIR` (`runner template list`
+shows them), edit its settings, then make a launcher for it here.
 
 ## Before you start
 

@@ -201,10 +201,10 @@ def main() -> int:
         from .ctl import main as ctl_main
 
         return ctl_main(sys.argv[2:])
-    if len(sys.argv) > 1 and sys.argv[1] == "project":
-        from .project_cli import main as project_main
+    if len(sys.argv) > 1 and sys.argv[1] == "template":
+        from .template_cli import main as template_main
 
-        return project_main(sys.argv[2:])
+        return template_main(sys.argv[2:])
     _start_in_home_folder()
     app = QApplication(sys.argv)
 

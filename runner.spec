@@ -195,15 +195,14 @@ a = Analysis(
     pathex=["src", "scripts"],
     binaries=[],
     # Runner's license and the third-party notices travel with every build.
-    # The guides `runner ctl guide`, `runner project guide` and Help show, and
-    # the project scripts `runner project` runs.
+    # The guide `runner ctl guide` prints, the Help page, and the script
+    # templates `runner template` copies.
     datas=[
         ("LICENSE", "."),
         ("THIRD-PARTY-NOTICES.txt", "."),
         ("src/runner/ctl_guide.md", "runner"),
-        ("src/runner/project_guide.md", "runner"),
         ("src/runner/help.md", "runner"),
-        ("src/runner/project_scripts/*.sh", "runner/project_scripts"),
+        ("src/runner/templates/*.sh", "runner/templates"),
     ],
     hiddenimports=[],
     hookspath=[],

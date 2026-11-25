@@ -9,8 +9,8 @@ set -euo pipefail
 #   ./scripts/build-mac.sh --skip-tests  build without the lint check and tests first
 #
 # Works from any folder. The version comes from pyproject.toml; runner.spec
-# reads the same value for the bundle's Info.plist. `runner project build`
-# runs it with a log and a notification at the end (see .runner/project.toml).
+# reads the same value for the bundle's Info.plist. scripts/build.sh
+# (the Runner Build launcher) runs it with a log and a notification.
 
 DEPLOY=0
 RUN_TESTS=1

@@ -89,22 +89,29 @@ The rules, because a launcher is a command Runner runs:
 - A group can be given dates, but only you can turn its Schedule switch on. A scheduled group, and the command of any launcher one runs, can't be changed until you turn the schedule off.
 - While a Runner window is open, changes are refused (reads still work), so the window can't save over them.
 
-### Project scripts (`runner project`)
+### Script templates (`runner template`)
 
-`runner project` gives a code project four launchers, **Build**, **Merge**, **Push** and **Release**, run by scripts that ship inside Runner ([src/runner/project_scripts/](src/runner/project_scripts/)). A project describes itself in `.runner/project.toml`: its main branch, remote, version file, changelog, and lint, test and build commands. Runner's own file is [.runner/project.toml](.runner/project.toml).
+Runner ships templates for the scripts a code project runs over and over. Copy them into a project and they're the project's own: edit the settings at the top, commit them, and make a launcher for each with `runner ctl`. Runner doesn't run or read them. The templates are in [src/runner/templates/](src/runner/templates/).
 
 ```bash
-runner project init                    # write .runner/project.toml with what it detects
-runner project check                   # ok / note / FIX for each part, until "Ready."
-runner project launchers --as claude   # a "<name> Scripts" container with the launchers
-runner project guide                   # the full guide, written for LLMs
+runner template list                          # build, merge, push, release, test-once
+runner template show release                  # read one
+runner template copy release push --to scripts   # copy, ready to edit
 ```
 
-Each script checks first and stops with the reason rather than guessing, logs each run to `~/Library/Logs/Runner/scripts/<name>/`, and ends with a notification. They need bash, so macOS and Linux only. **Help** on the arrow's right-click menu explains all of this for people.
+| Template | What it does |
+| --- | --- |
+| `build.sh` | Lint, test, then the build command. |
+| `merge.sh` | Fast-forwards the main branch to the branch you're on. Never pushes. |
+| `push.sh` | Pushes the branch and its new release tags. Asks before publishing. |
+| `release.sh` | Bumps the version, dates the changelog, commits, tags, then asks before pushing. |
+| `test-once.sh` | Runs the tests one at a time, and skips code that already passed. |
+
+Each checks first and stops with the reason rather than guessing, logs its last run to `~/Library/Logs/<project>/`, and ends with a notification. They need bash, so macOS and Linux only. Runner's own copies are in [scripts/](scripts/); its tests go through [scripts/run_tests.py](scripts/run_tests.py), which does what `test-once.sh` does.
 
 ### Putting `runner` on the PATH
 
-The Mac app's own program does `runner ctl`. Link it into a folder on your PATH once, and `runner ctl` works from any terminal and for any LLM tool:
+The Mac app's own program does `runner ctl` and `runner template`. Link it into a folder on your PATH once, and `runner ctl` works from any terminal and for any LLM tool:
 
 ```bash
 mkdir -p ~/.local/bin && ln -sf /Applications/Runner.app/Contents/MacOS/Runner ~/.local/bin/runner
@@ -118,15 +125,17 @@ An LLM working in another project won't know Runner exists. Paste this into its 
 
 ```markdown
 ## Runner (my desktop launcher)
-I use Runner, a launcher app, to start programs, scripts, files and URLs with one click.
-When I ask for a launcher, a button, a shortcut or a one-click way to run something,
-make it in Runner with `runner ctl` (if `runner` isn't found:
-`/Applications/Runner.app/Contents/MacOS/Runner ctl`).
-When I ask to set a project up for Runner, or for build, merge, push or release
-launchers, follow `runner project guide`.
-- Before your first use in a session, run `runner ctl guide` and follow it.
-- Always pass `--as claude` (your own name), use `upsert`, and use absolute paths.
-- You can't run what you make. Tell me its name and where to find it in Runner.
+When I ask for a launcher, button or one-click way to run something, make it
+in Runner. Commands (if `runner` isn't found, use
+/Applications/Runner.app/Contents/MacOS/Runner):
+  runner ctl ping                              is Runner answering?
+  runner ctl guide                             how to make launchers and groups; read it first
+  runner ctl --as claude launcher list --mine  what you made before
+  runner template list                         script templates: build, merge, push, release, test-once
+  runner template show NAME                    read a template
+  runner template copy NAME... --to DIR        copy templates into a project, then edit their settings
+Always pass --as claude, use upsert and absolute paths. You can't run what you
+make: tell me its name and where it is in Runner.
 ```
 
 ## Installation (development)
