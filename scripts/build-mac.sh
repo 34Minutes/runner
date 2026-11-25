@@ -137,5 +137,7 @@ rm -rf "$INSTALLED"
 mv "$STAGING" "$INSTALLED"
 
 echo "==> Starting $INSTALLED..."
-open "$INSTALLED"
+# open passes this shell's environment on. QT_QPA_PLATFORM=offscreen (set
+# to run the tests without windows) would start Runner with nothing on screen.
+env -u QT_QPA_PLATFORM open "$INSTALLED"
 echo "==> Deployed Runner $VERSION."
