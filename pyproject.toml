@@ -1,6 +1,6 @@
 [project]
 name = "runner"
-version = "2.0.0"
+version = "2.1.0"
 description = "A lightweight, always-on-top single launcher for scripts and applications (macOS + Windows)."
 readme = "README.md"
 requires-python = ">=3.11"

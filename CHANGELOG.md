@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - Per-launcher icons (auto + custom).
 
+## [2.1.0] - 2026-11-28
+
 ### Added
 - **Duplicate** on the launcher, execute group, schedule and container group screens, and in every row's right-click menu between Edit and Delete. It saves a copy named with the next free number in brackets ("Brave (1)"), beside the original in every list it is in, and opens the copy with its name selected. Cancel there keeps the copy.
 - The date dial carries into the next ring, as the interval roller does: past 23 the day goes on one, past the month's last day the month does, past December the year does, and turning back carries back. A carry that would leave the dial's twelve years stops at its edge.
