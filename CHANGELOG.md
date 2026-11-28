@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - Per-launcher icons (auto + custom).
 
+### Added
+- `scripts/latest.sh` (the **Runner Set Latest** launcher) points the `LATEST_RELEASE` tag at a version you pick and pushes only that tag. It lists the versions with the one the tag is on, asks before pushing, and notes a version with no GitHub release. Moving the tag builds and publishes nothing.
+
 ## [2.1.0] - 2026-11-28
 
 ### Added
