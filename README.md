@@ -165,6 +165,8 @@ Give clients a bundled app. PyInstaller is the supported bundler. `runner.spec` 
 ```bash
 ./scripts/build-mac.sh            # test, then build
 ./scripts/build-mac.sh --deploy   # also install to /Applications and start it
+./scripts/install-mac.sh          # install the build in dist/ without rebuilding
+./scripts/deploy.sh               # install, rebuilding first only if dist/ is out of date
 ```
 
 It runs the lint check and the tests first (`--skip-tests` to skip them), then writes `dist/Runner.app` and `dist/Runner.dmg`. It works from any folder. `--deploy` quits a running installed Runner, replaces `/Applications/Runner.app`, and opens the new one. The version comes from `pyproject.toml`; the build stops if `src/runner/__init__.py` disagrees. `dist/` is gitignored. An unsigned build will warn in Gatekeeper on first open. Right-click the app and choose Open, or approve it in System Settings → Privacy & Security.

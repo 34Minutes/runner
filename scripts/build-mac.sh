@@ -11,6 +11,8 @@ set -euo pipefail
 # Works from any folder. The version comes from pyproject.toml; runner.spec
 # reads the same value for the bundle's Info.plist. scripts/build.sh
 # (the Runner Build launcher) runs it with a log and a notification.
+# --deploy hands the new build to scripts/install-mac.sh; scripts/deploy.sh
+# (the Runner Deploy launcher) installs without rebuilding when it can.
 
 DEPLOY=0
 RUN_TESTS=1
@@ -102,53 +104,4 @@ if [ "$DEPLOY" -eq 0 ]; then
 fi
 
 # ------------------------------------------------------------------ deploy
-echo "==> Deploying to $INSTALLED..."
-
-# Ask the installed copy to quit, so it saves its arrow position, then wait.
-if pgrep -f "$INSTALLED/Contents/MacOS/" >/dev/null; then
-  echo "    Quitting the running Runner..."
-  # The installed copy may be an older build with the misspelled bundle id.
-  for bundle_id in com.dougie.runner com.douglie.runner; do
-    osascript -e "tell application id \"$bundle_id\" to quit" >/dev/null 2>&1 || true
-  done
-  for _ in $(seq 1 50); do
-    pgrep -f "$INSTALLED/Contents/MacOS/" >/dev/null || break
-    sleep 0.1
-  done
-  if pgrep -f "$INSTALLED/Contents/MacOS/" >/dev/null; then
-    echo "    Still running after 5 s; stopping it."
-    pkill -f "$INSTALLED/Contents/MacOS/" || true
-    sleep 1
-  fi
-fi
-
-# Only one Runner runs at a time. A copy started from the source tree would
-# make the new app exit straight away, so say so instead of silently failing.
-if pgrep -f "python.*-m runner|runner/main.py|\.venv/bin/runner" >/dev/null; then
-  echo "WARNING: a Runner started from the source tree is running." >&2
-  echo "         Quit it (right-click the arrow > Exit) or the installed app will not open." >&2
-fi
-
-# Copy beside the old app first, then swap with rollback if mv fails.
-STAGING="/Applications/.Runner.app.new"
-BACKUP="/Applications/.Runner.app.old"
-rm -rf "$STAGING" "$BACKUP"
-ditto "$APP" "$STAGING"
-if [ -d "$INSTALLED" ]; then
-  mv "$INSTALLED" "$BACKUP"
-fi
-if ! mv "$STAGING" "$INSTALLED"; then
-  echo "ERROR: could not move new Runner.app into place; restoring previous copy." >&2
-  if [ -d "$BACKUP" ]; then
-    mv "$BACKUP" "$INSTALLED"
-  fi
-  rm -rf "$STAGING"
-  exit 1
-fi
-rm -rf "$BACKUP"
-
-echo "==> Starting $INSTALLED..."
-# open passes this shell's environment on. QT_QPA_PLATFORM=offscreen (set
-# to run the tests without windows) would start Runner with nothing on screen.
-env -u QT_QPA_PLATFORM open "$INSTALLED"
-echo "==> Deployed Runner $VERSION."
+"$SCRIPT_DIR/install-mac.sh"

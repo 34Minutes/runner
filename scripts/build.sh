@@ -13,7 +13,7 @@ PROJECT_DIR=".."     # the project's folder, from this script's folder
 PROJECT_NAME="Runner"  # for notifications and the log folder
 LINT_CMD=""          # for example: ruff check .   (empty: no lint step)
 TEST_CMD=""          # for example: npm test       (empty: no test step)
-BUILD_CMD="./scripts/build-mac.sh --deploy"  # build-mac.sh lints and tests first (scripts/run_tests.py)
+BUILD_CMD="./scripts/build-mac.sh"  # lints and tests first (scripts/run_tests.py). Installing is scripts/deploy.sh
 # ---------------------------------------------------------------- the rest
 # Started from a Runner launcher there's no terminal, so each run's output
 # also goes to a log (the last run only), and a notification says how it
