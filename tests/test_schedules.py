@@ -409,6 +409,104 @@ def _settle(dial) -> None:
         dial._tick()
 
 
+def _stepped(qtbot, when, ring_name, steps):
+    """The dial's date after stepping one ring, as the wheel or arrow keys do."""
+    from runner.ui.date_dial import MetalDial
+
+    dial = MetalDial(when, first_year=2026)
+    qtbot.addWidget(dial)
+    ring = getattr(dial, ring_name)
+    for _ in range(abs(steps)):
+        ring.carries = True
+        ring.step_by(1 if steps > 0 else -1)
+    _settle(dial)
+    return dial.value()
+
+
+@pytest.mark.parametrize(
+    ("when", "ring", "steps", "expected"),
+    [
+        (datetime(2026, 11, 28, 23, 0), "hour", 1, datetime(2026, 11, 29, 0, 0)),
+        (datetime(2026, 11, 29, 0, 0), "hour", -1, datetime(2026, 11, 28, 23, 0)),
+        (datetime(2026, 11, 30, 23, 0), "hour", 1, datetime(2026, 12, 1, 0, 0)),
+        (datetime(2026, 12, 1, 0, 0), "hour", -1, datetime(2026, 11, 30, 23, 0)),
+        (datetime(2026, 12, 31, 23, 0), "hour", 1, datetime(2027, 1, 1, 0, 0)),
+        (datetime(2027, 1, 1, 0, 0), "hour", -1, datetime(2026, 12, 31, 23, 0)),
+        (datetime(2026, 12, 31, 23, 59), "minute", 1, datetime(2027, 1, 1, 0, 0)),
+        (datetime(2026, 11, 28, 22, 0), "hour", 5, datetime(2026, 11, 29, 3, 0)),
+        (datetime(2026, 12, 31, 9, 0), "day", 2, datetime(2027, 1, 2, 9, 0)),
+        (datetime(2028, 3, 1, 9, 0), "day", -1, datetime(2028, 2, 29, 9, 0)),
+        (datetime(2027, 3, 2, 9, 0), "day", -3, datetime(2027, 2, 27, 9, 0)),
+        (datetime(2026, 12, 5, 9, 0), "month", 1, datetime(2027, 1, 5, 9, 0)),
+        (datetime(2027, 1, 5, 9, 0), "month", -1, datetime(2026, 12, 5, 9, 0)),
+    ],
+)
+def test_a_ring_turned_past_its_end_carries_into_the_next(qapp, qtbot, when, ring, steps, expected):
+    assert _stepped(qtbot, when, ring, steps) == expected
+
+
+@pytest.mark.parametrize(
+    ("when", "ring", "steps"),
+    [
+        (datetime(2037, 12, 31, 23, 0), "hour", 1),
+        (datetime(2037, 12, 5, 9, 0), "month", 1),
+        (datetime(2026, 1, 1, 0, 0), "hour", -1),
+        (datetime(2026, 1, 1, 9, 0), "day", -1),
+    ],
+)
+def test_carrying_stops_at_the_year_rings_ends(qapp, qtbot, when, ring, steps):
+    # Twelve years, 2026 to 2037: going off either end would wrap to the other.
+    assert _stepped(qtbot, when, ring, steps) == when
+
+
+def test_dragging_the_hour_ring_past_midnight_carries(qapp, qtbot):
+    from runner.ui.date_dial import MetalDial
+
+    dial = MetalDial(datetime(2026, 11, 30, 22, 0), first_year=2026)
+    qtbot.addWidget(dial)
+    dial._grab = dial.hour
+    dial.hour.carries = True
+    for _ in range(30):  # three hours, a tenth of a notch at a time
+        dial.hour.rotation -= dial.hour.step / 10
+        dial._sync()
+    dial._grab = None
+    dial.hour.target = dial.hour.rotation_for(dial.hour.index_at(dial.hour.rotation))
+    _settle(dial)
+    assert dial.value() == datetime(2026, 12, 1, 1, 0)
+
+
+def test_selecting_mid_turn_settles_the_carry_first(qapp, qtbot):
+    from runner.ui.date_dial import MetalDial
+
+    dial = MetalDial(datetime(2026, 12, 31, 23, 0), first_year=2026)
+    qtbot.addWidget(dial)
+    chosen = []
+    dial.selected.connect(chosen.append)
+    dial.hour.carries = True
+    dial.hour.step_by(1)
+    dial._select()
+    assert chosen == [datetime(2027, 1, 1, 0, 0)]
+
+
+def test_spinning_to_a_date_carries_nothing(qapp, qtbot):
+    from runner.ui.date_dial import MetalDial
+
+    dial = MetalDial(datetime(2028, 6, 2, 21, 10), first_year=2026)
+    qtbot.addWidget(dial)
+    dial.spin_to(datetime(2026, 11, 24, 8, 41))
+    _settle(dial)
+    assert dial.value() == datetime(2026, 11, 24, 8, 41)
+
+
+def test_the_dial_opens_on_the_dates_own_year(qapp, qtbot):
+    # It used to open on the first year it lists, so a 2027 date read as 2026.
+    from runner.ui.date_dial import MetalDial
+
+    dial = MetalDial(datetime(2027, 3, 1, 9, 0), first_year=2026)
+    qtbot.addWidget(dial)
+    assert dial.value() == datetime(2027, 3, 1, 9, 0)
+
+
 def test_typing_a_date_spins_the_dial_there(qapp, qtbot):
     dialog = DatePickerDialog(datetime(2026, 11, 24, 9, 30), now=lambda: datetime(2026, 11, 24, 8))
     qtbot.addWidget(dialog)

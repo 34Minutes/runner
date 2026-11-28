@@ -6,6 +6,12 @@ to spin it: it rises out of the dial while held and settles back on release.
 Scroll over a ring to step it; Up/Down picks a ring, Left/Right steps it.
 Click the silver centre, or press Enter or Space, to select the date.
 
+Turning a ring past its end carries into the ring outside it, as the
+interval roller does: past 23 the hour goes back to 00 and the day goes on
+one, past the month's last day the month goes on one, past December the
+year does. Turning back carries back. Spinning to a date (Now, or a date
+typed under the dial) moves each ring straight there and carries nothing.
+
 The demo window is prototypes/metal_dial.py.
 """
 
@@ -131,6 +137,11 @@ class Ring:
         self.spring = self.SPRING
         self.lift = 0.0  # 0 resting in the dial, 1 raised while held
         self.lift_target = 0.0
+        # How far round the ring has turned, in notches, counting every turn:
+        # index is notch % len(items). A change in notch // len(items) is a carry.
+        self.notch = 0
+        # Off while the dial spins it to a date, which must not carry.
+        self.carries = True
         rnd = random.Random(seed)  # the brushing pattern, fixed per ring
         self.grain = [(rnd.random(), rnd.random() < 0.5, rnd.uniform(6, 26)) for _ in range(40)]
 
@@ -138,16 +149,26 @@ class Ring:
     def step(self) -> float:
         return 360.0 / len(self.items)
 
+    def notch_at(self, rotation: float) -> int:
+        return round(-rotation / self.step)
+
     def index_at(self, rotation: float) -> int:
-        return round(-rotation / self.step) % len(self.items)
+        return self.notch_at(rotation) % len(self.items)
+
+    def turns(self, notch: int) -> int:
+        """Whole turns between the last synced notch and this one: +1 past the end, -1 back past the start."""
+        n = len(self.items)
+        return notch // n - self.notch // n
 
     def rotation_for(self, index: int) -> float:
         base = -index * self.step
         return base + 360.0 * round((self.rotation - base) / 360.0)
 
     def jump_to(self, index: int):
+        """Put the ring on this item at once. A jump never carries."""
         self.index = index % len(self.items)
         self.rotation = self.rotation_for(self.index)
+        self.notch = self.notch_at(self.rotation)
         self.velocity, self.target = 0.0, None
 
     def step_by(self, n: int):
@@ -203,7 +224,7 @@ class MetalDial(QWidget):
         self._show_minutes = show_minutes
         self._layout()
 
-        self.year.jump_to(0)
+        self.year.jump_to(self.years.index(when.year))
         self.month.jump_to(when.month - 1)
         self._fit_days()
         self.day.jump_to(when.day - 1)
@@ -308,6 +329,7 @@ class MetalDial(QWidget):
             ring.velocity = 0.0
             ring.target = ring.rotation_for(index)
             ring.spring = speed
+            ring.carries = False  # each ring goes straight to its own value
         self._start()
 
     def _days_in_month(self) -> int:
@@ -320,6 +342,72 @@ class MetalDial(QWidget):
             keep = min(self.day.index, n - 1)
             self.day.items = [str(d) for d in range(1, n + 1)]
             self.day.jump_to(keep)
+
+    # ---------- carrying ----------
+    def _outer(self, ring: Ring) -> Ring | None:
+        """The ring a turn of this one carries into."""
+        order = [self.year, self.month, self.day, self.hour, self.minute]
+        at = order.index(ring)
+        return order[at - 1] if at > 0 else None
+
+    @staticmethod
+    def _aim(ring: Ring) -> float:
+        return ring.target if ring.target is not None else ring.rotation
+
+    def _carry(self, ring: Ring, turns: int):
+        """This ring went past its end (turns > 0) or back past its start: step the ring outside it."""
+        outer = self._outer(ring)
+        if outer is None or turns == 0:
+            return
+        if not self._carry_fits(outer, turns):
+            # The year ring holds twelve years. Carrying off either end would
+            # wrap round to the other, so the ring stops at its edge instead.
+            ring.jump_to(len(ring.items) - 1 if turns > 0 else 0)
+            return
+        outer.carries = True
+        outer.step_by(turns)
+        if ring is self.day:
+            self._refit_days_for_carry(turns)
+
+    def _carry_fits(self, outer: Ring, turns: int) -> bool:
+        """Whether stepping `outer` keeps the date inside the year ring's years."""
+        year = self.years[self.year.index_at(self._aim(self.year))]
+        month = self.month.index_at(self._aim(self.month)) + 1
+        day = min(self.day.index_at(self._aim(self.day)) + 1, calendar.monthrange(year, month)[1])
+        hour = self.hour.index_at(self._aim(self.hour))
+        aimed = dt.datetime(year, month, day, hour)
+        if outer is self.year:
+            moved = year + turns
+        elif outer is self.month:
+            moved = year + (month - 1 + turns) // 12
+        elif outer is self.day:
+            moved = (aimed + dt.timedelta(days=turns)).year
+        else:
+            moved = (aimed + dt.timedelta(hours=turns)).year
+        return self.years[0] <= moved <= self.years[-1]
+
+    def _refit_days_for_carry(self, turns: int):
+        """The day went past the month's end, so the month is changing: give the
+        day ring the new month's days now, on its first day going on or its
+        last going back, so 1 November back an hour is 31 October. Steps the
+        ring still had to go carry on from there."""
+        old_n = len(self.day.items)
+        # How far past the 1st (going on) or before the last day (going back)
+        # the ring already is, and how many steps it still has to go.
+        past = self.day.index if turns > 0 else old_n - 1 - self.day.index
+        ahead = self.day.notch_at(self._aim(self.day)) - self.day.notch_at(self.day.rotation)
+        month_notch = self.month.notch_at(self._aim(self.month))
+        month = month_notch % 12
+        year = self.year.index_at(self._aim(self.year)) + month_notch // 12 - self.month.notch // 12
+        year = max(0, min(len(self.years) - 1, year))
+        n = calendar.monthrange(self.years[year], month + 1)[1]
+        if len(self.day.items) != n:
+            self.day.items = [str(d) for d in range(1, n + 1)]
+        past = min(past, n - 1)
+        self.day.jump_to(past if turns > 0 else n - 1 - past)
+        if ahead:
+            self.day.carries = True
+            self.day.step_by(ahead)
 
     # ---------- geometry ----------
     def _radius(self) -> float:
@@ -339,10 +427,18 @@ class MetalDial(QWidget):
 
     def _select(self):
         """Settle any ring still turning, then report the date it shows."""
-        for ring in self.rings:
-            if ring.moving():  # a step lands where it was going; a flick where it is
-                aim = ring.target if ring.target is not None else ring.rotation
-                ring.jump_to(ring.index_at(aim))
+        # A step lands where it was going; a flick where it is. A ring that
+        # lands past its end carries, which sets the next ring turning, so
+        # settle again until nothing moves. Five rings need at most five rounds.
+        for _ in range(len(self.rings) + 1):
+            moving = [ring for ring in self.rings if ring.moving()]
+            if not moving:
+                break
+            for ring in moving:
+                notch = ring.notch_at(self._aim(ring))
+                turns = ring.turns(notch) if ring.carries else 0
+                ring.jump_to(notch % len(ring.items))
+                self._carry(ring, turns)
         self._grab = None
         self._sync()
         self._flash = 1.0
@@ -366,6 +462,7 @@ class MetalDial(QWidget):
             return
         self._grab = ring
         self.focus_ring = self.rings.index(ring)
+        ring.carries = True
         ring.velocity, ring.target = 0.0, None
         ring.lift_target = 1.0
         self._samples.clear()
@@ -430,6 +527,7 @@ class MetalDial(QWidget):
         while abs(self._wheel) >= 120:
             n = 1 if self._wheel > 0 else -1
             self._wheel -= 120 * n
+            ring.carries = True
             ring.step_by(n)
         self._start()
         event.accept()
@@ -443,7 +541,9 @@ class MetalDial(QWidget):
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             self._select()
         elif key in (Qt.Key.Key_Right, Qt.Key.Key_Left):
-            self.rings[self.focus_ring].step_by(1 if key == Qt.Key.Key_Right else -1)
+            ring = self.rings[self.focus_ring]
+            ring.carries = True
+            ring.step_by(1 if key == Qt.Key.Key_Right else -1)
             self._start()
         else:
             super().keyPressEvent(event)
@@ -488,8 +588,19 @@ class MetalDial(QWidget):
 
     def _sync(self):
         before = self.value()
+        carries = []
         for ring in self.rings:
-            ring.index = ring.index_at(ring.rotation)
+            notch = ring.notch_at(ring.rotation)
+            if notch != ring.notch:
+                if ring.carries:
+                    carries.append((ring, ring.turns(notch)))
+                ring.notch = notch
+            ring.index = notch % len(ring.items)
+        for ring, turns in carries:
+            self._carry(ring, turns)
+        for ring in self.rings:
+            if ring is not self._grab and not ring.moving():
+                ring.carries = True  # a spin to a date is over
         if self._grab is None and not any(r.moving() for r in self.rings):
             self._fit_days()
         else:  # mid-spin: keep the value valid, fix the ring once it stops
