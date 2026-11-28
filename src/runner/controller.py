@@ -259,6 +259,7 @@ class RunnerController:
             panel.set_peer_finder(self._find_drop_peer)
             panel.launch_requested.connect(self._on_launch)
             panel.edit_requested.connect(self._on_edit_launcher)
+            panel.duplicate_requested.connect(self._on_duplicate_launcher)
             panel.delete_requested.connect(self._on_delete_launcher)
             panel.external_drop.connect(self._on_external_drop)
         for panel in (dropdown, container, execute, groups):
@@ -266,8 +267,10 @@ class RunnerController:
 
         dropdown.rows_reordered.connect(self.cfg.apply_main_row_order)
         dropdown.submenu_edit_requested.connect(self._on_container_edit)
+        dropdown.submenu_duplicate_requested.connect(self._on_container_duplicate)
         dropdown.submenu_delete_requested.connect(self._on_container_delete)
         self.container_list.submenu_edit_requested.connect(self._on_container_edit)
+        self.container_list.submenu_duplicate_requested.connect(self._on_container_duplicate)
         self.container_list.submenu_delete_requested.connect(self._on_container_delete)
         self.container_list.rows_reordered.connect(self._on_container_list_reordered)
         container.reordered.connect(self._on_container_reordered)
@@ -275,12 +278,14 @@ class RunnerController:
 
         groups.launch_requested.connect(self._on_group_launch)
         groups.edit_requested.connect(self._on_group_edit)
+        groups.duplicate_requested.connect(self._on_group_duplicate)
         groups.delete_requested.connect(self._on_group_delete)
         groups.reordered.connect(self.cfg.reorder_groups)
 
         schedules = self.schedule_list
         schedules.launch_requested.connect(self._on_schedule_click)  # edits it, or runs it
         schedules.edit_requested.connect(self._on_group_edit)
+        schedules.duplicate_requested.connect(self._on_group_duplicate)
         schedules.delete_requested.connect(self._on_group_delete)
 
     def _connect_trigger_menu(self) -> None:
@@ -656,6 +661,9 @@ class RunnerController:
     def _on_edit_launcher(self, launcher: Launcher) -> None:
         self.dialogs.on_edit_launcher(launcher)
 
+    def _on_duplicate_launcher(self, launcher: Launcher) -> None:
+        self.dialogs.on_duplicate_launcher(launcher)
+
     def _on_delete_launcher(self, launcher: Launcher) -> None:
         self.dialogs.on_delete_launcher(launcher)
 
@@ -674,6 +682,9 @@ class RunnerController:
     def _on_group_edit(self, row: Launcher) -> None:
         self.dialogs.on_group_edit(row)
 
+    def _on_group_duplicate(self, row: Launcher) -> None:
+        self.dialogs.on_group_duplicate(row)
+
     def _on_group_delete(self, row: Launcher) -> None:
         self.dialogs.on_group_delete(row)
 
@@ -685,6 +696,9 @@ class RunnerController:
 
     def _on_container_edit(self, group_id: str) -> None:
         self.dialogs.on_container_edit(group_id)
+
+    def _on_container_duplicate(self, group_id: str) -> None:
+        self.dialogs.on_container_duplicate(group_id)
 
     def _on_container_delete(self, group_id: str) -> None:
         self.dialogs.on_container_delete(group_id)

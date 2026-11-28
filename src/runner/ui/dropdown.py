@@ -70,10 +70,12 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
     launch_requested = Signal(Launcher)  # emitted when a button is clicked
     reordered = Signal(list)  # full launcher id order after a drag
     edit_requested = Signal(Launcher)
+    duplicate_requested = Signal(Launcher)
     delete_requested = Signal(Launcher)
     submenu_hovered = Signal(str)
     submenu_left = Signal(str)
     submenu_edit_requested = Signal(str)
+    submenu_duplicate_requested = Signal(str)
     submenu_delete_requested = Signal(str)
     hover_enter = Signal()
     hover_leave = Signal()
@@ -619,7 +621,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         return [b for b in self._buttons if isinstance(b, LaunchButton)]
 
     def _show_item_menu(self, button: LaunchButton, pos: QPoint) -> None:
-        """Right-click menu for one row. Edit and Delete only."""
+        """Right-click menu for one row: Edit, Duplicate, Delete."""
         if self._drag_active:
             return
         previous = self._item_menu
@@ -632,8 +634,12 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         menu = QMenu(self)
         keep_menu_above_lists(menu)
         edit_action = menu.addAction("Edit")
+        duplicate_action = menu.addAction("Duplicate")
         delete_action = menu.addAction("Delete")
         edit_action.triggered.connect(lambda checked=False, item=launcher: self.edit_requested.emit(item))
+        duplicate_action.triggered.connect(
+            lambda checked=False, item=launcher: self.duplicate_requested.emit(item)
+        )
         delete_action.triggered.connect(lambda checked=False, item=launcher: self.delete_requested.emit(item))
 
         self._item_menu = menu
@@ -646,7 +652,7 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         QTimer.singleShot(0, lambda m=menu, p=global_pos: m.popup(p))
 
     def _show_submenu_menu(self, button: SubmenuButton, pos: QPoint) -> None:
-        """Right-click menu for a container group row. Edit and Delete only."""
+        """Right-click menu for a container group row: Edit, Duplicate, Delete."""
         if self._drag_active:
             return
         previous = self._item_menu
@@ -659,9 +665,13 @@ class DropdownPanel(DragReorderMixin, PanelMotionMixin, QWidget):
         menu = QMenu(self)
         keep_menu_above_lists(menu)
         edit_action = menu.addAction("Edit")
+        duplicate_action = menu.addAction("Duplicate")
         delete_action = menu.addAction("Delete")
         edit_action.triggered.connect(
             lambda checked=False, group_id=item_id: self.submenu_edit_requested.emit(group_id)
+        )
+        duplicate_action.triggered.connect(
+            lambda checked=False, group_id=item_id: self.submenu_duplicate_requested.emit(group_id)
         )
         delete_action.triggered.connect(
             lambda checked=False, group_id=item_id: self.submenu_delete_requested.emit(group_id)

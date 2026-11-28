@@ -225,6 +225,11 @@ class AddEditDialog(StayOnTopDialog):
 
         self._name_edit.setFocus()
 
+    def select_name(self) -> None:
+        """Focus the name with it selected, ready to type over, as for a new copy."""
+        self._name_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._name_edit.selectAll()
+
     def _show(self, launcher: Launcher) -> None:
         self._name_edit.setText(launcher.name)
         self._command_edit.setText(launcher.command)
@@ -302,8 +307,7 @@ class AddEditDialog(StayOnTopDialog):
         self.setWindowTitle("Edit Launcher")
         self._show(copy)
         # The tick lists already show the original's groups, which the copy is now in.
-        self._name_edit.setFocus(Qt.FocusReason.OtherFocusReason)
-        self._name_edit.selectAll()
+        self.select_name()
 
     def accept(self) -> None:
         if self._apply():

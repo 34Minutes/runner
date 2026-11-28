@@ -731,7 +731,7 @@ def test_group_list_matches_the_main_view_and_reorders_groups_only(qapp, qtbot):
 
     buttons = [button for button in panel._buttons if isinstance(button, LaunchButton)]
     assert buttons[0].toolTip() == "Run group: One"
-    assert [action.text() for action in _row_menu(panel, buttons[1]).actions()] == ["Edit", "Delete"]
+    assert [action.text() for action in _row_menu(panel, buttons[1]).actions()] == ["Edit", "Duplicate", "Delete"]
 
     reordered = []
     panel.reordered.connect(lambda ids: (order.clear(), order.extend(ids), reordered.append(list(ids))))

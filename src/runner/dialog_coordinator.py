@@ -40,11 +40,13 @@ class DialogCoordinator:
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    def show_add_dialog(self, existing: Launcher | None = None) -> None:
+    def show_add_dialog(self, existing: Launcher | None = None, *, select_name: bool = False) -> None:
         from .controller import fill_main_dropdown
 
         ctl = self._ctl
         dialog = AddEditDialog(existing, ctl.trigger, cfg=ctl.cfg)
+        if select_name:
+            dialog.select_name()
         accepted = bool(dialog.exec())
         result = dialog.result_launcher
         # Duplicate saves as it goes, so a cancel after it still changed the lists.
@@ -57,10 +59,27 @@ class DialogCoordinator:
         ctl._refresh_open_container()
         ctl._sync_groups_after_change()
 
-    def on_edit_launcher(self, launcher: Launcher) -> None:
-        self._ctl.show_add_dialog(launcher)
+    def on_edit_launcher(self, launcher: Launcher, *, select_name: bool = False) -> None:
+        self.show_add_dialog(launcher, select_name=select_name)
         if self._ctl.settings.pinned_open:
             self._ctl._apply_pinned_state()
+
+    def on_duplicate_launcher(self, launcher: Launcher) -> None:
+        """Right-click Duplicate: save a numbered copy, then open it to edit.
+
+        The copy is saved before its screen opens, so Cancel there keeps it.
+        """
+        ctl = self._ctl
+        copy = ctl.cfg.duplicate_launcher(launcher.id)
+        if copy is None:
+            return
+        self._after_copy()
+        self.on_edit_launcher(copy, select_name=True)
+
+    def _after_copy(self) -> None:
+        """Show a copy in every open list before its edit screen opens."""
+        self._ctl._refresh_open_list()
+        self._ctl._sync_groups_after_change()
 
     def on_delete_launcher(self, launcher: Launcher) -> None:
         if not self._ctl._confirm_delete("Delete Launcher", launcher.name):
@@ -79,9 +98,13 @@ class DialogCoordinator:
         ctl._sync_groups_after_change()
         ctl._apply_pinned_state()
 
-    def show_group_dialog(self, existing: Group | None = None, *, scheduled: bool = False) -> None:
+    def show_group_dialog(
+        self, existing: Group | None = None, *, scheduled: bool = False, select_name: bool = False
+    ) -> None:
         ctl = self._ctl
         dialog = GroupDialog(ctl.cfg, existing, ctl.trigger, scheduled=scheduled)
+        if select_name:
+            dialog.select_name()
         dialog.launchers_changed.connect(ctl._refresh_open_list)
         accepted = bool(dialog.exec())
         result = dialog.result_group
@@ -110,6 +133,14 @@ class DialogCoordinator:
         if group is not None:
             self._ctl.show_group_dialog(group)
 
+    def on_group_duplicate(self, row: Launcher) -> None:
+        """Right-click Duplicate on an execute group or schedule: copy it, then edit the copy."""
+        copy = self._ctl.cfg.duplicate_group(row.id)
+        if copy is None:
+            return
+        self._after_copy()
+        self.show_group_dialog(copy, select_name=True)
+
     def on_group_delete(self, row: Launcher) -> None:
         ctl = self._ctl
         group = ctl._group_by_id(row.id)
@@ -119,9 +150,13 @@ class DialogCoordinator:
         ctl.cfg.remove_group(group.id)
         ctl._sync_groups_after_change()
 
-    def show_container_dialog(self, existing: ContainerGroup | None = None) -> None:
+    def show_container_dialog(
+        self, existing: ContainerGroup | None = None, *, select_name: bool = False
+    ) -> None:
         ctl = self._ctl
         dialog = ContainerDialog(ctl.cfg, existing, ctl.trigger)
+        if select_name:
+            dialog.select_name()
         dialog.launchers_changed.connect(ctl._refresh_open_list)
         accepted = bool(dialog.exec())
         result = dialog.result_group
@@ -141,6 +176,14 @@ class DialogCoordinator:
         group = self._ctl._container_by_id(group_id)
         if group is not None:
             self._ctl.show_container_dialog(group)
+
+    def on_container_duplicate(self, group_id: str) -> None:
+        """Right-click Duplicate on a container group row: copy it, then edit the copy."""
+        copy = self._ctl.cfg.duplicate_container_group(group_id)
+        if copy is None:
+            return
+        self._after_copy()
+        self.show_container_dialog(copy, select_name=True)
 
     def on_container_delete(self, group_id: str) -> None:
         ctl = self._ctl

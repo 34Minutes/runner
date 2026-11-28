@@ -419,11 +419,15 @@ def test_main_popup_shows_container_rows_and_a_click_does_not_launch(qapp, qtbot
     qapp.processEvents()
     menu = panel._item_menu
     assert menu is not None
-    assert [action.text() for action in menu.actions()] == ["Edit", "Delete"]
+    assert [action.text() for action in menu.actions()] == ["Edit", "Duplicate", "Delete"]
     edited = []
+    copied = []
     panel.submenu_edit_requested.connect(edited.append)
+    panel.submenu_duplicate_requested.connect(copied.append)
     menu.actions()[0].trigger()
     assert edited == ["folder"]
+    menu.actions()[1].trigger()
+    assert copied == ["folder"]
     menu.close()
 
 

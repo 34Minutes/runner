@@ -313,6 +313,10 @@ class MemberPickerDialog(StayOnTopDialog):
         self._name_edit.setText(copy.name)
         self._show_copy(copy)
         self.launchers_changed.emit()
+        self.select_name()
+
+    def select_name(self) -> None:
+        """Focus the name with it selected, ready to type over, as for a new copy."""
         self._name_edit.setFocus(Qt.FocusReason.OtherFocusReason)
         self._name_edit.selectAll()
 

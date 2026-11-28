@@ -1,4 +1,4 @@
-"""Right-click Edit and Delete on a dropdown row."""
+"""Right-click Edit, Duplicate and Delete on a dropdown row."""
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QContextMenuEvent
@@ -16,7 +16,7 @@ def _send_context_menu(button: LaunchButton) -> None:
     QApplication.sendEvent(button, event)
 
 
-def test_right_click_offers_edit_and_delete(qapp, qtbot):
+def test_right_click_offers_edit_duplicate_and_delete(qapp, qtbot):
     cfg = AppConfig()
     panel = DropdownPanel(cfg)
     qtbot.addWidget(panel)
@@ -28,9 +28,11 @@ def test_right_click_offers_edit_and_delete(qapp, qtbot):
     qtbot.waitExposed(panel)
 
     edited = []
+    copied = []
     deleted = []
     launched = []
     panel.edit_requested.connect(edited.append)
+    panel.duplicate_requested.connect(copied.append)
     panel.delete_requested.connect(deleted.append)
     panel.launch_requested.connect(lambda item: launched.append(item.name))
 
@@ -44,7 +46,7 @@ def test_right_click_offers_edit_and_delete(qapp, qtbot):
 
     menu = panel._item_menu
     assert menu is not None
-    assert [action.text() for action in menu.actions()] == ["Edit", "Delete"]
+    assert [action.text() for action in menu.actions()] == ["Edit", "Duplicate", "Delete"]
     # Above the lists: on macOS a popup already is, and the flag would drop it to their level.
     on_top = bool(menu.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
     assert on_top is (QApplication.instance().platformName() != "cocoa")
@@ -58,6 +60,9 @@ def test_right_click_offers_edit_and_delete(qapp, qtbot):
     assert edited == [beta]
 
     actions[1].trigger()
+    assert copied == [beta]
+
+    actions[2].trigger()
     assert deleted == [beta]
     assert launched == []
 
