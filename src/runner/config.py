@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 import threading
 from contextlib import contextmanager, suppress
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -303,6 +304,48 @@ def _list_of(data: dict[str, Any], key: str, problems: list[str]) -> list:
 
 def _unique_known(ids: list[str], known: set[str]) -> set[str]:
     return {item_id for item_id in ids if item_id in known}
+
+
+_COPY_SUFFIX = re.compile(r"^(?P<base>.*?)\s*\((?P<n>\d+)\)$")
+
+
+def duplicate_name(name: str, taken: list[str]) -> str:
+    """The name for a copy: the base name and the next free number in brackets.
+
+    "Brave" gives "Brave (1)", then "Brave (2)". Copying "Brave (1)" counts on
+    from the same base, so it gives the next free number too, not "Brave (1) (1)".
+    """
+    match = _COPY_SUFFIX.match(name.strip())
+    base = (match.group("base") if match else name).strip() or name.strip()
+    highest = 0
+    for other in taken:
+        found = _COPY_SUFFIX.match(other.strip())
+        if found and found.group("base").strip() == base:
+            highest = max(highest, int(found.group("n")))
+    return f"{base} ({highest + 1})"
+
+
+def _put(items: list, item) -> None:
+    """Append item, or replace the entry with its id."""
+    for index, existing in enumerate(items):
+        if existing.id == item.id:
+            items[index] = item
+            return
+    items.append(item)
+
+
+def _insert_after(items: list, index: int, item) -> None:
+    items.insert(index + 1 if index >= 0 else len(items), item)
+
+
+def _copy_member_after(members: list, original_id: str, copy_id: str) -> list:
+    """Put the copy straight after the original, with the same flags."""
+    result = list(members)
+    for index, member in enumerate(result):
+        if member.launcher_id == original_id:
+            result.insert(index + 1, replace(member, launcher_id=copy_id))
+            break
+    return result
 
 
 def _sync_members(members: list, launcher_id: str, keep: bool, make_member):
@@ -656,8 +699,43 @@ class ConfigManager:
         return current
 
     def add_launcher(self, launcher: Launcher) -> None:
-        self.config.launchers.append(launcher)
+        # A screen that duplicated may already have saved this one. Adding it
+        # again replaces it in place instead of listing it twice.
+        _put(self.config.launchers, launcher)
         self.save()
+
+    def duplicate_launcher(self, launcher_id: str) -> Launcher | None:
+        """Save a copy straight after the original, in every list it is in.
+
+        The copy has the next free number in brackets on its name, and is a
+        Runner launcher even when the original came from `runner ctl`.
+        """
+        launchers = self.config.launchers
+        index = next((i for i, item in enumerate(launchers) if item.id == launcher_id), -1)
+        if index < 0:
+            return None
+        original = launchers[index]
+        copy = replace(
+            original,
+            id=str(uuid4()),
+            name=duplicate_name(original.name, [item.name for item in launchers]),
+            source=None,
+        )
+        _insert_after(launchers, index, copy)
+        for group in self.config.groups:
+            group.members = _copy_member_after(group.members, original.id, copy.id)
+        for group in self.config.container_groups:
+            group.members = _copy_member_after(group.members, original.id, copy.id)
+        self._order_copy_after("launcher", original.id, copy.id)
+        self.save()
+        return copy
+
+    def _order_copy_after(self, kind: str, original_id: str, copy_id: str) -> None:
+        """Put the copy's main-popup row under the original's, once the user has an order."""
+        order = self.config.main_order
+        token = f"{kind}:{original_id}"
+        if token in order:
+            order.insert(order.index(token) + 1, f"{kind}:{copy_id}")
 
     def update_launcher(self, launcher: Launcher) -> None:
         for i, existing in enumerate(self.config.launchers):
@@ -683,8 +761,27 @@ class ConfigManager:
         self.save()
 
     def add_group(self, group: Group) -> None:
-        self.config.groups.append(group)
+        _put(self.config.groups, group)
         self.save()
+
+    def duplicate_group(self, group_id: str) -> Group | None:
+        """Save a copy of an execute group or schedule straight after it."""
+        groups = self.config.groups
+        index = next((i for i, item in enumerate(groups) if item.id == group_id), -1)
+        if index < 0:
+            return None
+        original = groups[index]
+        copy = replace(
+            original,
+            id=str(uuid4()),
+            name=duplicate_name(original.name, [item.name for item in groups]),
+            members=[replace(member) for member in original.members],
+            schedule=[replace(entry, id=str(uuid4())) for entry in original.schedule],
+            source=None,
+        )
+        _insert_after(groups, index, copy)
+        self.save()
+        return copy
 
     def update_group(self, group: Group) -> None:
         for index, existing in enumerate(self.config.groups):
@@ -709,8 +806,27 @@ class ConfigManager:
         self.save()
 
     def add_container_group(self, group: ContainerGroup) -> None:
-        self.config.container_groups.append(group)
+        _put(self.config.container_groups, group)
         self.save()
+
+    def duplicate_container_group(self, group_id: str) -> ContainerGroup | None:
+        """Save a copy of a container group straight after it."""
+        groups = self.config.container_groups
+        index = next((i for i, item in enumerate(groups) if item.id == group_id), -1)
+        if index < 0:
+            return None
+        original = groups[index]
+        copy = replace(
+            original,
+            id=str(uuid4()),
+            name=duplicate_name(original.name, [item.name for item in groups]),
+            members=[replace(member) for member in original.members],
+            source=None,
+        )
+        _insert_after(groups, index, copy)
+        self._order_copy_after("container", original.id, copy.id)
+        self.save()
+        return copy
 
     def update_container_group(self, group: ContainerGroup) -> None:
         for index, existing in enumerate(self.config.container_groups):

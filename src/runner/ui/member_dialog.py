@@ -171,6 +171,8 @@ class MemberPickerDialog(StayOnTopDialog):
         self._drag_updating = False
         self._ghost: _DragGhost | None = None
         self._visual_override: list[str] | None = None
+        # Ids this screen saved itself, by duplicating. The caller saves the last one.
+        self.saved_ids: list[str] = []
         self._init_state()
 
         if group is not None:
@@ -212,10 +214,18 @@ class MemberPickerDialog(StayOnTopDialog):
         cancel_button = QPushButton("Cancel")
         cancel_button.setAutoDefault(False)
         cancel_button.clicked.connect(self.reject)
+        # Saves this group, then a numbered copy, and carries on editing the copy.
+        self.duplicate_button = QPushButton("Duplicate")
+        self.duplicate_button.setAutoDefault(False)
+        self.duplicate_button.setToolTip(
+            f"Save this {self.NOUN.lower()}, then add a numbered copy of it and edit the copy."
+        )
+        self.duplicate_button.clicked.connect(self.duplicate)
 
         # Cancel before Save, the way every other Runner dialog has them.
         buttons = QHBoxLayout()
         buttons.addWidget(add_button)
+        buttons.addWidget(self.duplicate_button)
         buttons.addStretch(1)
         buttons.addWidget(cancel_button)
         buttons.addWidget(save_button)
@@ -262,6 +272,49 @@ class MemberPickerDialog(StayOnTopDialog):
     def _saved_groups(self) -> list:
         """The config list this kind of group is saved in."""
         return []
+
+    def _apply(self) -> bool:
+        """Check the fields and set self._result. False when something is missing."""
+        return False
+
+    def _store(self, group) -> None:
+        """Save this group to the config, adding it or replacing the saved one."""
+
+    def _copy_saved(self, group_id: str):
+        """Save a numbered copy of the saved group and return it."""
+        return None
+
+    def _show_copy(self, group) -> None:
+        """The screen now edits this copy. Show anything it holds that differs."""
+
+    # ------------------------------------------------------- save or copy
+
+    def accept(self) -> None:
+        if self._apply():
+            super().accept()
+
+    def duplicate(self) -> None:
+        """Save what is on screen, then make a numbered copy and edit that.
+
+        The copy is saved straight away, so it stays even if this screen is
+        then cancelled. Cancel only drops changes made to the copy.
+        """
+        if not self._apply() or self._result is None:
+            return
+        saved = self._result
+        self._store(saved)
+        copy = self._copy_saved(saved.id)
+        if copy is None:
+            return
+        self.saved_ids.append(saved.id)
+        self._original = copy
+        self._result = copy
+        self.setWindowTitle(f"Edit {self.NOUN}")
+        self._name_edit.setText(copy.name)
+        self._show_copy(copy)
+        self.launchers_changed.emit()
+        self._name_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._name_edit.selectAll()
 
     # ------------------------------------------------------------ public
 
@@ -500,7 +553,9 @@ class MemberPickerDialog(StayOnTopDialog):
             return
         self._cfg.add_launcher(created)
         self.launchers_changed.emit()
-        self._absorb_new_member(created.id)
+        # Duplicate on that screen saved more than one.
+        for launcher_id in [*dialog.saved_ids, created.id]:
+            self._absorb_new_member(launcher_id)
         self._rebuild()
 
     def _absorb_new_member(self, launcher_id: str) -> None:

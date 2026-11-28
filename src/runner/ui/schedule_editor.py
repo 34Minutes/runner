@@ -112,6 +112,13 @@ class ScheduleEditor(QWidget):
     def entries(self) -> list[ScheduleEntry]:
         return [deepcopy(entry) for entry in self._entries]
 
+    def set_entries(self, entries: list[ScheduleEntry]) -> None:
+        """Show these dates instead, as when the screen moves on to a copy."""
+        self._entries = [deepcopy(entry) for entry in entries]
+        self._new_ids = []
+        self._rebuild()
+        self.changed.emit()
+
     def set_active(self, active: bool) -> None:
         """Off: the dates are greyed out and + is hidden. They are kept."""
         self._active = active

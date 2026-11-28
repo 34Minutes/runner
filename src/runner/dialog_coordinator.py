@@ -45,14 +45,13 @@ class DialogCoordinator:
 
         ctl = self._ctl
         dialog = AddEditDialog(existing, ctl.trigger, cfg=ctl.cfg)
-        if not dialog.exec():
-            return
+        accepted = bool(dialog.exec())
         result = dialog.result_launcher
-        if not result:
+        # Duplicate saves as it goes, so a cancel after it still changed the lists.
+        if not (accepted and result) and not dialog.saved_ids:
             return
-        if existing:
-            ctl.cfg.update_launcher(result)
-        else:
+        if accepted and result:
+            # After Duplicate the result is the copy, already saved. Adding replaces it.
             ctl.cfg.add_launcher(result)
         fill_main_dropdown(ctl.dropdown, ctl.cfg)
         ctl._refresh_open_container()

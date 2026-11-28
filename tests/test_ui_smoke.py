@@ -417,6 +417,7 @@ def test_manager_dialog_list_and_add_flow(qapp, qtbot, tmp_path):
         inst = mock_add.return_value
         inst.result_launcher = Launcher.new("A-edited", "calc.exe")
         inst.exec.return_value = True
+        inst.saved_ids = []  # no Duplicate this time
         qtbot.mouseClick(dlg._btn_edit, Qt.LeftButton)
     # After accept the list text should reflect edit (implementation updates in place)
     # We don't assert exact text to be robust, just that no crash and still 2 items
@@ -431,6 +432,7 @@ def test_manager_dialog_list_and_add_flow(qapp, qtbot, tmp_path):
         inst2 = mock_add2.return_value
         inst2.result_launcher = Launcher.new("C-new", "foo")
         inst2.exec.return_value = True
+        inst2.saved_ids = []
         qtbot.mouseClick(dlg._btn_add, Qt.LeftButton)
     assert dlg._list.count() >= 2  # may be 3 depending on how add merges
 

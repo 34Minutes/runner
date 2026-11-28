@@ -73,11 +73,11 @@ class ContainerDialog(MemberPickerDialog):
         self.launchers_changed.emit()
         QTimer.singleShot(0, self._rebuild)
 
-    def accept(self) -> None:
+    def _apply(self) -> bool:
         name = self._name_edit.text().strip()
         if not name:
             warning(self, "Missing info", "Name is required.")
-            return
+            return False
         members = [ContainerMember(launcher_id) for launcher_id in self._selected]
         if self._original is not None:
             self._original.name = name
@@ -85,4 +85,10 @@ class ContainerDialog(MemberPickerDialog):
             self._result = self._original
         else:
             self._result = ContainerGroup.new(name, members)
-        super().accept()
+        return True
+
+    def _store(self, group) -> None:
+        self._cfg.add_container_group(group)
+
+    def _copy_saved(self, group_id: str):
+        return self._cfg.duplicate_container_group(group_id)

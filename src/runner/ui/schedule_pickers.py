@@ -1,7 +1,7 @@
 """The two pickers a schedule uses, each in its own small window.
 
 DatePickerDialog holds the metal dial: pressing its silver centre, or Enter,
-chooses the date. A Minutes switch and a Now button sit top left, and the
+chooses the date. A three-line menu top left holds Show minutes and Now, and the
 written-out date under the dial can be typed over to spin the dial there. IntervalPickerDialog holds the interval rollers: the Select
 key chooses how often it repeats, and Don't repeat clears it. Both follow the
 active colour scheme. Esc closes either one without changing anything.
@@ -12,8 +12,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..config import ScheduleEntry
 from ..schedule import format_full, parse_when
@@ -21,7 +31,6 @@ from . import theme
 from .date_dial import MetalDial
 from .interval_roller import PLACES, IntervalRoller, digits
 from .stay_on_top import StayOnTopDialog
-from .toggle_switch import ToggleSwitch
 
 
 def next_quarter_hour(now: datetime | None = None) -> datetime:
@@ -46,6 +55,50 @@ def _style(dialog: QWidget, hint: QLabel, background: str) -> None:
     hint.setWordWrap(True)
 
 
+MENU_ICON_PX = 18
+
+
+def menu_icon(colour: str, size: int = MENU_ICON_PX) -> QIcon:
+    """Three short rounded lines, drawn sharp on high-density screens."""
+    scale = 3
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(colour), 2 * scale)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    left, right = 3 * scale, (size - 3) * scale
+    for y in (5, 9, 13):
+        painter.drawLine(QPointF(left, y * scale), QPointF(right, y * scale))
+    painter.end()
+    pixmap.setDevicePixelRatio(scale)
+    return QIcon(pixmap)
+
+
+def _menu_qss() -> str:
+    """The three-line button and its menu, in the active scheme."""
+    c = theme.dialog_colors()
+    return (
+        "QToolButton#dialMenu {"
+        f" background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px; }}"
+        "QToolButton#dialMenu:hover, QToolButton#dialMenu:pressed, QToolButton#dialMenu[open=\"true\"] {"
+        f" background: {c.button_hover}; border-color: {c.button_border}; }}"
+        "QToolButton#dialMenu:focus {"
+        f" border: 1px solid {c.focus}; }}"
+        "QToolButton#dialMenu::menu-indicator { image: none; width: 0; }"
+        "QMenu {"
+        f" background: {c.field}; color: {c.text}; border: 1px solid {c.field_border};"
+        " border-radius: 6px; padding: 4px; }"
+        "QMenu::item { padding: 5px 18px 5px 26px; border-radius: 4px; }"
+        "QMenu::item:selected {"
+        f" background: {c.button_hover}; color: {c.button_hover_text}; }}"
+        "QMenu::indicator { width: 14px; height: 14px; left: 6px; }"
+        "QMenu::separator {"
+        f" height: 1px; background: {c.field_border}; margin: 4px 6px; }}"
+    )
+
+
 # A date that can't be read: the field's edge and the line under it. Reads on all three schemes.
 PROBLEM_COLOR = "#e0584f"
 
@@ -66,8 +119,9 @@ class _DateField(QLineEdit):
 class DatePickerDialog(StayOnTopDialog):
     """Pick a date and time on the dial. Press the centre to choose it.
 
-    Top left: the Minutes switch shows or hides the minute ring (off, times
-    land on the hour), and Now spins every ring to the current time. The
+    Top left, a three-line menu: Show minutes shows or hides the minute ring
+    (off, times land on the hour), and Now spins every ring to the current
+    time. The
     written-out date under the dial can be typed over; Enter spins the dial
     to it.
     """
@@ -94,20 +148,35 @@ class DatePickerDialog(StayOnTopDialog):
         self.dial = MetalDial(when, show_minutes=show_minutes, scheme=theme.current(), first_year=now().year)
         self.dial.selected.connect(self._choose)
 
-        self.minutes_switch = ToggleSwitch("Minutes")
-        self.minutes_switch.setToolTip("Show the minute ring. Off, times land on the hour.")
-        self.minutes_switch.setChecked(show_minutes)
-        self.minutes_switch.toggled.connect(self._toggle_minutes)
-        self.now_button = QPushButton("Now")
-        self.now_button.setToolTip("Spin the dial to the current date and time")
-        self.now_button.setAutoDefault(False)
-        self.now_button.setDefault(False)
-        self.now_button.clicked.connect(self.spin_to_now)
+        # The dial's settings, in a three-line menu top left.
+        self.menu = QMenu(self)
+        self.menu.setToolTipsVisible(True)
+        self.minutes_action = QAction("Show minutes", self)
+        self.minutes_action.setCheckable(True)
+        self.minutes_action.setChecked(show_minutes)
+        self.minutes_action.setToolTip("Show the minute ring. Off, times land on the hour.")
+        self.minutes_action.toggled.connect(self._toggle_minutes)
+        self.now_action = QAction("Now", self)
+        self.now_action.setToolTip("Spin the dial to the current date and time")
+        self.now_action.triggered.connect(self.spin_to_now)
+        self.menu.addAction(self.minutes_action)
+        self.menu.addSeparator()
+        self.menu.addAction(self.now_action)
+        self.menu.aboutToShow.connect(lambda: self._mark_menu_open(True))
+        self.menu.aboutToHide.connect(lambda: self._mark_menu_open(False))
+
+        self.menu_button = QToolButton(self)
+        self.menu_button.setObjectName("dialMenu")
+        self.menu_button.setToolTip("Dial settings: Show minutes, Now")
+        self.menu_button.setAccessibleName("Dial settings")
+        self.menu_button.setIcon(menu_icon(theme.dialog_colors().text))
+        self.menu_button.setIconSize(QSize(MENU_ICON_PX, MENU_ICON_PX))
+        self.menu_button.setMenu(self.menu)
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.menu_button.setCursor(Qt.CursorShape.PointingHandCursor)
         corner = QHBoxLayout()
         corner.setContentsMargins(0, 0, 0, 0)
-        corner.setSpacing(12)
-        corner.addWidget(self.minutes_switch)
-        corner.addWidget(self.now_button)
+        corner.addWidget(self.menu_button)
         corner.addStretch(1)
 
         # The full date the dial shows, kept up to date as the rings turn.
@@ -135,6 +204,7 @@ class DatePickerDialog(StayOnTopDialog):
         layout.addWidget(self.problem)
         layout.addWidget(hint)
         _style(self, hint, self.dial.palette_.background.name())
+        self.setStyleSheet(self.styleSheet() + _menu_qss())
         self._style_readout(error=False)
         self.dial.setFocus()
 
@@ -158,6 +228,11 @@ class DatePickerDialog(StayOnTopDialog):
     def _choose(self, when: datetime) -> None:
         self._chosen = when
         self.accept()
+
+    def _mark_menu_open(self, open_: bool) -> None:
+        # Keeps the button lit while its menu is down.
+        self.menu_button.setProperty("open", "true" if open_ else "false")
+        self.menu_button.style().polish(self.menu_button)
 
     def _toggle_minutes(self, shown: bool) -> None:
         self.dial.set_show_minutes(shown)
@@ -187,7 +262,7 @@ class DatePickerDialog(StayOnTopDialog):
             self._set_problem(f"Choose a year from {first} to {last}.")
             return
         if when.minute and not self.dial.show_minutes():
-            self.minutes_switch.setChecked(True)  # so the minutes typed are kept
+            self.minutes_action.setChecked(True)  # so the minutes typed are kept
         self._set_problem("")
         self.readout.setText(format_full(when))
         self.dial.spin_to(when)

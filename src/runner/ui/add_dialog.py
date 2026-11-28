@@ -30,6 +30,8 @@ from .toggle_switch import ToggleSwitch
 
 from ..config import ConfigManager, Launcher
 
+DUPLICATE_TIP = "Save this launcher, then add a numbered copy of it and edit the copy."
+
 
 class _MembershipList(QWidget):
     """The groups of one kind, each with a tick for whether this launcher is in it."""
@@ -165,7 +167,14 @@ class AddEditDialog(StayOnTopDialog):
         cancel_button = QPushButton("Cancel")
         cancel_button.setAutoDefault(False)
         cancel_button.clicked.connect(self.reject)
+        # Saves this launcher, then a numbered copy, and carries on editing the copy.
+        self.duplicate_button = QPushButton("Duplicate")
+        self.duplicate_button.setAutoDefault(False)
+        self.duplicate_button.setToolTip(DUPLICATE_TIP)
+        self.duplicate_button.clicked.connect(self.duplicate)
+        self.duplicate_button.setVisible(cfg is not None)
         buttons = QHBoxLayout()
+        buttons.addWidget(self.duplicate_button)
         buttons.addStretch(1)
         buttons.addWidget(cancel_button)
         buttons.addWidget(save_button)
@@ -208,16 +217,22 @@ class AddEditDialog(StayOnTopDialog):
         hint = self.sizeHint()
         self.resize(max(560, hint.width() + 24), hint.height() + 12)
 
+        # Ids this screen saved itself, by duplicating. The caller saves the last one.
+        self.saved_ids: list[str] = []
+
         if launcher:
-            self._name_edit.setText(launcher.name)
-            self._command_edit.setText(launcher.command)
-            self._args_edit.setText(launcher.args)
-            self._enabled_cb.setChecked(self._included_in_dropdown(launcher))
-            self._work_dir_edit.setText(launcher.working_dir or "")
-            self._run_as_admin_cb.setChecked(launcher.run_as_admin)
-            self._show_console_cb.setChecked(launcher.show_console)
+            self._show(launcher)
 
         self._name_edit.setFocus()
+
+    def _show(self, launcher: Launcher) -> None:
+        self._name_edit.setText(launcher.name)
+        self._command_edit.setText(launcher.command)
+        self._args_edit.setText(launcher.args)
+        self._enabled_cb.setChecked(self._included_in_dropdown(launcher))
+        self._work_dir_edit.setText(launcher.working_dir or "")
+        self._run_as_admin_cb.setChecked(launcher.run_as_admin)
+        self._show_console_cb.setChecked(launcher.show_console)
 
     def _included_in_dropdown(self, launcher: Launcher) -> bool:
         return launcher.show_in_main
@@ -264,12 +279,43 @@ class AddEditDialog(StayOnTopDialog):
         if d:
             self._work_dir_edit.setText(d)
 
+    def duplicate(self) -> None:
+        """Save what is on screen, then make a numbered copy and edit that.
+
+        The copy is saved straight away, so it stays even if this screen is
+        then cancelled. Cancel only drops changes made to the copy.
+        """
+        if self._cfg is None or not self._apply():
+            return
+        saved = self._result_launcher
+        assert saved is not None
+        if self._original is None:
+            self._cfg.add_launcher(saved)
+        else:
+            self._cfg.update_launcher(saved)
+        copy = self._cfg.duplicate_launcher(saved.id)
+        if copy is None:
+            return
+        self.saved_ids.append(saved.id)
+        self._original = copy
+        self._result_launcher = copy
+        self.setWindowTitle("Edit Launcher")
+        self._show(copy)
+        # The tick lists already show the original's groups, which the copy is now in.
+        self._name_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._name_edit.selectAll()
+
     def accept(self) -> None:
+        if self._apply():
+            super().accept()
+
+    def _apply(self) -> bool:
+        """Check the fields and write them to the launcher. False when one is missing."""
         name = self._name_edit.text().strip()
         command = self._command_edit.text().strip()
         if not name or not command:
             warning(self, "Missing info", "Name and Command are required.")
-            return
+            return False
 
         work_dir = self._work_dir_edit.text().strip() or None
         run_admin = self._run_as_admin_cb.isChecked()
@@ -303,8 +349,7 @@ class AddEditDialog(StayOnTopDialog):
                 self._container_membership.selected_ids(),
                 self._execute_membership.selected_ids(),
             )
-
-        super().accept()
+        return True
 
     @property
     def result_launcher(self) -> Launcher | None:

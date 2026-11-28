@@ -430,29 +430,29 @@ def test_now_spins_back_to_the_current_time(qapp, qtbot):
     now = datetime(2026, 11, 24, 8, 41)
     dialog = DatePickerDialog(datetime(2028, 6, 2, 21, 10), now=lambda: now)
     qtbot.addWidget(dialog)
-    dialog.now_button.click()
+    dialog.now_action.trigger()
     assert any(ring.moving() for ring in dialog.dial.rings)
     _settle(dialog.dial)
     assert dialog.dial.value() == now
 
 
-def test_the_minutes_switch_hides_the_minute_ring(qapp, qtbot):
+def test_the_minutes_action_hides_the_minute_ring(qapp, qtbot):
     dialog = DatePickerDialog(datetime(2026, 11, 24, 9, 0), show_minutes=False)
     qtbot.addWidget(dialog)
     seen = []
     dialog.minutes_toggled.connect(seen.append)
-    assert not dialog.minutes_switch.isChecked() and dialog.dial.minute not in dialog.dial.rings
-    dialog.minutes_switch.setChecked(True)
+    assert not dialog.minutes_action.isChecked() and dialog.dial.minute not in dialog.dial.rings
+    dialog.minutes_action.setChecked(True)
     assert dialog.dial.minute in dialog.dial.rings and seen == [True]
-    dialog.minutes_switch.setChecked(False)
+    dialog.minutes_action.setChecked(False)
     assert dialog.dial.value().minute == 0 and seen == [True, False]
     # Typing minutes brings the ring back so they are kept.
     dialog.type_date("10:20")
-    assert dialog.minutes_switch.isChecked()
+    assert dialog.minutes_action.isChecked()
     # A date with minutes opens with the ring shown, whatever the setting.
     other = DatePickerDialog(datetime(2026, 11, 24, 9, 30), show_minutes=False)
     qtbot.addWidget(other)
-    assert other.minutes_switch.isChecked()
+    assert other.minutes_action.isChecked()
 
 
 def test_the_select_key_and_dont_repeat_choose_the_interval(qapp, qtbot):

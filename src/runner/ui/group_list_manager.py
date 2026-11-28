@@ -121,9 +121,9 @@ class GroupListManagerDialog(StayOnTopDialog):
             return
         dialog = self._editor(group)
         if dialog.exec() and dialog.result_group is not None:
-            self._store_edit(dialog.result_group)
-            self._groups = list(self._saved())
-            self._refresh_list()
+            # The original, or the copy Duplicate moved on to. Adding replaces it.
+            self._store_new(dialog.result_group)
+        self._reload(dialog.result_group if dialog.saved_ids else group)
 
     def _on_delete(self) -> None:
         group = self._selected_group()
@@ -164,11 +164,22 @@ class GroupListManagerDialog(StayOnTopDialog):
 
     def _on_add(self) -> None:
         dialog = self._editor(None)
-        if dialog.exec() and dialog.result_group is not None:
+        accepted = bool(dialog.exec())
+        if accepted and dialog.result_group is not None:
             self._store_new(dialog.result_group)
-            self._groups = list(self._saved())
-            self._refresh_list()
-            self._list.setCurrentRow(self._list.count() - 1)
+        if accepted or dialog.saved_ids:
+            self._reload(dialog.result_group)
+
+    def _reload(self, select) -> None:
+        """Read the saved groups again, which Duplicate may have added to, and select one."""
+        self._groups = list(self._saved())
+        self._refresh_list()
+        if select is None:
+            return
+        for row, group in enumerate(self._groups):
+            if group.id == select.id:
+                self._list.setCurrentRow(row)
+                return
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._save_order()

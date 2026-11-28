@@ -156,11 +156,11 @@ class GroupDialog(MemberPickerDialog):
         self._cfg.set_shown_in_main_menu(launcher_id, not checked)
         self.launchers_changed.emit()
 
-    def accept(self) -> None:
+    def _apply(self) -> bool:
         name = self._name_edit.text().strip()
         if not name:
             warning(self, "Missing info", "Name is required.")
-            return
+            return False
         members = [
             GroupMember(launcher_id, concurrent=self._concurrent.get(launcher_id, False))
             for launcher_id in self._selected
@@ -184,4 +184,14 @@ class GroupDialog(MemberPickerDialog):
             created.schedule = schedule
             created.click_runs = click_runs
             self._result = created
-        super().accept()
+        return True
+
+    def _store(self, group) -> None:
+        self._cfg.add_group(group)
+
+    def _copy_saved(self, group_id: str):
+        return self._cfg.duplicate_group(group_id)
+
+    def _show_copy(self, group) -> None:
+        # The copy's dates have their own ids. Edit those, not the original's.
+        self.schedule_editor.set_entries(group.schedule)

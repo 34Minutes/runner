@@ -121,10 +121,16 @@ class ManagerDialog(StayOnTopDialog):
         if not launcher:
             return
         dlg = AddEditDialog(launcher, self, cfg=self._cfg)
-        if dlg.exec():
-            # The dialog mutates the launcher in place when editing
-            self._cfg.update_launcher(launcher)  # persist
-            self._refresh_list()
+        accepted = bool(dlg.exec())
+        if dlg.saved_ids:
+            # Duplicate saved as it went and moved on to a copy. Saving adds or replaces that.
+            if accepted and dlg.result_launcher is not None:
+                self._cfg.add_launcher(dlg.result_launcher)
+            self._reload(dlg.result_launcher)
+        elif accepted:
+            # The dialog edits the launcher in place.
+            self._cfg.update_launcher(launcher)
+            self._reload(launcher)
 
     def _on_delete(self):
         launcher = self._get_selected_launcher()
@@ -165,14 +171,22 @@ class ManagerDialog(StayOnTopDialog):
 
     def _on_add_new(self):
         dlg = AddEditDialog(None, self, cfg=self._cfg)
-        if dlg.exec():
-            new_l = dlg.result_launcher
-            if new_l:
-                self._launchers.append(new_l)
-                self._cfg.add_launcher(new_l)
-                self._refresh_list()
-                # select the new one
-                self._list.setCurrentRow(self._list.count() - 1)
+        accepted = bool(dlg.exec())
+        if accepted and dlg.result_launcher is not None:
+            self._cfg.add_launcher(dlg.result_launcher)
+        if accepted or dlg.saved_ids:
+            self._reload(dlg.result_launcher)
+
+    def _reload(self, select: Launcher | None) -> None:
+        """Read the saved launchers again, which Duplicate may have added to, and select one."""
+        self._launchers = list(self._cfg.config.launchers)
+        self._refresh_list()
+        if select is None:
+            return
+        for row, launcher in enumerate(self._launchers):
+            if launcher.id == select.id:
+                self._list.setCurrentRow(row)
+                return
 
     def closeEvent(self, event):
         # Ensure any pending order is saved (in case user just reordered without other actions)

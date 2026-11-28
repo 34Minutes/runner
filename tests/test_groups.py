@@ -226,6 +226,7 @@ def test_group_dialog_checks_in_click_order_and_shares_only_in_groups(qapp, qtbo
     assert dialog.schedule_switch.isChecked() is False
     assert [button.text() for button in dialog.findChildren(QPushButton) if button.isVisible()] == [
         "Add Launcher…",
+        "Duplicate",
         "Cancel",
         "Save",
     ]
@@ -585,6 +586,7 @@ def test_add_new_launcher_appears_unchecked_for_the_group(qapp, tmp_path, monkey
 
     class _FakeDialog:
         result_launcher = created
+        saved_ids: list[str] = []
 
         def exec(self):
             return True
